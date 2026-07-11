@@ -215,6 +215,21 @@ def test_map_result_handles_missing_images() -> None:
     assert mapped["backdrop_path"] is None
 
 
+def test_map_result_captures_tmdb_id() -> None:
+    mapped = tmdb_client._map_result(
+        {
+            "id": 12345,
+            "title": "Has Id",
+            "release_date": "2018-01-01",
+            "genre_ids": [53],
+            "overview": "",
+        }
+    )
+
+    assert mapped is not None
+    assert mapped["tmdb_id"] == 12345
+
+
 def test_get_json_wraps_network_errors(monkeypatch) -> None:
     def raise_url_error(*args, **kwargs):
         raise tmdb_client.URLError("boom")
