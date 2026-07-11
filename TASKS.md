@@ -14,14 +14,20 @@ en su propio worktree/branch. Reglas:
   avanzamos con features nuevas. No asumas nada sobre lo que hizo otro
   agente — leé este archivo antes de cada acción.
 
+Nota: se armó un worktree `pelipick-gemini` (`gemini/cache-001`) pero
+Gemini no terminó participando — quedó sin usar, `cache-001` se
+reasignó a Codex en `pelipick-codex`.
+
 ## Pending
 
 - [ ] [cache-001] Caché de resultados de TMDb (in-memory, TTL simple,
       stdlib, sin dependencias nuevas) — evita pegarle a `/discover/movie`
       y `/discover/tv` en cada request si el mood+página ya se pidió hace
-      poco | owner: none | depende_de: -
+      poco | owner: none (asignada a codex, ver worktree `pelipick-codex`) |
+      depende_de: -
 - [ ] [auth-001] Recuperación de contraseña + rate limiting de login |
-      owner: none | depende_de: -
+      owner: none (asignada a codex, ver worktree `pelipick-codex`) |
+      depende_de: -
 - [ ] [cast-001] Cast y tráiler en el modal de detalle de película (nueva
       función en `tmdb_client.py` para `/movie/{id}/credits` y
       `/movie/{id}/videos`, expuesta en un endpoint, consumida por el modal
