@@ -18,16 +18,16 @@ Nota: se armó un worktree `pelipick-gemini` (`gemini/cache-001`) pero
 Gemini no terminó participando — quedó sin usar, `cache-001` se
 reasignó a Codex en `pelipick-codex`.
 
+Nota: revisá siempre el diff antes de commitear con encoding — un editor
+metió BOM + mojibake (cp1252) en todos los archivos que tocó en `auth-001`/
+`cache-001`. Si ves acentos raros (`Ã³` en vez de `ó`) en tu propio diff,
+pará y arreglalo antes de seguir, no lo dejes pasar.
+
+`cache-001` y `auth-001` ya están en `main` (`bf855e0`, pusheado a GitHub).
+`cast-001` ya no depende de `cache-001` por ese motivo.
+
 ## Pending
 
-- [ ] [cast-001] Cast y tráiler en el modal de detalle de película (nueva
-      función en `tmdb_client.py` para `/movie/{id}/credits` y
-      `/movie/{id}/videos`, expuesta en un endpoint, consumida por el modal
-      del frontend) | owner: none | depende_de: cache-001 (mismo archivo
-      `tmdb_client.py` — mergear cache-001 primero para evitar conflicto)
-- [ ] [historial-001] Historial de sesiones de recomendación revisitables
-      (nuevo endpoint de listado sobre `db.py`, nueva página de frontend) |
-      owner: none | depende_de: -
 - [ ] [perfil-001] Perfil de gusto visual (radar de géneros, heatmap de
       décadas, directores/actores favoritos) — scope grande, necesita
       matchear el historial del usuario contra TMDb y una página nueva con
@@ -35,7 +35,15 @@ reasignó a Codex en `pelipick-codex`.
 
 ## In Progress
 
-(vacío)
+- [ ] [cast-001] Cast y tráiler en el modal de detalle de película. Ojo:
+      hoy `Recommendation`/`recommendations_served` no guardan el `id` real
+      de TMDb, solo título/año — antes de pedir `/movie/{id}/credits` hay
+      que sumar ese campo desde `tmdb_client.py` hasta el modelo, la DB, y
+      lo que ya viene del catálogo mock (que no tiene id real de TMDb, ojo
+      con eso al armar el fallback) | owner: claude | rama: `claude/cast-001`
+- [ ] [historial-001] Historial de sesiones de recomendación revisitables
+      (nuevo endpoint de listado sobre `db.py`, nueva página de frontend) |
+      owner: codex | rama: `codex/historial-001`
 
 ## Blocked
 
