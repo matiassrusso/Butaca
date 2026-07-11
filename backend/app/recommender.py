@@ -109,6 +109,7 @@ def recommend(
             (
                 score,
                 Recommendation(
+                    tmdb_id=item.get("tmdb_id"),
                     title=item["title"],
                     year=item["year"],
                     kind=item["kind"],

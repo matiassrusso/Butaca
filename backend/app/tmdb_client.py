@@ -146,6 +146,7 @@ def _map_result(
         return None
 
     return {
+        "tmdb_id": raw.get("id"),
         "title": title,
         "year": year,
         "kind": kind,

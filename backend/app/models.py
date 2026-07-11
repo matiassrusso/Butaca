@@ -16,6 +16,7 @@ class RecommendRequest(BaseModel):
 
 class Recommendation(BaseModel):
     id: int | None = None
+    tmdb_id: int | None = None
     title: str
     year: int
     kind: str

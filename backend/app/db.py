@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS rated_items (
 CREATE TABLE IF NOT EXISTS recommendations_served (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id),
+    tmdb_id INTEGER,
     title TEXT NOT NULL,
     year INTEGER NOT NULL,
     kind TEXT NOT NULL,
@@ -81,6 +82,12 @@ def get_connection():
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(SCHEMA)
+    try:
+        # lightweight migration for DBs created before tmdb_id existed —
+        # no migration framework for a 7-table stdlib-sqlite schema yet.
+        conn.execute("ALTER TABLE recommendations_served ADD COLUMN tmdb_id INTEGER")
+    except sqlite3.OperationalError:
+        pass  # column already exists
     try:
         yield conn
         conn.commit()
@@ -211,12 +218,13 @@ def save_recommendations(user_id: int, mood: str, items: list[dict]) -> list[int
             cursor = conn.execute(
                 """
                 INSERT INTO recommendations_served
-                    (user_id, title, year, kind, why, match_score, tags, mood,
+                    (user_id, tmdb_id, title, year, kind, why, match_score, tags, mood,
                      poster_path, backdrop_path, overview, vote_average)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     user_id,
+                    item.get("tmdb_id"),
                     item["title"],
                     item["year"],
                     item["kind"],
