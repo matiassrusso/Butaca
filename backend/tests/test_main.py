@@ -204,3 +204,41 @@ def test_feedback_rejects_invalid_status() -> None:
     )
 
     assert response.status_code == 422
+
+
+def test_history_requires_auth() -> None:
+    response = client.get("/history")
+
+    assert response.status_code == 401
+
+
+def test_history_returns_sessions_for_authenticated_user() -> None:
+    headers = _auth_headers("historyuser")
+    _post_zip(headers, mood="funny")
+    _post_zip(
+        headers,
+        mood="psychological",
+        ratings_csv="Name,Rating,Review\nWhiplash,4.5,psychological and intense",
+    )
+
+    response = client.get("/history", headers=headers)
+
+    assert response.status_code == 200
+    sessions = response.json()["sessions"]
+    assert len(sessions) == 2
+    assert sessions[0]["mood"] == "psychological"
+    assert sessions[0]["recommendations"]
+    assert sessions[0]["taste_summary"]
+    assert all(item["id"] is not None for item in sessions[0]["recommendations"])
+    assert sessions[1]["mood"] == "funny"
+
+
+def test_history_excludes_other_users_sessions() -> None:
+    owner_headers = _auth_headers("historyowner")
+    intruder_headers = _auth_headers("historyintruder")
+    _post_zip(owner_headers, mood="funny")
+
+    response = client.get("/history", headers=intruder_headers)
+
+    assert response.status_code == 200
+    assert response.json()["sessions"] == []

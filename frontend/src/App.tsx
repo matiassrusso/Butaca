@@ -3,6 +3,7 @@ import { Route, Switch } from "wouter";
 
 import ErrorBoundary from "./components/ErrorBoundary";
 import { AuthProvider } from "./hooks/useAuth";
+import History from "./pages/History";
 import Home from "./pages/Home";
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
@@ -14,6 +15,7 @@ function Router() {
       <Route path="/" component={Home} />
       <Route path="/login" component={Login} />
       <Route path="/recommend" component={Recommend} />
+      <Route path="/history" component={History} />
       <Route component={NotFound} />
     </Switch>
   );

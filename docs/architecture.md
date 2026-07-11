@@ -33,6 +33,7 @@ todavía.
 8. El backend devuelve hasta 5 recomendaciones explicadas.
 9. El frontend renderiza el resumen y los picks, con botones de feedback por pick.
 10. El feedback (me interesa / no me interesa / ya la vi) se guarda asociado al usuario y a la recomendación.
+11. El usuario puede volver después a `/history` y revisitar sesiones pasadas sin resubir el zip.
 
 ## Frontend
 
@@ -48,6 +49,7 @@ Páginas:
 - [frontend/src/pages/Home.tsx](C:\Users\matia\OneDrive\Escritorio\Webs\projects\pelipick\frontend\src\pages\Home.tsx): landing
 - [frontend/src/pages/Login.tsx](C:\Users\matia\OneDrive\Escritorio\Webs\projects\pelipick\frontend\src\pages\Login.tsx): login/registro
 - [frontend/src/pages/Recommend.tsx](C:\Users\matia\OneDrive\Escritorio\Webs\projects\pelipick\frontend\src\pages\Recommend.tsx): upload del zip + mood + resultados + feedback, todo en un solo flujo (fusiona lo que en el diseño original eran dos pasos separados)
+- [frontend/src/pages/History.tsx](C:\Users\matia\OneDrive\Escritorio\Webs\projects\pelipick\frontend\src\pages\History.tsx): historial de sesiones de recomendación revisitables
 - [frontend/src/pages/NotFound.tsx](C:\Users\matia\OneDrive\Escritorio\Webs\projects\pelipick\frontend\src\pages\NotFound.tsx)
 
 Estado compartido:
@@ -123,6 +125,10 @@ Piezas actuales:
 - caché en memoria de `/discover/movie` y `/discover/tv` (TTL 5 min, tope
   32 entradas, LRU) — evita pegarle a TMDb en cada request si el
   mood+página ya se pidió hace poco
+- historial revisitable guardando una `recommendation_session` explícita por
+  request de `/recommend/zip`, en vez de reconstruir sesiones por timestamp
+  desde `recommendations_served` (más corto de implementar, pero frágil si dos
+  requests caen en el mismo segundo)
 
 ## Limitaciones actuales
 

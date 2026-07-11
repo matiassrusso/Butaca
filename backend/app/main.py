@@ -10,6 +10,7 @@ from .models import (
     FeedbackRequest,
     PasswordResetConfirmRequest,
     PasswordResetRequest,
+    RecommendationHistoryResponse,
     PasswordResetStartResponse,
     RecommendRequest,
     RecommendResponse,
@@ -124,6 +125,13 @@ def recommend_titles(payload: RecommendRequest) -> RecommendResponse:
     return recommend(payload.ratings, payload.mood)
 
 
+@app.get("/history", response_model=RecommendationHistoryResponse)
+def recommendation_history(
+    user: sqlite3.Row = Depends(auth.get_current_user),
+) -> RecommendationHistoryResponse:
+    return RecommendationHistoryResponse(sessions=db.get_recommendation_history(user["id"]))
+
+
 @app.post("/recommend/zip", response_model=RecommendResponse)
 async def recommend_titles_from_zip(
     mood: str = Form(""),
@@ -166,7 +174,9 @@ async def recommend_titles_from_zip(
     db.save_rated_items(
         user["id"], [(item.title, item.rating, item.review) for item in ratings]
     )
+    session_id = db.create_recommendation_session(user["id"], mood, response.taste_summary)
     inserted_ids = db.save_recommendations(
+        session_id,
         user["id"],
         mood,
         [item.model_dump() for item in response.recommendations],

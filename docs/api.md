@@ -182,6 +182,43 @@ interno viene mal formado.
 Cada rating importado y cada recomendación servida quedan persistidos en
 SQLite, asociados al usuario autenticado.
 
+## `GET /history`
+
+Requiere auth. Devuelve las sesiones de recomendación ya generadas por el
+usuario autenticado, ordenadas de la más nueva a la más vieja.
+
+### Response
+
+```json
+{
+  "sessions": [
+    {
+      "id": 2,
+      "mood": "psychological",
+      "taste_summary": "Tu historial tira más a cine de autor...",
+      "created_at": "2026-07-11 18:40:12",
+      "recommendations": [
+        {
+          "id": 9,
+          "title": "Perfect Blue",
+          "year": 1997,
+          "kind": "movie",
+          "why": "coincide con patrones que venís premiando.",
+          "match_score": 99,
+          "tags": ["psychological", "dark", "stylized", "thriller"],
+          "poster_path": "https://image.tmdb.org/t/p/w500/...",
+          "backdrop_path": "https://image.tmdb.org/t/p/w780/...",
+          "overview": "Mima, una idol pop...",
+          "vote_average": 8.3
+        }
+      ]
+    }
+  ]
+}
+```
+
+Si el usuario no tiene historial todavía, devuelve `200` con `sessions: []`.
+
 ## `POST /feedback`
 
 Requiere auth. Guarda feedback explícito sobre un pick ya servido.

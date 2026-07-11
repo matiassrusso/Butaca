@@ -41,9 +41,6 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
       que sumar ese campo desde `tmdb_client.py` hasta el modelo, la DB, y
       lo que ya viene del catálogo mock (que no tiene id real de TMDb, ojo
       con eso al armar el fallback) | owner: claude | rama: `claude/cast-001`
-- [ ] [historial-001] Historial de sesiones de recomendación revisitables
-      (nuevo endpoint de listado sobre `db.py`, nueva página de frontend) |
-      owner: codex | rama: `codex/historial-001`
 
 ## Blocked
 
@@ -51,6 +48,13 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
 
 ## Done
 
+- [x] [historial-001] Historial de sesiones de recomendación revisitables
+      (nuevo endpoint de listado sobre `db.py`, nueva página de frontend) |
+      owner: codex | rama: `codex/historial-001` | archivos:
+      `backend/app/db.py`, `backend/app/main.py`, `backend/app/models.py`,
+      `backend/tests/test_main.py`, `frontend/src/App.tsx`,
+      `frontend/src/components/Navbar.tsx`, `frontend/src/pages/History.tsx`,
+      `docs/api.md`, `docs/architecture.md`, `docs/mvp-status.md`
 - [x] [cache-001] Caché de resultados de TMDb (in-memory, TTL simple,
       stdlib, sin dependencias nuevas) — evita pegarle a `/discover/movie`
       y `/discover/tv` en cada request si el mood+página ya se pidió hace

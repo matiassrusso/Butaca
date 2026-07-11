@@ -30,12 +30,16 @@
   mail todavía)
 - caché en memoria de resultados de TMDb (`/discover/movie` y
   `/discover/tv`, TTL de 5 min, tope de 32 entradas)
-- tests de backend (52, incluyendo auth, feedback, TMDb, Gemini, el
+- historial revisitables de sesiones: cada request de `/recommend/zip` queda
+  guardado como sesión y se puede volver a ver desde `/history` sin resubir
+  el zip
+- tests de backend (55, incluyendo auth, feedback, historial, TMDb, Gemini, el
   desempate por score crudo, el parser del zip de Letterboxd, rate
   limiting/reset de contraseña, y la caché de TMDb)
 - pasada de UX/UI: tema "cinematic" (paleta ámbar/dorada, `Instrument Serif` +
   `IBM Plex Sans`), animaciones con Framer Motion, páginas Home / Login /
-  Recommend (upload del zip + mood + resultados con feedback) / NotFound
+  Recommend (upload del zip + mood + resultados con feedback) / History /
+  NotFound
 - build verificado de frontend
 
 ## Hecho pero verde
@@ -59,9 +63,8 @@
   - diseño generado con otra IA (plataforma "Manus"), adaptado a mano: nos
     quedamos con la UI/tema y descartamos enteros el server Node/tRPC/
     Drizzle/MySQL, el auth OAuth y el LLM de esa plataforma
-  - páginas de perfil de gusto (gráficos) e historial de sesiones quedaron
-    afuera de esta pasada — el diseño original las asumía, pero necesitan
-    backend nuevo (ver abajo)
+  - la página de historial ya está, pero es una primera pasada: revisita
+    picks y resumen; no recupera el zip original ni analytics más finos
   - el modal de detalle de película no tiene cast ni tráiler (pediría un
     fetch extra por película a TMDb)
 
@@ -70,7 +73,6 @@
 - perfil de gusto visual (radar de géneros, heatmap de décadas, directores/
   actores favoritos) — necesita matchear cada título del CSV del usuario
   contra TMDb, no es trivial con exports grandes
-- historial de sesiones de recomendación revisitables
 - cast y tráiler en el detalle de cada película — necesita empezar a
   guardar el id real de TMDb por título, que hoy no viaja por el pipeline
 - import de historial por username de Letterboxd (scraping), como alternativa

@@ -44,8 +44,17 @@ CREATE TABLE IF NOT EXISTS rated_items (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS recommendation_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    mood TEXT NOT NULL DEFAULT '',
+    taste_summary TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS recommendations_served (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER REFERENCES recommendation_sessions(id),
     user_id INTEGER NOT NULL REFERENCES users(id),
     title TEXT NOT NULL,
     year INTEGER NOT NULL,
@@ -75,12 +84,25 @@ def _db_path() -> str:
     return os.environ.get("PELIPICK_DB_PATH", str(DEFAULT_DB_PATH))
 
 
+def _has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    columns = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    return any(row["name"] == column for row in columns)
+
+
+def _run_migrations(conn: sqlite3.Connection) -> None:
+    if not _has_column(conn, "recommendations_served", "session_id"):
+        conn.execute(
+            "ALTER TABLE recommendations_served ADD COLUMN session_id INTEGER REFERENCES recommendation_sessions(id)"
+        )
+
+
 @contextmanager
 def get_connection():
     conn = sqlite3.connect(_db_path())
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(SCHEMA)
+    _run_migrations(conn)
     try:
         yield conn
         conn.commit()
@@ -204,18 +226,31 @@ def save_rated_items(user_id: int, items: list[tuple[str, float, str]]) -> None:
         )
 
 
-def save_recommendations(user_id: int, mood: str, items: list[dict]) -> list[int]:
+def create_recommendation_session(user_id: int, mood: str, taste_summary: str) -> int:
+    with get_connection() as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO recommendation_sessions (user_id, mood, taste_summary)
+            VALUES (?, ?, ?)
+            """,
+            (user_id, mood, taste_summary),
+        )
+        return cursor.lastrowid
+
+
+def save_recommendations(session_id: int, user_id: int, mood: str, items: list[dict]) -> list[int]:
     ids: list[int] = []
     with get_connection() as conn:
         for item in items:
             cursor = conn.execute(
                 """
                 INSERT INTO recommendations_served
-                    (user_id, title, year, kind, why, match_score, tags, mood,
+                    (session_id, user_id, title, year, kind, why, match_score, tags, mood,
                      poster_path, backdrop_path, overview, vote_average)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
+                    session_id,
                     user_id,
                     item["title"],
                     item["year"],
@@ -232,6 +267,62 @@ def save_recommendations(user_id: int, mood: str, items: list[dict]) -> list[int
             )
             ids.append(cursor.lastrowid)
     return ids
+
+
+def get_recommendation_history(user_id: int) -> list[dict]:
+    with get_connection() as conn:
+        sessions = conn.execute(
+            """
+            SELECT id, mood, taste_summary, created_at
+            FROM recommendation_sessions
+            WHERE user_id = ?
+            ORDER BY id DESC
+            """,
+            (user_id,),
+        ).fetchall()
+        if not sessions:
+            return []
+
+        recommendations = conn.execute(
+            """
+            SELECT
+                id, session_id, title, year, kind, why, match_score, tags, poster_path,
+                backdrop_path, overview, vote_average
+            FROM recommendations_served
+            WHERE user_id = ? AND session_id IS NOT NULL
+            ORDER BY session_id DESC, id ASC
+            """,
+            (user_id,),
+        ).fetchall()
+
+    recommendations_by_session: dict[int, list[dict]] = {}
+    for row in recommendations:
+        recommendations_by_session.setdefault(row["session_id"], []).append(
+            {
+                "id": row["id"],
+                "title": row["title"],
+                "year": row["year"],
+                "kind": row["kind"],
+                "why": row["why"],
+                "match_score": row["match_score"],
+                "tags": json.loads(row["tags"]),
+                "poster_path": row["poster_path"],
+                "backdrop_path": row["backdrop_path"],
+                "overview": row["overview"],
+                "vote_average": row["vote_average"],
+            }
+        )
+
+    return [
+        {
+            "id": session["id"],
+            "mood": session["mood"],
+            "taste_summary": session["taste_summary"],
+            "created_at": session["created_at"],
+            "recommendations": recommendations_by_session.get(session["id"], []),
+        }
+        for session in sessions
+    ]
 
 
 def get_recommendation(recommendation_id: int, user_id: int) -> sqlite3.Row | None:

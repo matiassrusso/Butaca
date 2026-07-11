@@ -33,6 +33,18 @@ class RecommendResponse(BaseModel):
     recommendations: list[Recommendation]
 
 
+class RecommendationSession(BaseModel):
+    id: int
+    mood: str
+    taste_summary: str
+    created_at: str
+    recommendations: list[Recommendation]
+
+
+class RecommendationHistoryResponse(BaseModel):
+    sessions: list[RecommendationSession]
+
+
 class UserCredentials(BaseModel):
     username: str = Field(min_length=3, max_length=50)
     password: str = Field(min_length=8, max_length=200)

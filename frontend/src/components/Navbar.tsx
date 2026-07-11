@@ -8,6 +8,7 @@ import { useAuth } from "@/hooks/useAuth";
 const NAV_ITEMS: GooeyNavItem[] = [
   { label: "Inicio", href: "/" },
   { label: "Recomendaciones", href: "/recommend" },
+  { label: "Historial", href: "/history" },
 ];
 
 export function Navbar() {
