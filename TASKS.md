@@ -52,7 +52,14 @@ reasignó a Codex en `pelipick-codex`.
 - [x] [auth-001] Recuperación de contraseña + rate limiting de login |
       owner: codex | rama: `codex/auth-001` | archivos:
       `backend/app/auth.py`, `backend/app/db.py`, `backend/app/main.py`,
-      `backend/app/models.py`, `backend/tests/test_auth.py`, `docs/api.md`
+      `backend/app/models.py`, `backend/tests/test_auth.py`, `docs/api.md`.
+      Revisado por Claude: `/auth/forgot-password` devolvía el
+      `reset_token` en la respuesta a cualquiera (toma de cuenta completa
+      en 3 requests sin tocar el email del usuario) — arreglado en un
+      commit aparte (`4b7f80e`), ahora solo se expone con
+      `PELIPICK_DEBUG=1`, nunca por default. También se arregló encoding
+      roto (BOM + mojibake por cp1252) en los 10 archivos que tocó
+      Codex (commit `a5b4a4e`), sin cambios de comportamiento.
 - [x] [zip-001] Import del `.zip` completo de Letterboxd, reemplaza el CSV
       suelto pegado/subido. Combina `ratings.csv`/`reviews.csv` (base),
       boost de rewatch desde `diary.csv`, likes sin puntuar desde
