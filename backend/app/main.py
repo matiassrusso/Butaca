@@ -18,9 +18,12 @@ from .models import (
     UserCredentials,
     WatchedHistoryResponse,
 )
-from .recommender import recommend
+from .recommender import GENRE_OPTIONS, recommend
 
 MAX_ZIP_SIZE = 20 * 1024 * 1024  # 20MB — real Letterboxd exports run in the tens of KB
+VALID_MODES = {"profile", "recent", "genres"}
+VALID_KIND_FILTERS = {"movie", "series", "both"}
+RECENT_WINDOW = 10  # how many of the user's most-recently-watched titles count as "lo último que vi"
 
 
 def _debug_mode() -> bool:
@@ -144,9 +147,17 @@ def watched_history(
 @app.post("/recommend/zip", response_model=RecommendResponse)
 async def recommend_titles_from_zip(
     mood: str = Form(""),
+    mode: str = Form("profile"),
+    kind_filter: str = Form("both"),
+    genres: str = Form(""),
     file: UploadFile = File(...),
     user: sqlite3.Row = Depends(auth.get_current_user),
 ) -> RecommendResponse:
+    if mode not in VALID_MODES:
+        raise HTTPException(status_code=400, detail="Modo de recomendación inválido.")
+    if kind_filter not in VALID_KIND_FILTERS:
+        raise HTTPException(status_code=400, detail="Filtro de tipo inválido.")
+
     if not (file.filename or "").lower().endswith(".zip"):
         raise HTTPException(status_code=400, detail="Subí el .zip que exporta Letterboxd.")
 
@@ -177,7 +188,34 @@ async def recommend_titles_from_zip(
     # different movies instead of the same deterministic top 5
     already_recommended = db.get_recently_recommended_titles(user["id"])
     also_seen = frozenset(extra_seen) | frozenset(already_recommended)
-    response = recommend(ratings, mood, catalog=candidates, also_seen=also_seen)
+
+    # "según lo último que vi" narrows the taste signal to the user's most
+    # recently watched titles instead of their whole history — exclusion
+    # (also_seen/ratings above) still covers everything they've ever watched
+    preference_ratings = None
+    if mode == "recent":
+        preference_ratings = sorted(
+            ratings, key=lambda item: item.watched_date, reverse=True
+        )[:RECENT_WINDOW]
+
+    selected_genres = [key.strip() for key in genres.split(",") if key.strip()]
+    required_any_tags = frozenset(
+        tag for key in selected_genres for tag in GENRE_OPTIONS.get(key, [])
+    )
+    if mode == "genres" and not required_any_tags:
+        raise HTTPException(
+            status_code=400, detail="Elegí al menos un género para este modo."
+        )
+
+    response = recommend(
+        ratings,
+        mood,
+        catalog=candidates,
+        also_seen=also_seen,
+        kind_filter=kind_filter,
+        required_any_tags=required_any_tags or None,
+        preference_ratings=preference_ratings,
+    )
 
     if llm_client.is_configured():
         try:

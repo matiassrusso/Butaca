@@ -36,9 +36,17 @@
 - modal de detalle con reparto y link al tráiler para recomendaciones de
   TMDb; si TMDb no está disponible o el pick viene del catálogo mock, el
   resto del detalle sigue funcionando
-- tests de backend (63, incluyendo auth, feedback, historial, TMDb, Gemini, el
+- flujo de "qué querés ver hoy" con 3 modos (perfil completo / últimas
+  películas vistas / selección de géneros con lógica OR y cobertura
+  garantizada por género elegido) y split Películas/Series/Ambas —
+  reemplaza el dropdown de mood único
+- historial separado en dos secciones: "Vistas" (`GET /history/watched`,
+  películas ya vistas según el zip importado, deduplicadas por título) y
+  "Recomendadas" (lo que ya había en `/history`)
+- tests de backend (81, incluyendo auth, feedback, historial, TMDb, Gemini, el
   desempate por score crudo, el parser del zip de Letterboxd, rate
-  limiting/reset de contraseña, y la caché de TMDb)
+  limiting/reset de contraseña, la caché de TMDb, los 3 modos de
+  recomendación + kind_filter, y el historial de vistas)
 - pasada de UX/UI: tema "cinematic" (paleta ámbar/dorada, `Instrument Serif` +
   `IBM Plex Sans`), animaciones con Framer Motion, páginas Home / Login /
   Recommend (upload del zip + mood + resultados con feedback) / History /

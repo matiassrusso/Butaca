@@ -6,6 +6,7 @@ from .models import RatedItem
 TITLE_FIELDS = ("Name", "Title", "Film")
 RATING_FIELDS = ("Rating", "Watched Rating", "Letterboxd Rating")
 REVIEW_FIELDS = ("Review", "Review Text", "Comments")
+DATE_FIELDS = ("Watched Date", "Date")
 
 
 def _pick(row: dict[str, str], names: tuple[str, ...]) -> str:
@@ -52,6 +53,7 @@ def parse_ratings_csv(content: str) -> list[RatedItem]:
                 title=title,
                 rating=rating,
                 review=_pick(row, REVIEW_FIELDS),
+                watched_date=_pick(row, DATE_FIELDS),
             )
         )
 

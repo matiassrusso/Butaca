@@ -26,12 +26,24 @@ def _auth_headers(username: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {login.json()['token']}"}
 
 
-def _post_zip(headers: dict[str, str], ratings_csv: str = VALID_RATINGS_CSV, mood: str = ""):
+def _post_zip(
+    headers: dict[str, str],
+    ratings_csv: str = VALID_RATINGS_CSV,
+    mood: str = "",
+    zip_files: dict[str, str] | None = None,
+    **extra_form_fields: str,
+):
     return client.post(
         "/recommend/zip",
         headers=headers,
-        data={"mood": mood},
-        files={"file": ("export.zip", _zip_bytes({"ratings.csv": ratings_csv}), "application/zip")},
+        data={"mood": mood, **extra_form_fields},
+        files={
+            "file": (
+                "export.zip",
+                _zip_bytes(zip_files or {"ratings.csv": ratings_csv}),
+                "application/zip",
+            )
+        },
     )
 
 
@@ -202,6 +214,94 @@ def test_recommend_zip_excludes_previously_recommended_titles() -> None:
     first_titles = {item["title"] for item in first}
     second_titles = {item["title"] for item in second}
     assert first_titles.isdisjoint(second_titles)
+
+
+def test_recommend_zip_rejects_invalid_mode() -> None:
+    headers = _auth_headers("badmode")
+    response = _post_zip(headers, mode="bogus")
+
+    assert response.status_code == 400
+
+
+def test_recommend_zip_rejects_invalid_kind_filter() -> None:
+    headers = _auth_headers("badkindfilter")
+    response = _post_zip(headers, kind_filter="bogus")
+
+    assert response.status_code == 400
+
+
+def test_recommend_zip_genres_mode_requires_at_least_one_genre() -> None:
+    headers = _auth_headers("nogenres")
+    response = _post_zip(headers, mode="genres", genres="")
+
+    assert response.status_code == 400
+
+
+def test_recommend_zip_genres_mode_filters_by_selected_genres(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+
+    def fake_fetch_candidates(mood: str):
+        return [
+            {"title": "Romance Pick", "year": 2021, "kind": "movie", "tags": ["romantic"]},
+            {"title": "Unrelated Pick", "year": 2021, "kind": "movie", "tags": ["quiet"]},
+        ]
+
+    monkeypatch.setattr("backend.app.main.tmdb_client.fetch_candidates", fake_fetch_candidates)
+
+    headers = _auth_headers("genremode")
+    response = _post_zip(headers, mode="genres", genres="romance")
+
+    assert response.status_code == 200
+    titles = {item["title"] for item in response.json()["recommendations"]}
+    assert titles == {"Romance Pick"}
+
+
+def test_recommend_zip_kind_filter_only_returns_series(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+
+    def fake_fetch_candidates(mood: str):
+        return [
+            {"title": "A Movie", "year": 2021, "kind": "movie", "tags": ["dark"]},
+            {"title": "A Series", "year": 2021, "kind": "series", "tags": ["dark"]},
+        ]
+
+    monkeypatch.setattr("backend.app.main.tmdb_client.fetch_candidates", fake_fetch_candidates)
+
+    headers = _auth_headers("kindfilter")
+    response = _post_zip(headers, kind_filter="series")
+
+    assert response.status_code == 200
+    titles = {item["title"] for item in response.json()["recommendations"]}
+    assert titles == {"A Series"}
+
+
+def test_recommend_zip_recent_mode_returns_picks(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+
+    def fake_fetch_candidates(mood: str):
+        return [{"title": "Action Pick", "year": 2021, "kind": "movie", "tags": ["action"]}]
+
+    monkeypatch.setattr("backend.app.main.tmdb_client.fetch_candidates", fake_fetch_candidates)
+
+    diary_csv = (
+        "Date,Name,Year,Letterboxd URI,Rating,Rewatch,Tags,Watched Date\n"
+        "2024-01-01,Old Boring Movie,2000,https://boxd.it/aaa1,5,No,,2024-01-01\n"
+        "2025-06-01,Recent Action Movie,2020,https://boxd.it/aaa2,5,No,,2025-06-01\n"
+    )
+    ratings_csv = (
+        "Name,Rating,Review\n"
+        "Old Boring Movie,5,slow and quiet\n"
+        "Recent Action Movie,5,action packed\n"
+    )
+    headers = _auth_headers("recentmode")
+    response = _post_zip(
+        headers,
+        mode="recent",
+        zip_files={"ratings.csv": ratings_csv, "diary.csv": diary_csv},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["recommendations"][0]["title"] == "Action Pick"
 
 
 def test_movie_details_returns_cast_and_trailer(monkeypatch) -> None:

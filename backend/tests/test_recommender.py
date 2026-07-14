@@ -1,5 +1,5 @@
 from backend.app.models import RatedItem
-from backend.app.recommender import capitalize_sentence, recommend
+from backend.app.recommender import GENRE_OPTIONS, capitalize_sentence, recommend
 
 
 def test_recommend_filters_seen_titles_and_prefers_matching_mood() -> None:
@@ -127,3 +127,59 @@ def test_capitalize_sentence() -> None:
     assert capitalize_sentence("hola mundo.") == "Hola mundo."
     assert capitalize_sentence("") == ""
     assert capitalize_sentence("Ya con mayúscula.") == "Ya con mayúscula."
+
+
+def test_recommend_kind_filter_excludes_other_kind() -> None:
+    catalog = [
+        {"title": "A Movie", "year": 2020, "kind": "movie", "tags": ["dark"]},
+        {"title": "A Series", "year": 2020, "kind": "series", "tags": ["dark"]},
+    ]
+
+    response = recommend(ratings=[], mood="", catalog=catalog, kind_filter="series")
+
+    assert [item.title for item in response.recommendations] == ["A Series"]
+
+
+def test_recommend_required_any_tags_filters_by_or_logic() -> None:
+    catalog = [
+        {"title": "Only Action", "year": 2020, "kind": "movie", "tags": ["action"]},
+        {"title": "Only Romance", "year": 2020, "kind": "movie", "tags": ["romantic"]},
+        {"title": "Neither", "year": 2020, "kind": "movie", "tags": ["quiet"]},
+    ]
+    required = frozenset(GENRE_OPTIONS["action"]) | frozenset(GENRE_OPTIONS["romance"])
+
+    response = recommend(ratings=[], mood="", catalog=catalog, required_any_tags=required)
+
+    titles = {item.title for item in response.recommendations}
+    assert titles == {"Only Action", "Only Romance"}
+
+
+def test_recommend_required_any_tags_guarantees_genre_coverage() -> None:
+    # 5 strong action matches would normally fill every slot and starve the
+    # romance genre out entirely — coverage should force at least one in.
+    catalog = [
+        {"title": f"Action {i}", "year": 2020, "kind": "movie", "tags": ["action", "kinetic"]}
+        for i in range(5)
+    ] + [{"title": "The Only Romance", "year": 2020, "kind": "movie", "tags": ["romantic"]}]
+    required = frozenset(GENRE_OPTIONS["action"]) | frozenset(GENRE_OPTIONS["romance"])
+
+    response = recommend(ratings=[], mood="", catalog=catalog, required_any_tags=required)
+
+    titles = {item.title for item in response.recommendations}
+    assert "The Only Romance" in titles
+    assert len(response.recommendations) == 5
+
+
+def test_recommend_preference_ratings_overrides_taste_signal() -> None:
+    catalog = [{"title": "Action Movie", "year": 2020, "kind": "movie", "tags": ["action"]}]
+    all_ratings = [RatedItem(title="Old Movie", rating=1, review="boring and quiet")]
+    recent_ratings = [RatedItem(title="Recent Movie", rating=5, review="action packed")]
+
+    response = recommend(
+        ratings=all_ratings,
+        mood="",
+        catalog=catalog,
+        preference_ratings=recent_ratings,
+    )
+
+    assert response.recommendations[0].match_score > 50

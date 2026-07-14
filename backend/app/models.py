@@ -7,6 +7,7 @@ class RatedItem(BaseModel):
     title: str
     rating: float = Field(ge=0, le=5)
     review: str = ""
+    watched_date: str = ""
 
 
 class RecommendRequest(BaseModel):

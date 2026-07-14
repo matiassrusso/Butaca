@@ -58,8 +58,15 @@ def parse_letterboxd_zip(data: bytes) -> tuple[list[RatedItem], set[str]]:
         for row in diary_rows:
             key = _normalize(row.get("Name", ""))
             existing = ratings_by_title.get(key)
-            if existing is not None and row.get("Rewatch") == "Yes":
+            if existing is None:
+                continue
+            if row.get("Rewatch") == "Yes":
                 existing.rating = min(5.0, existing.rating + REWATCH_BONUS)
+            # diary.csv's "Watched Date" is the actual date the user saw the
+            # film, more accurate than ratings.csv's "Date" (date rated)
+            watched_date = row.get("Watched Date", "").strip()
+            if watched_date:
+                existing.watched_date = watched_date
 
         likes_rows = _read_csv(zf, LIKES_FILE)
         for row in likes_rows:

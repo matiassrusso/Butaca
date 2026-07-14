@@ -76,7 +76,7 @@ Este documento base **no se toca por proyecto** — si algo acá deja de ser cie
 - Workflow particular: coordinación multi-agente vía `TASKS.md` (varios agentes en worktrees separados) — leer ese archivo antes de tocar código
 
 **Estado actual** (detalle completo en `docs/mvp-status.md`):
-- Hecho: login real, catálogo TMDb con fallback a mock, agente Gemini que refina resumen/picks, import completo del `.zip` de Letterboxd, feedback explícito por pick, caché TMDb, historial de sesiones revisitables, 63 tests de backend
+- Hecho: login real, catálogo TMDb con fallback a mock, agente Gemini que refina resumen/picks, import completo del `.zip` de Letterboxd, feedback explícito por pick, caché TMDb, historial de sesiones revisitables separado en Vistas/Recomendadas, flujo de recomendación con 3 modos (perfil/últimas vistas/géneros) + split películas/series, 81 tests de backend
 - Falta: perfil de gusto visual (radar de géneros, heatmap de décadas), import por username de Letterboxd (scraping), envío real de mail para recuperación de contraseña, observabilidad mínima
 
 **Identidad visual:** tema "cinematic" — paleta ámbar/dorada, tipografía Instrument Serif + IBM Plex Sans, animaciones con Framer Motion. Detalle en `docs/design-directions.md`.

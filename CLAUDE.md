@@ -43,7 +43,7 @@ Solo yo (Matías), con posible coordinación multi-agente (Claude, Codex) docume
 
 ## Current Status
 
-> **Last updated:** 2026-07-13
-> **Status:** Activo, MVP funcional local. 63 tests de backend. Último commit real: 2026-07-11 ("docs: correct backend test count").
+> **Last updated:** 2026-07-14
+> **Status:** Activo, MVP funcional local. 81 tests de backend (sin commitear todavía: rediseño del flujo de recomendación con 3 modos + split películas/series, y split de historial en Vistas/Recomendadas). Último commit real: 2026-07-11 ("docs: correct backend test count").
 
 Detalle completo en `docs/mvp-status.md`. Pendiente: perfil de gusto visual, import por username de Letterboxd (scraping), envío real de mail para recuperación de contraseña, observabilidad mínima.

@@ -2,6 +2,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   AlertCircle,
   CheckCircle,
+  Clock,
   Eye,
   ExternalLink,
   FileText,
@@ -10,9 +11,11 @@ import {
   RefreshCw,
   Sparkles,
   Star,
+  Tags,
   ThumbsDown,
   ThumbsUp,
   Upload as UploadIcon,
+  User,
   X,
 } from "lucide-react";
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -55,6 +58,47 @@ const feedbackOptions: { status: FeedbackStatus; label: string; icon: typeof Thu
   { status: "interested", label: "Me interesa", icon: ThumbsUp },
   { status: "not_interested", label: "No me interesa", icon: ThumbsDown },
   { status: "seen", label: "Ya la vi", icon: Eye },
+];
+
+type RecommendMode = "profile" | "recent" | "genres";
+type KindFilter = "movie" | "series" | "both";
+
+const modeOptions: { mode: RecommendMode; label: string; description: string; icon: typeof User }[] = [
+  {
+    mode: "profile",
+    label: "Según mi perfil",
+    description: "Analiza todo tu historial de ratings y reviews.",
+    icon: User,
+  },
+  {
+    mode: "recent",
+    label: "Según lo último que vi",
+    description: "Se basa solo en las películas que viste más recientemente.",
+    icon: Clock,
+  },
+  {
+    mode: "genres",
+    label: "Por géneros",
+    description: "Elegís uno o más géneros y buscamos algo de esa mezcla.",
+    icon: Tags,
+  },
+];
+
+const kindFilterOptions: { value: KindFilter; label: string }[] = [
+  { value: "movie", label: "Películas" },
+  { value: "series", label: "Series" },
+  { value: "both", label: "Ambas" },
+];
+
+// misma clave que backend/app/recommender.py::GENRE_OPTIONS
+const genreOptions: { key: string; label: string }[] = [
+  { key: "action", label: "Acción" },
+  { key: "romance", label: "Romance" },
+  { key: "comedy", label: "Comedia" },
+  { key: "horror", label: "Terror / oscuro" },
+  { key: "drama", label: "Drama" },
+  { key: "psychological", label: "Psicológico / misterio" },
+  { key: "scifi", label: "Ciencia ficción / fantástico" },
 ];
 
 function formatFileSize(bytes: number): string {
@@ -421,7 +465,9 @@ export default function Recommend() {
   const { isAuthenticated, loading: authLoading, token } = useAuth();
   const [, navigate] = useLocation();
 
-  const [mood, setMood] = useState("psychological");
+  const [mode, setMode] = useState<RecommendMode>("profile");
+  const [kindFilter, setKindFilter] = useState<KindFilter>("both");
+  const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
   const [zipFile, setZipFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -458,14 +504,22 @@ export default function Recommend() {
     if (file) processFile(file);
   }
 
+  function toggleGenre(key: string) {
+    setSelectedGenres((prev) => (prev.includes(key) ? prev.filter((g) => g !== key) : [...prev, key]));
+  }
+
+  const canGenerate = Boolean(zipFile) && (mode !== "genres" || selectedGenres.length > 0);
+
   async function handleGenerate() {
-    if (!token || !zipFile) return;
+    if (!token || !zipFile || !canGenerate) return;
     setLoading(true);
     setError("");
 
     try {
       const formData = new FormData();
-      formData.append("mood", mood);
+      formData.append("mode", mode);
+      formData.append("kind_filter", kindFilter);
+      formData.append("genres", mode === "genres" ? selectedGenres.join(",") : "");
       formData.append("file", zipFile);
 
       const response = await fetch(`${API_BASE_URL}/recommend/zip`, {
@@ -594,24 +648,74 @@ export default function Recommend() {
               </div>
 
               <div className="p-6 rounded-2xl border border-border bg-card/50">
+                <span className="text-sm font-medium mb-3 block">Qué querés ver hoy</span>
+                <div className="grid sm:grid-cols-3 gap-3 mb-2">
+                  {modeOptions.map((option) => (
+                    <button
+                      key={option.mode}
+                      type="button"
+                      onClick={() => setMode(option.mode)}
+                      className={`text-left p-3.5 rounded-xl border transition-all duration-200 ${
+                        mode === option.mode
+                          ? "border-primary bg-primary/10"
+                          : "border-border hover:border-primary/40 hover:bg-card/60"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <option.icon className={`w-4 h-4 ${mode === option.mode ? "text-primary" : "text-muted-foreground"}`} />
+                        <span className="text-sm font-medium">{option.label}</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground leading-snug">{option.description}</p>
+                    </button>
+                  ))}
+                </div>
+
+                {mode === "genres" && (
+                  <div className="mb-5 mt-3 flex flex-wrap gap-2">
+                    {genreOptions.map((genre) => (
+                      <button
+                        key={genre.key}
+                        type="button"
+                        onClick={() => toggleGenre(genre.key)}
+                        className={`px-3 py-1.5 rounded-full text-xs border transition-all duration-200 ${
+                          selectedGenres.includes(genre.key)
+                            ? "bg-primary text-primary-foreground border-primary"
+                            : "border-border hover:border-primary/50 hover:bg-primary/5 text-muted-foreground"
+                        }`}
+                      >
+                        {genre.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {mode === "genres" && selectedGenres.length === 0 && (
+                  <p className="text-xs text-destructive/80 mb-5 -mt-2">Elegí al menos un género.</p>
+                )}
+                {mode !== "genres" && <div className="mb-5" />}
+
                 <label className="block mb-5">
-                  <span className="text-sm font-medium mb-2 block">Qué querés ver hoy</span>
-                  <select
-                    value={mood}
-                    onChange={(event) => setMood(event.target.value)}
-                    className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-primary/50 transition-colors duration-200"
-                  >
-                    <option value="psychological">Algo psicológico</option>
-                    <option value="romance">Algo romántico</option>
-                    <option value="funny">Algo liviano</option>
-                    <option value="action">Algo con energía</option>
-                    <option value="slow">Algo calmo</option>
-                  </select>
+                  <span className="text-sm font-medium mb-2 block">Qué querés que te recomiende</span>
+                  <div className="grid grid-cols-3 gap-2">
+                    {kindFilterOptions.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => setKindFilter(option.value)}
+                        className={`py-2.5 rounded-xl text-sm border transition-all duration-200 ${
+                          kindFilter === option.value
+                            ? "bg-primary text-primary-foreground border-primary"
+                            : "border-border hover:border-primary/50 hover:bg-primary/5 text-muted-foreground"
+                        }`}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
                 </label>
 
                 <button
                   onClick={handleGenerate}
-                  disabled={loading || !zipFile}
+                  disabled={loading || !canGenerate}
                   className="w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3.5 rounded-xl font-medium hover:bg-primary/90 transition-all duration-200 active:scale-95 disabled:opacity-60 amber-glow"
                 >
                   <Sparkles className="w-4 h-4" />

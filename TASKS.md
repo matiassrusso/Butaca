@@ -46,6 +46,38 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
 
 ## Done
 
+- [x] [historial-002] Separar historial en "Vistas" (rated_items, deduplicado
+      por título) y "Recomendadas" (lo ya existente) | owner: codex (3
+      intentos por bloqueos de entorno del sandbox — worktree vacío sin
+      `.git`, luego worktree hermano fuera del sandbox permitido; el tercer
+      intento con worktree adentro de `PeliPick/.claude/worktrees/` sí pudo
+      escribir el código pero no pudo correr pytest/vite ni commitear por
+      permisos del sandbox de Codex — Claude verificó tests+build y
+      commiteó por él) | archivos: `backend/app/db.py`
+      (`get_watched_items`), `backend/app/main.py` (`GET /history/watched`),
+      `backend/app/models.py` (`WatchedItem`, `WatchedHistoryResponse`),
+      `backend/tests/test_main.py`, `frontend/src/pages/History.tsx` (tabs
+      Vistas/Recomendadas). Mergeado con el trabajo de modos-001 vía
+      3-way patch (`git apply --3way`) sin conflictos. 81 tests de backend
+      en verde, build de frontend limpio.
+- [x] [modos-001] Rediseño del flujo "qué querés ver hoy": 3 modos (perfil
+      completo / últimas pelis vistas / selección de géneros con lógica OR
+      y cobertura garantizada por género) + split Películas/Series/Ambas |
+      owner: claude | archivos: `backend/app/models.py` (campo
+      `watched_date` en `RatedItem`), `backend/app/csv_ingest.py` (parsea
+      fecha), `backend/app/letterboxd_zip.py` (prioriza `Watched Date` de
+      diary.csv), `backend/app/recommender.py` (`GENRE_OPTIONS`,
+      `kind_filter`, `required_any_tags` con cobertura, `preference_ratings`
+      para separar señal de gusto de exclusión), `backend/app/main.py`
+      (form fields `mode`/`kind_filter`/`genres` en `/recommend/zip`, valida
+      y arma `required_any_tags`/`preference_ratings`),
+      `frontend/src/pages/Recommend.tsx` (3 botones de modo, chips de
+      género, toggle Películas/Series/Ambas, reemplaza el dropdown de mood),
+      tests nuevos en `test_recommender.py` y `test_main.py`,
+      `docs/api.md`. 77 tests de backend en verde (67→77), build de
+      frontend limpio, verificado en vivo con TMDB real (genre OR-filter,
+      kind_filter movie/series, modo recent) y sin regresión en el modal de
+      detalle (cast/tráiler/scroll-lock siguen funcionando).
 - [x] [cast-001] Cast y tráiler en el modal de detalle | owner: codex |
       rama: `codex/cast-001` | archivos: `frontend/src/pages/Recommend.tsx`,
       `TASKS.md`, `docs/api.md`, `docs/architecture.md`,
