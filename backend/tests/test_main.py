@@ -285,3 +285,50 @@ def test_history_excludes_other_users_sessions() -> None:
 
     assert response.status_code == 200
     assert response.json()["sessions"] == []
+
+
+def test_watched_history_requires_auth() -> None:
+    response = client.get("/history/watched")
+
+    assert response.status_code == 401
+
+
+def test_watched_history_returns_items_from_uploaded_zip() -> None:
+    headers = _auth_headers("watcheduser")
+    _post_zip(headers, ratings_csv="Name,Rating,Review\nWhiplash,4.5,psychological and intense")
+
+    response = client.get("/history/watched", headers=headers)
+
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert len(items) == 1
+    assert items[0]["title"] == "Whiplash"
+    assert items[0]["rating"] == 4.5
+    assert items[0]["review"] == "psychological and intense"
+    assert items[0]["created_at"]
+
+
+def test_watched_history_excludes_other_users_items() -> None:
+    owner_headers = _auth_headers("watchedowner")
+    intruder_headers = _auth_headers("watchedintruder")
+    _post_zip(owner_headers)
+
+    response = client.get("/history/watched", headers=intruder_headers)
+
+    assert response.status_code == 200
+    assert response.json()["items"] == []
+
+
+def test_watched_history_deduplicates_reuploaded_titles() -> None:
+    headers = _auth_headers("watcheddedupe")
+    _post_zip(headers, ratings_csv="Name,Rating,Review\nWhiplash,4.0,first review")
+    _post_zip(headers, ratings_csv="Name,Rating,Review\n whiplash ,2.5,latest review")
+
+    response = client.get("/history/watched", headers=headers)
+
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert len(items) == 1
+    assert items[0]["title"] == "whiplash"
+    assert items[0]["rating"] == 2.5
+    assert items[0]["review"] == "latest review"

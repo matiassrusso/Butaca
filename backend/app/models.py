@@ -46,6 +46,17 @@ class RecommendationHistoryResponse(BaseModel):
     sessions: list[RecommendationSession]
 
 
+class WatchedItem(BaseModel):
+    title: str
+    rating: float
+    review: str
+    created_at: str
+
+
+class WatchedHistoryResponse(BaseModel):
+    items: list[WatchedItem]
+
+
 class UserCredentials(BaseModel):
     username: str = Field(min_length=3, max_length=50)
     password: str = Field(min_length=8, max_length=200)

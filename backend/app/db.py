@@ -229,6 +229,28 @@ def save_rated_items(user_id: int, items: list[tuple[str, float, str]]) -> None:
         )
 
 
+def get_watched_items(user_id: int) -> list[dict]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT title, rating, review, created_at
+            FROM rated_items
+            WHERE user_id = ?
+            ORDER BY created_at DESC, id DESC
+            """,
+            (user_id,),
+        ).fetchall()
+
+    seen_titles: set[str] = set()
+    items: list[dict] = []
+    for row in rows:
+        normalized_title = row["title"].strip().lower()
+        if normalized_title not in seen_titles:
+            seen_titles.add(normalized_title)
+            items.append(dict(row))
+    return items
+
+
 def create_recommendation_session(user_id: int, mood: str, taste_summary: str) -> int:
     with get_connection() as conn:
         cursor = conn.execute(

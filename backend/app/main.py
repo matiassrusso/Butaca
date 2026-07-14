@@ -16,6 +16,7 @@ from .models import (
     RecommendRequest,
     RecommendResponse,
     UserCredentials,
+    WatchedHistoryResponse,
 )
 from .recommender import recommend
 
@@ -131,6 +132,13 @@ def recommendation_history(
     user: sqlite3.Row = Depends(auth.get_current_user),
 ) -> RecommendationHistoryResponse:
     return RecommendationHistoryResponse(sessions=db.get_recommendation_history(user["id"]))
+
+
+@app.get("/history/watched", response_model=WatchedHistoryResponse)
+def watched_history(
+    user: sqlite3.Row = Depends(auth.get_current_user),
+) -> WatchedHistoryResponse:
+    return WatchedHistoryResponse(items=db.get_watched_items(user["id"]))
 
 
 @app.post("/recommend/zip", response_model=RecommendResponse)
