@@ -23,6 +23,11 @@ def _normalize(text: str) -> str:
     return text.strip().lower()
 
 
+def capitalize_sentence(text: str) -> str:
+    text = text.strip()
+    return text[:1].upper() + text[1:] if text else text
+
+
 def positive_tags_from_text(text: str) -> set[str]:
     normalized = _normalize(text)
     tags: set[str] = set()
@@ -45,8 +50,8 @@ def summarize_taste(ratings: list[RatedItem], mood: str) -> str:
 
     mood_text = _normalize(mood)
     if mood_text:
-        return f"{base} Hoy además buscás algo con vibra '{mood_text}'."
-    return base
+        return capitalize_sentence(f"{base} Hoy además buscás algo con vibra '{mood_text}'.")
+    return capitalize_sentence(base)
 
 
 def _collect_preference_tags(ratings: list[RatedItem]) -> tuple[set[str], set[str]]:
@@ -94,9 +99,9 @@ def recommend(
         if item["kind"] == "series":
             score -= 8
 
-        if score < 40:
-            continue
-
+        # no score floor here on purpose — we always want up to 5 picks when
+        # the catalog has that many unseen candidates, even if some are weak
+        # matches; the displayed match_score already tells the user how weak.
         reasons = []
         if tags & positive_tags:
             reasons.append("coincide con patrones que venís premiando")
@@ -113,7 +118,7 @@ def recommend(
                     title=item["title"],
                     year=item["year"],
                     kind=item["kind"],
-                    why=", y ".join(reasons) + ".",
+                    why=capitalize_sentence(", y ".join(reasons) + "."),
                     match_score=max(1, min(score, 99)),
                     tags=item["tags"],
                     poster_path=item.get("poster_path"),

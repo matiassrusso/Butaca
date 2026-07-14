@@ -164,7 +164,12 @@ async def recommend_titles_from_zip(
         except tmdb_client.TmdbError:
             candidates = catalog.CATALOG
 
-    response = recommend(ratings, mood, catalog=candidates, also_seen=frozenset(extra_seen))
+    # exclude titles already recommended to this user before, so hitting
+    # "nuevos picks" and regenerating with the same zip+mood surfaces
+    # different movies instead of the same deterministic top 5
+    already_recommended = db.get_recently_recommended_titles(user["id"])
+    also_seen = frozenset(extra_seen) | frozenset(already_recommended)
+    response = recommend(ratings, mood, catalog=candidates, also_seen=also_seen)
 
     if llm_client.is_configured():
         try:

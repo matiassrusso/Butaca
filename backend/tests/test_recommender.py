@@ -1,5 +1,5 @@
 from backend.app.models import RatedItem
-from backend.app.recommender import recommend
+from backend.app.recommender import capitalize_sentence, recommend
 
 
 def test_recommend_filters_seen_titles_and_prefers_matching_mood() -> None:
@@ -95,3 +95,35 @@ def test_recommend_breaks_match_score_ties_by_raw_score_not_catalog_order() -> N
     ]
     assert response.recommendations[0].match_score == 99
     assert response.recommendations[1].match_score == 99
+
+
+def test_recommend_backfills_weak_matches_instead_of_returning_too_few() -> None:
+    # none of these share a single tag with the user's taste or mood, so
+    # under the old "score < 40: continue" cutoff every one of them would
+    # get dropped and the response would come back empty
+    catalog = [
+        {"title": f"Unrelated Movie {i}", "year": 2000 + i, "kind": "movie", "tags": ["quiet"]}
+        for i in range(3)
+    ]
+
+    response = recommend(
+        ratings=[RatedItem(title="Old Movie", rating=5, review="action packed")],
+        mood="romance",
+        catalog=catalog,
+    )
+
+    assert len(response.recommendations) == 3
+
+
+def test_recommend_capitalizes_why() -> None:
+    catalog = [{"title": "Some Movie", "year": 2020, "kind": "movie", "tags": ["dark"]}]
+
+    response = recommend(ratings=[], mood="", catalog=catalog)
+
+    assert response.recommendations[0].why[0].isupper()
+
+
+def test_capitalize_sentence() -> None:
+    assert capitalize_sentence("hola mundo.") == "Hola mundo."
+    assert capitalize_sentence("") == ""
+    assert capitalize_sentence("Ya con mayúscula.") == "Ya con mayúscula."

@@ -193,6 +193,17 @@ def test_recommend_zip_falls_back_to_heuristic_when_gemini_fails(monkeypatch) ->
     assert response.json()["recommendations"]
 
 
+def test_recommend_zip_excludes_previously_recommended_titles() -> None:
+    headers = _auth_headers("nuevospicks")
+
+    first = _post_zip(headers).json()["recommendations"]
+    second = _post_zip(headers).json()["recommendations"]
+
+    first_titles = {item["title"] for item in first}
+    second_titles = {item["title"] for item in second}
+    assert first_titles.isdisjoint(second_titles)
+
+
 def test_movie_details_returns_cast_and_trailer(monkeypatch) -> None:
     monkeypatch.setenv("TMDB_API_KEY", "fake-key")
     monkeypatch.setattr(

@@ -49,9 +49,9 @@ def test_refine_reorders_and_overrides_why(monkeypatch) -> None:
     ratings = [RatedItem(title="Old Movie", rating=4.5, review="genial")]
     result = llm_client.refine_recommendations(ratings, "funny", HEURISTIC)
 
-    assert result.taste_summary == "resumen del agente"
+    assert result.taste_summary == "Resumen del agente"
     assert [r.title for r in result.recommendations] == ["Fake Comedy", "Fake Thriller"]
-    assert result.recommendations[0].why == "porque te reís poco últimamente"
+    assert result.recommendations[0].why == "Porque te reís poco últimamente"
     # fields not touched by the LLM (score, tags) survive untouched
     assert result.recommendations[0].match_score == 60
     assert result.recommendations[0].tags == ["funny", "light"]

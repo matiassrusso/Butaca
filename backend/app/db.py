@@ -273,6 +273,16 @@ def save_recommendations(session_id: int, user_id: int, mood: str, items: list[d
     return ids
 
 
+def get_recently_recommended_titles(user_id: int, limit: int = 100) -> list[str]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT title FROM recommendations_served WHERE user_id = ? "
+            "ORDER BY created_at DESC LIMIT ?",
+            (user_id, limit),
+        ).fetchall()
+    return [row["title"] for row in rows]
+
+
 def get_recommendation_history(user_id: int) -> list[dict]:
     with get_connection() as conn:
         sessions = conn.execute(

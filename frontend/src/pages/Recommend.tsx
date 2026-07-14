@@ -80,6 +80,14 @@ function MovieModal({
   const [loadingDetails, setLoadingDetails] = useState(false);
 
   useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     setDetails(null);
 
@@ -686,6 +694,7 @@ export default function Recommend() {
       <AnimatePresence>
         {selectedRec && (
           <MovieModal
+            key={selectedRec.id}
             rec={selectedRec}
             token={token}
             feedback={feedbackState[selectedRec.id]}

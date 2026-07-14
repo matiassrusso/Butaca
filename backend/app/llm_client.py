@@ -5,6 +5,7 @@ from pathlib import Path
 from urllib.error import URLError
 
 from .models import RatedItem, RecommendResponse
+from .recommender import capitalize_sentence
 
 ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
 GENERATE_URL = (
@@ -127,11 +128,11 @@ def refine_recommendations(
         rec = by_title.get(str(pick.get("title", "")).strip().lower())
         if rec is None:
             continue
-        why = str(pick.get("why", "")).strip()
+        why = capitalize_sentence(str(pick.get("why", "")).strip())
         reordered.append(rec.model_copy(update={"why": why or rec.why}))
 
     if not reordered:
         raise LlmError("Gemini no devolvió picks válidos de la lista de candidatos.")
 
-    taste_summary = str(result.get("taste_summary", "")).strip() or heuristic.taste_summary
+    taste_summary = capitalize_sentence(str(result.get("taste_summary", "")).strip()) or heuristic.taste_summary
     return RecommendResponse(taste_summary=taste_summary, recommendations=reordered[:5])
