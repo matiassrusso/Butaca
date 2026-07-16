@@ -66,8 +66,9 @@ def test_recommend_carries_tmdb_id_when_present_and_none_otherwise() -> None:
 
 def test_recommend_breaks_match_score_ties_by_raw_score_not_catalog_order() -> None:
     # both items clamp to the same displayed match_score (99), but the
-    # series scores higher before clamping — it should rank first even
-    # though it's listed second in the catalog and gets the series penalty.
+    # series matches more of the user's positive tags, scoring higher before
+    # clamping — it should rank first even though it's listed second in the
+    # catalog and gets the series penalty.
     catalog = [
         {
             "title": "Capped Movie",
@@ -79,12 +80,12 @@ def test_recommend_breaks_match_score_ties_by_raw_score_not_catalog_order() -> N
             "title": "Higher Raw Series",
             "year": 2020,
             "kind": "series",
-            "tags": ["psychological", "dark", "mysterious", "character", "intimate", "funny"],
+            "tags": ["psychological", "dark", "mysterious", "funny", "light", "sharp"],
         },
     ]
 
     response = recommend(
-        ratings=[RatedItem(title="Old Movie", rating=5, review="psychological")],
+        ratings=[RatedItem(title="Old Movie", rating=5, review="psychological and funny")],
         mood="psychological",
         catalog=catalog,
     )

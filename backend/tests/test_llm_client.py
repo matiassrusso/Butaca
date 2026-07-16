@@ -79,6 +79,33 @@ def test_call_gemini_wraps_network_errors(monkeypatch) -> None:
         llm_client._call_gemini("prompt", "fake-key")
 
 
+def test_call_gemini_falls_through_to_next_model_on_failure(monkeypatch) -> None:
+    attempted_models = []
+
+    def fake_call_one_model(model, body, api_key):
+        attempted_models.append(model)
+        if model != llm_client.GEMINI_MODELS[-1]:
+            raise llm_client.LlmError(f"{model} out of quota")
+        return {"taste_summary": "ok", "picks": []}
+
+    monkeypatch.setattr(llm_client, "_call_one_model", fake_call_one_model)
+
+    result = llm_client._call_gemini("prompt", "fake-key")
+
+    assert attempted_models == llm_client.GEMINI_MODELS
+    assert result == {"taste_summary": "ok", "picks": []}
+
+
+def test_call_gemini_raises_last_error_when_all_models_fail(monkeypatch) -> None:
+    def fake_call_one_model(model, body, api_key):
+        raise llm_client.LlmError(f"{model} failed")
+
+    monkeypatch.setattr(llm_client, "_call_one_model", fake_call_one_model)
+
+    with pytest.raises(llm_client.LlmError, match="gemini-3.1-flash-lite failed"):
+        llm_client._call_gemini("prompt", "fake-key")
+
+
 def test_build_taste_digest_handles_empty_history() -> None:
     assert llm_client._build_taste_digest([]) == "Sin historial todavía."
 

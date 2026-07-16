@@ -1,3 +1,4 @@
+import logging
 import os
 import sqlite3
 
@@ -26,6 +27,14 @@ MAX_ZIP_SIZE = 20 * 1024 * 1024  # 20MB — real Letterboxd exports run in the t
 VALID_MODES = {"profile", "recent", "genres"}
 VALID_KIND_FILTERS = {"movie", "series", "both"}
 RECENT_WINDOW = 10  # how many of the user's most-recently-watched titles count as "lo último que vi"
+logger = logging.getLogger(__name__)
+# ponytail: recommend() only reads taste signal from review text and
+# explicit Letterboxd Tags — titles with neither (any username-scraped
+# import, or a zip rating with no review) contribute nothing, so the "why"
+# collapses to the same generic fallback for everyone. Filling in each loved
+# title's real TMDb genre closes that gap; capped since this runs
+# synchronously in the request path (raise if latency allows more).
+TASTE_TAG_LOOKUP_CAP = 30
 
 
 def _debug_mode() -> bool:
@@ -164,6 +173,24 @@ def _validate_recommend_params(mode: str, kind_filter: str) -> None:
         raise HTTPException(status_code=400, detail="Filtro de tipo inválido.")
 
 
+def _enrich_loved_ratings_with_genre_tags(ratings: list[RatedItem]) -> None:
+    """Mutates loved titles (rating >= 4) in place, adding their real TMDb
+    genre tags on top of whatever tags they already have. Only loved titles
+    qualify, since _collect_preference_tags treats any tag on a RatedItem as
+    positive signal regardless of rating — tagging a hated movie this way
+    would flip its genre into a false positive."""
+    if not tmdb_client.is_configured():
+        return
+    loved = sorted((r for r in ratings if r.rating >= 4), key=lambda r: r.rating, reverse=True)
+    for item in loved[:TASTE_TAG_LOOKUP_CAP]:
+        try:
+            match = tmdb_client.search_title(item.title)
+        except tmdb_client.TmdbError:
+            continue
+        if match:
+            item.tags = list(item.tags) + match["tags"]
+
+
 def _finish_recommend(
     ratings: list[RatedItem],
     extra_seen: set[str],
@@ -182,11 +209,14 @@ def _finish_recommend(
             detail="No encontré ratings ni reviews usables para armar recomendaciones.",
         )
 
+    _enrich_loved_ratings_with_genre_tags(ratings)
+
     candidates = catalog.CATALOG
     if tmdb_client.is_configured():
         try:
             candidates = tmdb_client.fetch_candidates(mood)
-        except tmdb_client.TmdbError:
+        except tmdb_client.TmdbError as exc:
+            logger.warning("TMDb candidates fetch failed, falling back to mock catalog: %s", exc)
             candidates = catalog.CATALOG
 
     # exclude titles already recommended to this user before, so hitting
@@ -226,8 +256,8 @@ def _finish_recommend(
     if llm_client.is_configured():
         try:
             response = llm_client.refine_recommendations(ratings, mood, response)
-        except llm_client.LlmError:
-            pass
+        except llm_client.LlmError as exc:
+            logger.warning("Gemini refine failed, falling back to heuristic why: %s", exc)
 
     db.save_rated_items(
         user["id"],

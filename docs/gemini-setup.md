@@ -31,11 +31,17 @@ loader chico de `.env` que ya usaba `tmdb_client.py` (stdlib, sin sumar
 ## Cómo se usa
 
 - [backend/app/llm_client.py](../backend/app/llm_client.py)
-  pega contra `gemini-flash-latest:generateContent` (stdlib `urllib`, sin
-  SDK) con `responseSchema` para forzar JSON estructurado. Se probó primero
-  con `gemini-2.0-flash`, pero esa key tenía cuota free-tier en 0 para ese
-  modelo puntual (proyecto de Cloud sin billing linkeado) — `gemini-flash-latest`
-  sí tenía cuota disponible.
+  pega contra `:generateContent` (stdlib `urllib`, sin SDK) con
+  `responseSchema` para forzar JSON estructurado. Prueba una cadena de
+  modelos en orden (`GEMINI_MODELS`: `gemini-flash-latest` →
+  `gemini-2.5-flash` → `gemini-3-flash` → `gemini-3.1-flash-lite`) y cae al
+  siguiente ante cualquier error del anterior — el free tier de Google AI
+  Studio da cuota diaria (RPD) **separada por modelo concreto**, no por el
+  alias `-latest`, así que agotar el mejor modelo en un rato de testeo ya no
+  tira todo al heurístico: sigue probando modelos con cuota disponible antes
+  de rendirse. El último de la cadena (`gemini-3.1-flash-lite`) tiene un
+  colchón bastante más grande (500 RPD vs. 20 de los demás) para justamente
+  ese caso.
 - Recibe el historial parseado del CSV, el mood y los candidatos que ya
   filtró el recomendador heurístico (`recommend()` en
   [recommender.py](../backend/app/recommender.py)).
@@ -49,12 +55,25 @@ loader chico de `.env` que ya usaba `tmdb_client.py` (stdlib, sin sumar
 
 ## Si Gemini falla o no está configurada
 
-`POST /recommend/csv` devuelve la respuesta heurística sin romper, igual que
-con TMDb. Pasa si:
+`POST /recommend/zip` y `POST /recommend/letterboxd` devuelven la respuesta
+heurística sin romper, igual que con TMDb, y el server loggea un
+`Gemini refine failed: ...` con el motivo (antes era un fallback 100%
+silencioso — costó una sesión entera de debugging diagnosticar por qué el
+"why" nunca variaba). Cae al heurístico si:
 
 - no hay `GEMINI_API_KEY` seteada
-- Gemini está caída, da timeout, devuelve JSON con formato inesperado, o
-  todos los picks que sugiere quedan afuera de la lista de candidatos
+- los 4 modelos de la cadena fallan (caídos, timeout, JSON con formato
+  inesperado, o cuota diaria agotada en los 4 al mismo tiempo)
+- todos los picks que sugiere el modelo que sí respondió quedan afuera de la
+  lista de candidatos
+
+Encontrado en vivo: en una red donde la ruta IPv6 hacia
+`generativelanguage.googleapis.com` está rota (cuelga sin error hasta el
+timeout, en vez de fallar rápido), `llm_client.py` fuerza IPv4 solo para
+esta llamada (`_force_ipv4_dns`). Además `gemini-flash-latest` "piensa"
+antes de responder (`thoughtSignature` en la respuesta cruda) y tarda
+~19-20s incluso en un prompt trivial, por eso `REQUEST_TIMEOUT` es 30s y no
+algo más ajustado.
 
 ## Tests
 

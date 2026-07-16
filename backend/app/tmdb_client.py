@@ -263,7 +263,12 @@ def _fetch_from_discover(
         params = {
             "api_key": api_key,
             "language": "en-US",
-            "sort_by": "popularity.desc",
+            # vote_average, not popularity: popularity.desc ranks what's
+            # trending right now (new releases, current buzz), which skews
+            # every recommendation toward recent titles regardless of taste.
+            # vote_count.gte keeps this from surfacing obscure titles with a
+            # handful of 10/10 votes.
+            "sort_by": "vote_average.desc",
             "vote_count.gte": 200,
             "include_adult": "false",
             "page": page,
@@ -345,7 +350,14 @@ def fetch_trailer_key(tmdb_id: int, kind: str = "movie") -> str | None:
     return trailers[0]["key"]
 
 
-def _search_one(url: str, kind: str, genre_name_map: dict[int, str], title: str, api_key: str) -> dict | None:
+def _search_one(
+    url: str,
+    kind: str,
+    genre_name_map: dict[int, str],
+    genre_tag_map: dict[int, list[str]],
+    title: str,
+    api_key: str,
+) -> dict | None:
     params = {"api_key": api_key, "query": title, "language": "en-US", "include_adult": "false"}
     data = _get_json(f"{url}?{urllib.parse.urlencode(params)}")
     results = data.get("results", [])
@@ -363,13 +375,16 @@ def _search_one(url: str, kind: str, genre_name_map: dict[int, str], title: str,
     except ValueError:
         return None
 
-    genres = sorted({genre_name_map[gid] for gid in raw.get("genre_ids", []) if gid in genre_name_map})
+    genre_ids = raw.get("genre_ids", [])
+    genres = sorted({genre_name_map[gid] for gid in genre_ids if gid in genre_name_map})
+    tags = sorted({tag for gid in genre_ids for tag in genre_tag_map.get(gid, [])})
     return {
         "tmdb_id": raw.get("id"),
         "title": (raw.get(title_field) or "").strip(),
         "year": year,
         "kind": kind,
         "genres": genres,
+        "tags": tags,
     }
 
 
@@ -393,9 +408,9 @@ def search_title(title: str) -> dict | None:
             return result.copy() if result else None
         del _SEARCH_CACHE[cache_key]
 
-    result = _search_one(SEARCH_URL, "movie", GENRE_ID_NAME_MAP, title, api_key)
+    result = _search_one(SEARCH_URL, "movie", GENRE_ID_NAME_MAP, GENRE_ID_TAG_MAP, title, api_key)
     if result is None:
-        result = _search_one(SEARCH_TV_URL, "series", TV_GENRE_ID_NAME_MAP, title, api_key)
+        result = _search_one(SEARCH_TV_URL, "series", TV_GENRE_ID_NAME_MAP, TV_GENRE_ID_TAG_MAP, title, api_key)
 
     _SEARCH_CACHE[cache_key] = (_now_monotonic() + TITLE_CACHE_TTL_SECONDS, result)
     _SEARCH_CACHE.move_to_end(cache_key)

@@ -78,12 +78,27 @@
   stack `urllib`/`requests` de Python queda bloqueado con `403` por
   Cloudflare según el fingerprint TLS del handshake, sin importar los
   headers que se manden
-- tests de backend (121, incluyendo auth, feedback, historial, TMDb, Gemini, el
+- corrección de 3 bugs de calidad de recomendación detectados en uso real: (1)
+  `_collect_preference_tags` sumaba ciegamente `funny/light/character/intimate`
+  a cualquier título puntuado ≥4.5 sin mirar su contenido — con la mayoría de
+  la gente puntuando varias cosas alto, ese ruido dominaba el resto de la
+  señal y explicaba por qué el "why" siempre terminaba citando humor/tono
+  liviano sin importar el historial real; (2) el import por username no trae
+  texto de review, así que sin ese bug la señal de gusto quedaba en cero —
+  ahora `_enrich_loved_ratings_with_genre_tags` (`backend/app/main.py`)
+  completa el género real de TMDb para los títulos puntuados ≥4 (capado a 30
+  por request, reutiliza `tmdb_client.search_title` ya cacheado 24h), gateado
+  a "amado" para no colar señal falsa desde títulos que el usuario odió; (3)
+  el discover de TMDb pedía `sort_by=popularity.desc` (qué está sonando
+  ahora, no qué es bueno), lo que sesgaba todo el catálogo de candidatos a
+  estrenos recientes — cambiado a `vote_average.desc`
+- tests de backend (128, incluyendo auth, feedback, historial, TMDb, Gemini, el
   desempate por score crudo, el parser del zip de Letterboxd (incluyendo
-  Tags de usuario), el scraper del diario por username, rate limiting/reset
-  de contraseña, la caché de TMDb, los 3 modos de recomendación +
-  kind_filter, el historial de vistas con fecha real, la personalización
-  del "why" (heurístico y del agente Gemini), y el perfil de gusto visual)
+  Tags de usuario), el scraper del diario por username, el enriquecimiento de
+  tags por TMDb para títulos amados, rate limiting/reset de contraseña, la
+  caché de TMDb, los 3 modos de recomendación + kind_filter, el historial de
+  vistas con fecha real, la personalización del "why" (heurístico y del
+  agente Gemini), y el perfil de gusto visual)
 - pasada de UX/UI: tema "cinematic" (paleta ámbar/dorada, `Instrument Serif` +
   `IBM Plex Sans`), animaciones con Framer Motion, páginas Home / Login /
   Recommend (upload del zip + mood + resultados con feedback) / History /

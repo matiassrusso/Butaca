@@ -1,7 +1,9 @@
 import json
 import os
+import socket
 import urllib.request
 from collections import Counter
+from contextlib import contextmanager
 from pathlib import Path
 from urllib.error import URLError
 
@@ -9,11 +11,18 @@ from .models import RatedItem, RecommendResponse
 from .recommender import TAG_PHRASES, capitalize_sentence, positive_tags_from_text
 
 ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
-GENERATE_URL = (
-    "https://generativelanguage.googleapis.com/v1beta/models/"
-    "gemini-flash-latest:generateContent"
-)
-REQUEST_TIMEOUT = 15
+GENERATE_URL_TEMPLATE = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+# best model first, each with its own free-tier daily quota bucket — the
+# top pick (gemini-flash-latest) is the newest/best but capped at 20
+# requests/day and easy to exhaust while testing; when it (or the next one)
+# is out of quota for the day, _call_gemini falls through to the next model
+# instead of giving up and dropping straight to the heuristic why.
+GEMINI_MODELS = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-3-flash", "gemini-3.1-flash-lite"]
+# gemini-flash-latest reasons internally before answering (visible as
+# thoughtSignature in the response) — observed ~19s time-to-first-byte even
+# for a trivial prompt, so a short timeout was silently discarding every
+# real call and falling back to the heuristic every time.
+REQUEST_TIMEOUT = 30
 
 _RESPONSE_SCHEMA = {
     "type": "OBJECT",
@@ -123,6 +132,47 @@ def _build_prompt(ratings: list[RatedItem], mood: str, heuristic: RecommendRespo
     )
 
 
+@contextmanager
+def _force_ipv4_dns():
+    # ponytail: on networks where the local IPv6 route to Google's endpoint
+    # is broken but IPv4 works (observed here — generativelanguage's AAAA
+    # records hang to the full REQUEST_TIMEOUT with no error, while the A
+    # records respond in ~1s), urlopen tries the (unreachable) IPv6 address
+    # first and never gets to IPv4 within the timeout, so every call fails
+    # silently and this feature never actually runs. Forcing AF_INET here
+    # skips straight past that. Scoped to just this call, not global.
+    original = socket.getaddrinfo
+
+    def ipv4_only(host, port, family=0, type=0, proto=0, flags=0):
+        return original(host, port, socket.AF_INET, type, proto, flags)
+
+    socket.getaddrinfo = ipv4_only
+    try:
+        yield
+    finally:
+        socket.getaddrinfo = original
+
+
+def _call_one_model(model: str, body: bytes, api_key: str) -> dict:
+    request = urllib.request.Request(
+        f"{GENERATE_URL_TEMPLATE.format(model=model)}?key={api_key}",
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with _force_ipv4_dns(), urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT) as response:
+            payload = json.loads(response.read())
+    except (URLError, TimeoutError, json.JSONDecodeError) as exc:
+        raise LlmError(f"No pude consultar Gemini ({model}): {exc}") from exc
+
+    try:
+        text = payload["candidates"][0]["content"]["parts"][0]["text"]
+        return json.loads(text)
+    except (KeyError, IndexError, json.JSONDecodeError) as exc:
+        raise LlmError(f"Respuesta de Gemini ({model}) con formato inesperado: {exc}") from exc
+
+
 def _call_gemini(prompt: str, api_key: str) -> dict:
     body = json.dumps(
         {
@@ -135,23 +185,13 @@ def _call_gemini(prompt: str, api_key: str) -> dict:
         }
     ).encode("utf-8")
 
-    request = urllib.request.Request(
-        f"{GENERATE_URL}?key={api_key}",
-        data=body,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT) as response:
-            payload = json.loads(response.read())
-    except (URLError, TimeoutError, json.JSONDecodeError) as exc:
-        raise LlmError(f"No pude consultar Gemini: {exc}") from exc
-
-    try:
-        text = payload["candidates"][0]["content"]["parts"][0]["text"]
-        return json.loads(text)
-    except (KeyError, IndexError, json.JSONDecodeError) as exc:
-        raise LlmError(f"Respuesta de Gemini con formato inesperado: {exc}") from exc
+    last_error: LlmError | None = None
+    for model in GEMINI_MODELS:
+        try:
+            return _call_one_model(model, body, api_key)
+        except LlmError as exc:
+            last_error = exc
+    raise last_error
 
 
 def refine_recommendations(

@@ -321,6 +321,7 @@ def test_search_title_matches_movie_first(monkeypatch) -> None:
         "year": 2015,
         "kind": "movie",
         "genres": ["Drama", "Thriller"],
+        "tags": ["character", "dark", "psychological"],
     }
 
 

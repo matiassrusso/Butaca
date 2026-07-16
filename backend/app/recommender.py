@@ -131,13 +131,9 @@ def _collect_preference_tags(ratings: list[RatedItem]) -> tuple[set[str], set[st
         positive_tags.update(
             tag for user_tag in item.tags if (tag := _normalize(user_tag)) in known_tags
         )
-        if item.rating >= 4.5:
-            positive_tags.update(POSITIVE_HINTS["funny"])
         for hint, tags in NEGATIVE_HINTS.items():
             if hint in review:
                 negative_tags.update(tags)
-        if item.rating >= 4.5:
-            positive_tags.update(["character", "intimate"])
         if item.rating <= 2:
             negative_tags.update(["loud"])
 
@@ -233,7 +229,10 @@ def recommend(
 
         if matched_positive:
             reference = _find_reference_title(taste_ratings, matched_positive)
-            phrase = _tag_phrases(matched_positive)
+            # cap how many tags get named: a broad taste profile can match
+            # most of a movie's tags at once, and citing all of them reads as
+            # a generic tag dump instead of a specific reason
+            phrase = _tag_phrases(set(sorted(matched_positive)[:3]))
             if reference:
                 reasons.append(f"tira para {phrase}, como lo que valoraste en «{reference}»")
             else:

@@ -41,6 +41,65 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
 
 ## Done
 
+- [x] [rec-quality-001] 3 bugs de calidad de recomendación reportados en uso
+      real (probando el import por username recién agregado): el "why" era
+      siempre casi el mismo texto ("humor y tono liviano"), no estaba claro
+      si el import por username realmente leía el perfil, y las
+      recomendaciones eran casi siempre estrenos/taquilla. Causas: (1)
+      `_collect_preference_tags` (`backend/app/recommender.py`) sumaba
+      ciegamente `funny/light/character/intimate` a cualquier título
+      puntuado ≥4.5 sin mirar su contenido — con la mayoría de la gente
+      puntuando varias cosas alto, ese ruido dominaba toda la señal real
+      (texto de review, Tags propios); (2) el import por username no trae
+      texto de review, así que sin ese bug la señal de gusto quedaba
+      directamente en cero para esa vía; (3) `tmdb_client.fetch_candidates`
+      pedía `sort_by=popularity.desc` a discover — eso es qué está sonando
+      ahora, no qué es bueno, y sesgaba el pool de candidatos a estrenos.
+      Fixes: se sacó el bonus ciego; se agregó
+      `_enrich_loved_ratings_with_genre_tags` (`backend/app/main.py`) que
+      completa el género real de TMDb (vía `tmdb_client.search_title`,
+      extendido para devolver también `tags` del vocabulario interno, mismo
+      request cacheado 24h que ya usaba `taste_profile.py`) para los
+      títulos puntuados ≥4, capado a 30 por request (`TASTE_TAG_LOOKUP_CAP`)
+      y gateado a "amado" para no colar señal falsa desde títulos odiados;
+      se cambió `sort_by` a `vote_average.desc` | owner: claude | archivos:
+      `backend/app/recommender.py`, `backend/app/tmdb_client.py`,
+      `backend/app/main.py`, tests actualizados/nuevos en
+      `test_recommender.py`, `test_tmdb_client.py`, `test_main.py`. 126
+      tests de backend en verde (121→126).
+      Al verificar en vivo apareció una 4ta causa, más de infraestructura que
+      de lógica: el agente Gemini nunca estaba corriendo realmente. Dos bugs
+      reales en `llm_client.py`: (a) la ruta IPv6 de esta red hacia
+      `generativelanguage.googleapis.com` está rota — Python intenta la
+      IPv6 primero, cuelga sin error hasta el timeout; forzar IPv4 (nuevo
+      `_force_ipv4_dns()`, scopeado solo a esa llamada) lo evita; (b)
+      `gemini-flash-latest` "piensa" antes de responder (`thoughtSignature`
+      en la respuesta) y tarda ~19-20s incluso en un prompt trivial —
+      `REQUEST_TIMEOUT=15` descartaba silenciosamente cada llamada real;
+      subido a 30. Con ambos fixes, una llamada real terminó en 20.3s. Un
+      tercer factor detectado (no arreglable en código): el rate limit
+      gratuito de Gemini (`429`) se agotó en medio de tanto test seguido —
+      cuando eso pasa cae al heurístico igual que un timeout. El fallback
+      a heurístico era 100% silencioso en ambos casos (`except ...: pass`
+      sin loggear nada) — se agregó `logger.warning(...)` en los dos
+      catches de `_finish_recommend` (TMDb y Gemini) para que la próxima
+      vez que "el why se vea igual" se pueda confirmar por qué en los logs
+      del server en vez de tener que re-investigar todo de cero.
+      El cupo gratis de Gemini resultó ser por modelo concreto, no por el
+      alias `-latest`: el dashboard de Google AI Studio mostró
+      `gemini-flash-latest` resolviendo hoy a "Gemini 3.5 Flash" con
+      22/20 RPD (agotado), mientras `gemini-2.5-flash` y `gemini-3-flash`
+      seguían casi sin usar (cupos separados). A pedido explícito del
+      usuario, `_call_gemini` ahora prueba una cadena de modelos en orden
+      (`GEMINI_MODELS` en `llm_client.py`: `gemini-flash-latest` →
+      `gemini-2.5-flash` → `gemini-3-flash` → `gemini-3.1-flash-lite`,
+      este último con 500 RPD de colchón) y cae al siguiente ante
+      cualquier `LlmError` del anterior, en vez de ir directo al
+      heurístico apenas falla el primero. Confirmado en vivo: cayó a
+      `gemini-2.5-flash` y respondió en 3.5s con un "why" real citando
+      "GoodFellas" del historial | archivos adicionales:
+      `backend/app/llm_client.py`, 2 tests nuevos en `test_llm_client.py`
+      (128 tests de backend en verde, 126→128). Sin commitear todavía.
 - [x] [lb-username-001] Import por username de Letterboxd (scraping),
       alternativa a subir el zip: nuevo endpoint `POST /recommend/letterboxd`
       que scrapea el diario público (`/diary/films/page/N/`, hasta 20

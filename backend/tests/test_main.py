@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from backend.app import letterboxd_scrape
 from backend.app.llm_client import LlmError
-from backend.app.main import app
+from backend.app.main import TASTE_TAG_LOOKUP_CAP, _enrich_loved_ratings_with_genre_tags, app
 from backend.app.models import RatedItem
 from backend.app.tmdb_client import TmdbError
 
@@ -143,6 +143,101 @@ def test_recommend_letterboxd_rejects_invalid_mode(monkeypatch) -> None:
     )
 
     assert response.status_code == 400
+
+
+def test_recommend_letterboxd_enriches_taste_from_tmdb_genres_when_reviews_are_empty(
+    monkeypatch,
+) -> None:
+    # username imports never carry review text, so without genre enrichment
+    # every pick falls back to the same generic "apuesta distinta" reason
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        letterboxd_scrape,
+        "fetch_letterboxd_diary",
+        lambda username: (
+            [RatedItem(title="Loved Movie", rating=5, review="", watched_date="2024-01-01")],
+            set(),
+        ),
+    )
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.search_title",
+        lambda title: {"tags": ["dark", "psychological"]},
+    )
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.fetch_candidates",
+        lambda mood: [{"title": "Dark Pick", "year": 2020, "kind": "movie", "tags": ["dark"]}],
+    )
+
+    headers = _auth_headers("lbenrich")
+    response = client.post(
+        "/recommend/letterboxd",
+        headers=headers,
+        data={"username": "someuser", "mood": ""},
+    )
+
+    assert response.status_code == 200
+    assert "apuesta distinta" not in response.json()["recommendations"][0]["why"]
+
+
+def test_enrich_loved_ratings_adds_tmdb_genre_tags_to_loved_titles_only(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.search_title",
+        lambda title: {"tags": ["dark", "psychological"]} if title == "Loved Movie" else None,
+    )
+
+    loved = RatedItem(title="Loved Movie", rating=5, review="")
+    hated = RatedItem(title="Hated Movie", rating=1, review="")
+    ratings = [loved, hated]
+
+    _enrich_loved_ratings_with_genre_tags(ratings)
+
+    assert set(loved.tags) == {"dark", "psychological"}
+    assert hated.tags == []
+
+
+def test_enrich_loved_ratings_noop_when_tmdb_not_configured(monkeypatch) -> None:
+    def fail_if_called(title):
+        raise AssertionError("should not call TMDb when not configured")
+
+    monkeypatch.setattr("backend.app.main.tmdb_client.search_title", fail_if_called)
+
+    ratings = [RatedItem(title="Loved Movie", rating=5, review="")]
+    _enrich_loved_ratings_with_genre_tags(ratings)
+
+    assert ratings[0].tags == []
+
+
+def test_enrich_loved_ratings_skips_titles_that_fail_to_match(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+
+    def raise_error(title):
+        raise TmdbError("boom")
+
+    monkeypatch.setattr("backend.app.main.tmdb_client.search_title", raise_error)
+
+    ratings = [RatedItem(title="Loved Movie", rating=5, review="")]
+    _enrich_loved_ratings_with_genre_tags(ratings)  # must not raise
+
+    assert ratings[0].tags == []
+
+
+def test_enrich_loved_ratings_respects_lookup_cap(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    calls: list[str] = []
+
+    def fake_search(title):
+        calls.append(title)
+        return {"tags": ["dark"]}
+
+    monkeypatch.setattr("backend.app.main.tmdb_client.search_title", fake_search)
+
+    ratings = [
+        RatedItem(title=f"Loved {i}", rating=5, review="") for i in range(TASTE_TAG_LOOKUP_CAP + 5)
+    ]
+    _enrich_loved_ratings_with_genre_tags(ratings)
+
+    assert len(calls) == TASTE_TAG_LOOKUP_CAP
 
 
 def test_feedback_accepts_own_recommendation() -> None:
