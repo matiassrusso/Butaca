@@ -1,8 +1,13 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useRef, useState } from "react";
 import { useLocation } from "wouter";
 
 import { PageTransition } from "@/components/PageTransition";
 import { useAuth } from "@/hooks/useAuth";
+
+// El backend corre en el free tier de Render, que se duerme tras inactividad:
+// la primera request puede tardar ~30-60s en despertar el server. Sin este
+// aviso, la espera se ve como si login/registro estuviera roto.
+const COLD_START_HINT_MS = 4000;
 
 export default function Login() {
   const { login, register } = useAuth();
@@ -11,12 +16,16 @@ export default function Login() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [slowHint, setSlowHint] = useState(false);
   const [error, setError] = useState("");
+  const slowTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setLoading(true);
     setError("");
+    setSlowHint(false);
+    slowTimer.current = setTimeout(() => setSlowHint(true), COLD_START_HINT_MS);
 
     try {
       if (mode === "login") {
@@ -28,7 +37,9 @@ export default function Login() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Falló la autenticación.");
     } finally {
+      if (slowTimer.current) clearTimeout(slowTimer.current);
       setLoading(false);
+      setSlowHint(false);
     }
   }
 
@@ -103,6 +114,13 @@ export default function Login() {
             >
               {loading ? "..." : mode === "register" ? "Crear cuenta →" : "Entrar →"}
             </button>
+
+            {slowHint && (
+              <p className="font-mono text-[10px] uppercase leading-relaxed tracking-widest text-muted-foreground">
+                Despertando el servidor... la primera vez puede tardar hasta un minuto.
+                Esperá sin recargar.
+              </p>
+            )}
 
             <button
               type="button"
