@@ -11,3 +11,7 @@ services:
         sync: false
       - key: GEMINI_API_KEY
         sync: false
+      - key: PELIPICK_ALLOWED_ORIGINS
+        value: https://pelipick.vercel.app
+      - key: DATABASE_URL
+        sync: false

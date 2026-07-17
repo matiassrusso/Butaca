@@ -114,20 +114,29 @@
   patrón que la caché de TMDb), keyeada por mood + los candidatos exactos
   que le pasó el heurístico — evita repetir la llamada (y gastar cupo
   gratuito) cuando se regeneran picks con la misma entrada
-- tests de backend (148, incluyendo auth, feedback, historial, TMDb, Gemini, el
+- tests de backend (150, incluyendo auth, feedback, historial, TMDb, Gemini, el
   desempate por score crudo, el parser del zip de Letterboxd (incluyendo
   Tags de usuario), el scraper del diario por username, el enriquecimiento de
   tags por TMDb para títulos amados, rate limiting/reset de contraseña, la
   caché de TMDb, los 3 modos de recomendación + kind_filter, el historial de
   vistas con fecha real, la personalización del "why" (heurístico y del
-  agente Gemini), el perfil de gusto visual, y el motor personalizado
+  agente Gemini), el perfil de gusto visual, el motor personalizado
   (candidatos por perfil, resolución de persona en TMDb, scoring por
-  director/actor/década, mezcla con exploración))
+  director/actor/década, mezcla con exploración), y la traducción de
+  placeholders SQL del wrapper de Postgres)
 - pasada de UX/UI: tema "cinematic" (paleta ámbar/dorada, `Instrument Serif` +
   `IBM Plex Sans`), animaciones con Framer Motion, páginas Home / Login /
   Recommend (upload del zip + mood + resultados con feedback) / History /
   NotFound
 - build verificado de frontend
+- deploy: frontend en Vercel ([pelipick.vercel.app](https://pelipick.vercel.app/)),
+  backend en Render ([pelipick-backend.onrender.com](https://pelipick-backend.onrender.com)).
+  CORS restringido al dominio de Vercel (antes `allow_origins=["*"]`)
+- persistencia en producción vía Postgres (Neon, free tier permanente): el
+  free tier de Render tiene filesystem efímero y borra el SQLite en cada
+  redeploy, así que `backend/app/db.py` ahora soporta los dos backends por
+  `DATABASE_URL` (sin setear sigue usando SQLite igual que siempre, para dev
+  local y tests); en Render se setea a mano con el connection string de Neon
 
 ## Hecho pero verde
 

@@ -6,7 +6,7 @@ from pathlib import Path
 
 DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "pelipick.db"
 
-SCHEMA = """
+SCHEMA_SQLITE = """
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT UNIQUE NOT NULL,
@@ -87,17 +87,155 @@ CREATE TABLE IF NOT EXISTS taste_profiles (
 );
 """
 
+# same tables as SCHEMA_SQLITE, adapted for Postgres (Neon): SERIAL instead of
+# AUTOINCREMENT, and a DEFAULT that renders the identical "YYYY-MM-DD HH:MM:SS"
+# UTC string SQLite's datetime('now') produces — frontend/src/pages/History.tsx
+# parses created_at by appending "Z", so both backends must match that format.
+_PG_NOW = "to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS')"
+SCHEMA_POSTGRES = f"""
+CREATE TABLE IF NOT EXISTS users (
+    id SERIAL PRIMARY KEY,
+    username TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    password_salt TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT ({_PG_NOW})
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    token TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    created_at TEXT NOT NULL DEFAULT ({_PG_NOW})
+);
+
+CREATE TABLE IF NOT EXISTS login_attempts (
+    username TEXT PRIMARY KEY,
+    failed_attempts INTEGER NOT NULL DEFAULT 0,
+    locked_until INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT ({_PG_NOW})
+);
+
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+    token_hash TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    expires_at INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT ({_PG_NOW})
+);
+
+CREATE TABLE IF NOT EXISTS rated_items (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    title TEXT NOT NULL,
+    rating REAL NOT NULL,
+    review TEXT NOT NULL DEFAULT '',
+    watched_date TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT ({_PG_NOW})
+);
+
+CREATE TABLE IF NOT EXISTS recommendation_sessions (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    mood TEXT NOT NULL DEFAULT '',
+    taste_summary TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT ({_PG_NOW})
+);
+
+CREATE TABLE IF NOT EXISTS recommendations_served (
+    id SERIAL PRIMARY KEY,
+    session_id INTEGER REFERENCES recommendation_sessions(id),
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    tmdb_id INTEGER,
+    title TEXT NOT NULL,
+    year INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    why TEXT NOT NULL,
+    match_score INTEGER NOT NULL,
+    tags TEXT NOT NULL,
+    mood TEXT NOT NULL DEFAULT '',
+    poster_path TEXT,
+    backdrop_path TEXT,
+    overview TEXT NOT NULL DEFAULT '',
+    vote_average REAL,
+    created_at TEXT NOT NULL DEFAULT ({_PG_NOW})
+);
+
+CREATE TABLE IF NOT EXISTS feedback (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    recommendation_id INTEGER NOT NULL REFERENCES recommendations_served(id),
+    status TEXT NOT NULL CHECK (status IN ('interested', 'not_interested', 'seen')),
+    created_at TEXT NOT NULL DEFAULT ({_PG_NOW})
+);
+
+CREATE TABLE IF NOT EXISTS taste_profiles (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id),
+    profile_json TEXT NOT NULL,
+    computed_at TEXT NOT NULL DEFAULT ({_PG_NOW})
+);
+"""
+
 
 def _db_path() -> str:
     return os.environ.get("PELIPICK_DB_PATH", str(DEFAULT_DB_PATH))
 
 
-def _has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
+def _database_url() -> str | None:
+    return os.environ.get("DATABASE_URL") or None
+
+
+def _is_postgres() -> bool:
+    return _database_url() is not None
+
+
+def qmark_to_pyformat(sql: str) -> str:
+    """Translate sqlite3's '?' placeholders to psycopg2's '%s'.
+
+    Safe here because none of this module's queries contain a literal '?'
+    inside a string — every '?' is a parameter placeholder.
+    """
+    return sql.replace("?", "%s")
+
+
+class _PostgresConnWrapper:
+    """Makes a psycopg2 connection quack like sqlite3.Connection for this
+    module's call sites: conn.execute(...).fetchone()/.fetchall(), and
+    conn.executemany(...). Reuses one cursor since no call site here nests
+    or interleaves cursors within the same `with get_connection()` block."""
+
+    def __init__(self, pg_conn):
+        self._conn = pg_conn
+        self._cursor = pg_conn.cursor()
+
+    def execute(self, sql, params=()):
+        self._cursor.execute(qmark_to_pyformat(sql), params)
+        return self._cursor
+
+    def executemany(self, sql, seq_of_params):
+        self._cursor.executemany(qmark_to_pyformat(sql), seq_of_params)
+        return self._cursor
+
+    def executescript(self, sql):
+        self._cursor.execute(sql)
+
+    def commit(self):
+        self._conn.commit()
+
+    def close(self):
+        self._cursor.close()
+        self._conn.close()
+
+
+def _has_column(conn, table: str, column: str) -> bool:
+    if _is_postgres():
+        row = conn.execute(
+            "SELECT 1 FROM information_schema.columns WHERE table_name = ? AND column_name = ?",
+            (table, column),
+        ).fetchone()
+        return row is not None
     columns = conn.execute(f"PRAGMA table_info({table})").fetchall()
     return any(row["name"] == column for row in columns)
 
 
-def _run_migrations(conn: sqlite3.Connection) -> None:
+def _run_migrations(conn) -> None:
     if not _has_column(conn, "recommendations_served", "session_id"):
         conn.execute(
             "ALTER TABLE recommendations_served ADD COLUMN session_id INTEGER REFERENCES recommendation_sessions(id)"
@@ -108,12 +246,30 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE rated_items ADD COLUMN watched_date TEXT NOT NULL DEFAULT ''")
 
 
+def _last_insert_id(conn, cursor):
+    """cursor.lastrowid works for sqlite3; psycopg2 has no equivalent, so
+    Postgres INSERTs that need the new id append RETURNING id and this reads
+    it back from the same cursor instead."""
+    if _is_postgres():
+        return cursor.fetchone()["id"]
+    return cursor.lastrowid
+
+
 @contextmanager
 def get_connection():
-    conn = sqlite3.connect(_db_path())
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    conn.executescript(SCHEMA)
+    database_url = _database_url()
+    if database_url:
+        import psycopg2
+        from psycopg2.extras import RealDictCursor
+
+        pg_conn = psycopg2.connect(database_url, cursor_factory=RealDictCursor)
+        conn = _PostgresConnWrapper(pg_conn)
+        conn.executescript(SCHEMA_POSTGRES)
+    else:
+        conn = sqlite3.connect(_db_path())
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.executescript(SCHEMA_SQLITE)
     _run_migrations(conn)
     try:
         yield conn
@@ -125,10 +281,11 @@ def get_connection():
 def create_user(username: str, password_hash: str, password_salt: str) -> int:
     with get_connection() as conn:
         cursor = conn.execute(
-            "INSERT INTO users (username, password_hash, password_salt) VALUES (?, ?, ?)",
+            "INSERT INTO users (username, password_hash, password_salt) VALUES (?, ?, ?)"
+            + (" RETURNING id" if _is_postgres() else ""),
             (username, password_hash, password_salt),
         )
-        return cursor.lastrowid
+        return _last_insert_id(conn, cursor)
 
 
 def get_user_by_username(username: str) -> sqlite3.Row | None:
@@ -269,10 +426,11 @@ def create_recommendation_session(user_id: int, mood: str, taste_summary: str) -
             """
             INSERT INTO recommendation_sessions (user_id, mood, taste_summary)
             VALUES (?, ?, ?)
-            """,
+            """
+            + (" RETURNING id" if _is_postgres() else ""),
             (user_id, mood, taste_summary),
         )
-        return cursor.lastrowid
+        return _last_insert_id(conn, cursor)
 
 
 def save_recommendations(session_id: int, user_id: int, mood: str, items: list[dict]) -> list[int]:
@@ -285,7 +443,8 @@ def save_recommendations(session_id: int, user_id: int, mood: str, items: list[d
                     (session_id, user_id, tmdb_id, title, year, kind, why, match_score, tags, mood,
                      poster_path, backdrop_path, overview, vote_average)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
+                """
+                + (" RETURNING id" if _is_postgres() else ""),
                 (
                     session_id,
                     user_id,
@@ -303,7 +462,7 @@ def save_recommendations(session_id: int, user_id: int, mood: str, items: list[d
                     item.get("vote_average"),
                 ),
             )
-            ids.append(cursor.lastrowid)
+            ids.append(_last_insert_id(conn, cursor))
     return ids
 
 

@@ -87,13 +87,15 @@ Implicancia: el foco es el **motor** (Fase 1), pero como portfolio también pesa
 
 ## 6. Fase 2 — Deploy (porque también es portfolio)
 
-Backend → **Render**, frontend → **Vercel** (stack estándar de Matías). **Después de Fase 1**, para que lo mostrable ya sea bueno.
+Backend → **Render**, frontend → **Vercel** (stack estándar de Matías). Deployeado 2026-07-16: [pelipick.vercel.app](https://pelipick.vercel.app/) + [pelipick-backend.onrender.com](https://pelipick-backend.onrender.com).
 
-**Decisión técnica a cerrar acá (§9):** el plan free/starter de Render también tiene **filesystem efímero** → el SQLite se borra en cada deploy. Opciones:
-- **Disco persistente de Render** (plan pago) — cambio mínimo, mantiene SQLite.
-- **Migrar a Postgres** — más "pro" para portfolio, más laburo (hoy es `sqlite3` stdlib sin ORM; habría que abstraer `db.py`).
+**CORS cerrado (2026-07-16):** `allow_origins=["*"]` reemplazado por lista explícita (`PELIPICK_ALLOWED_ORIGINS` en `render.yaml`, default incluye el dominio de Vercel + localhost de dev). Ver `backend/app/main.py`.
 
-Otros pendientes de deploy: env vars (`TMDB_API_KEY`, `GEMINI_API_KEY`, `PELIPICK_DEBUG`), CORS (hoy `allow_origins=["*"]`, endurecer al dominio de Vercel), y el envío real de mail para reset de password (hoy el token no llega al usuario sin `PELIPICK_DEBUG=1`).
+**Persistencia cerrada (2026-07-16):** el plan free de Render tiene **filesystem efímero** (confirmado en docs de Render) y los discos persistentes no existen ahí (hace falta plan Starter $7/mes). Supabase free se pausa a la semana de inactividad. Matías no quería pagar nada recurrente, así que se eligió **Neon** (Postgres serverless, plan free permanente, sin tarjeta, sin expiración por tiempo — solo el compute hace scale-to-zero a los 5 min de inactividad, sin borrar datos).
+
+`backend/app/db.py` ahora soporta los dos backends vía la env var `DATABASE_URL`: sin setear, sigue usando SQLite exactamente como antes (dev local y los 150 tests, sin cambios); seteada, usa Postgres. Detalle: dos DDL (`SCHEMA_SQLITE`/`SCHEMA_POSTGRES`), un wrapper chico (`_PostgresConnWrapper`) que traduce `?`→`%s` y expone `execute`/`executemany`/`commit`/`close` para que los ~25 helpers de abajo no se enteren de la diferencia, y `_last_insert_id` para los 3 INSERTs que necesitaban `cursor.lastrowid` (Postgres no lo tiene — usan `RETURNING id`). Nueva dependencia: `psycopg2-binary`. `render.yaml` suma `DATABASE_URL` (`sync: false`, se carga a mano en el dashboard de Render con el connection string de Neon).
+
+Pendiente: el envío real de mail para reset de password (hoy el token no llega al usuario sin `PELIPICK_DEBUG=1`).
 
 ---
 

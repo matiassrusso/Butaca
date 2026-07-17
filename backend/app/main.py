@@ -40,11 +40,23 @@ TASTE_TAG_LOOKUP_CAP = 30
 def _debug_mode() -> bool:
     return os.environ.get("PELIPICK_DEBUG", "").strip().lower() in {"1", "true", "yes"}
 
+
+_DEFAULT_ALLOWED_ORIGINS = [
+    "https://pelipick.vercel.app",
+    "http://localhost:4173",
+    "http://127.0.0.1:4173",
+]
+_ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get("PELIPICK_ALLOWED_ORIGINS", "").split(",")
+    if origin.strip()
+] or _DEFAULT_ALLOWED_ORIGINS
+
 app = FastAPI(title="PeliPick API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
