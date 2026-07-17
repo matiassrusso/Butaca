@@ -68,7 +68,7 @@ Este documento base **no se toca por proyecto** — si algo acá deja de ser cie
 
 ## Contexto del proyecto
 
-**PeliPick** — motor de recomendaciones de pelis/series basado en el gusto real de una persona (no en promedios genéricos). Stack: FastAPI + SQLite (backend), React + Vite + Tailwind (frontend, tema "cinematic"). Repo: [github.com/matiassrusso/PeliPick](https://github.com/matiassrusso/PeliPick). Todavía sin deploy — corre local (backend puerto 8001, frontend 4173).
+**PeliPick** — motor de recomendaciones de pelis/series basado en el gusto real de una persona (no en promedios genéricos). Stack: FastAPI + SQLite (backend), React + Vite + Tailwind (frontend, tema "cinematic"). Repo: [github.com/matiassrusso/PeliPick](https://github.com/matiassrusso/PeliPick). Deploy: frontend [pelipick.vercel.app](https://pelipick.vercel.app/) (Vercel), backend [pelipick-backend.onrender.com](https://pelipick-backend.onrender.com) (Render, free tier — cold start en la primera request). Local para desarrollo: backend puerto 8001, frontend 4173.
 
 **Constraints técnicos:**
 - Requiere `TMDB_API_KEY` y `GEMINI_API_KEY` (free tier) en `backend/.env`

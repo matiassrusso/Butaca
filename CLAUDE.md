@@ -16,7 +16,7 @@ If a session is drifting without moving hacia calidad de recomendación o clarid
 2. Implementación en `backend` (FastAPI + SQLite) y/o `frontend` (React + Vite + Tailwind)
 3. Si hay varios agentes en paralelo: coordinación por `TASKS.md` (worktrees separados, marcar In Progress → Done, nunca mergear a `main` solo)
 4. Tests de backend en verde antes de cerrar (128 tests a la fecha)
-5. Todavía sin deploy — se corre y valida local
+5. Deployeado: frontend [pelipick.vercel.app](https://pelipick.vercel.app/) (Vercel), backend [pelipick-backend.onrender.com](https://pelipick-backend.onrender.com) (Render, free tier — cold start en la primera request)
 
 ## Key People
 
@@ -43,7 +43,7 @@ Solo yo (Matías), con posible coordinación multi-agente (Claude, Codex) docume
 
 ## Current Status
 
-> **Last updated:** 2026-07-15
-> **Status:** Activo, MVP funcional local. 128 tests de backend. Import por username de Letterboxd (scraping del diario público vía `curl_cffi`, porque Cloudflare bloquea el stdlib `urllib`/`requests` por fingerprint TLS) commiteado y pusheado. Recién arreglados varios bugs de calidad de recomendación reportados en vivo: un bonus ciego por rating≥4.5 que inflaba "humor/tono liviano" en casi todas las razones sin importar el contenido real, ausencia total de señal de gusto para el import por username, el discover de TMDb ordenado por `popularity.desc` (sesgaba a estrenos), y — la causa de fondo por la que el agente Gemini nunca corría — IPv6 roto en esta red hacia el endpoint de Google, timeout de 15s insuficiente para el modo "thinking" de `gemini-flash-latest` (~19-20s reales), y cupo diario agotado por modelo (ahora con cadena de fallback `gemini-flash-latest` → `gemini-2.5-flash` → `gemini-3-flash` → `gemini-3.1-flash-lite`). Sin commitear todavía.
+> **Last updated:** 2026-07-16
+> **Status:** Activo, MVP deployeado — frontend [pelipick.vercel.app](https://pelipick.vercel.app/), backend [pelipick-backend.onrender.com](https://pelipick-backend.onrender.com). 128 tests de backend. Import por username de Letterboxd (scraping del diario público vía `curl_cffi`, porque Cloudflare bloquea el stdlib `urllib`/`requests` por fingerprint TLS) commiteado y pusheado. Recién arreglados varios bugs de calidad de recomendación reportados en vivo: un bonus ciego por rating≥4.5 que inflaba "humor/tono liviano" en casi todas las razones sin importar el contenido real, ausencia total de señal de gusto para el import por username, el discover de TMDb ordenado por `popularity.desc` (sesgaba a estrenos), y — la causa de fondo por la que el agente Gemini nunca corría — IPv6 roto en esta red hacia el endpoint de Google, timeout de 15s insuficiente para el modo "thinking" de `gemini-flash-latest` (~19-20s reales), y cupo diario agotado por modelo (ahora con cadena de fallback `gemini-flash-latest` → `gemini-2.5-flash` → `gemini-3-flash` → `gemini-3.1-flash-lite`). Sin commitear todavía.
 
 Detalle completo en `docs/mvp-status.md`. Pendiente: reportar filas descartadas del CSV base, envío real de mail para recuperación de contraseña, observabilidad mínima.
