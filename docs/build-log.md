@@ -62,14 +62,18 @@ producción y se encontraron dos cuellos de botella reales, no percepción:
 1. **Cada llamada a `db.get_connection()` recreaba el schema entero y
    corría las migraciones**, además de abrir una conexión nueva por
    request sin pool — y cada round trip cruza la región de Render a la
-   de Neon (São Paulo), ~400-500ms por viaje. Un login hacía 2-3 de estas
-   conexiones. Medido con curl contra producción: **login pasó de ~8s a
-   ~0.6s** después del fix. Cambio en `db.py`: `ThreadedConnectionPool`
-   de `psycopg2` (ya era una dependencia, sin sumar nada nuevo) creado una
-   sola vez, y el schema/migraciones ahora corren una única vez por
-   proceso (guardado por target — db path para SQLite, URL para
-   Postgres — no un bool global, para no romper el aislamiento de tests
-   que apuntan cada uno a su propio archivo temporal).
+   de Neon (São Paulo). Un login hacía 2-3 de estas conexiones. Medido con
+   curl contra producción: cada `get_connection()` bajó de ~2.9s a ~0.85s
+   (ya no repite schema/migraciones, solo paga el round trip real de la
+   query), y **login completo pasó de ~8s a ~2.85s** — sigue
+   dominado por esas 2-3 queries secuenciales cruzando región, que el pool
+   no elimina, solo el trabajo redundante que se hacía antes de cada una.
+   Cambio en `db.py`: `ThreadedConnectionPool` de `psycopg2` (ya era una
+   dependencia, sin sumar nada nuevo) creado una sola vez, y el schema/
+   migraciones ahora corren una única vez por proceso (guardado por
+   target — db path para SQLite, URL para Postgres — no un bool global,
+   para no romper el aislamiento de tests que apuntan cada uno a su propio
+   archivo temporal).
 2. **`build_taste_profile` y `_enrich_loved_ratings_with_genre_tags`
    hacían hasta ~200 llamadas secuenciales a TMDb** (una película a la
    vez, cada una ~0.9s desde acá). Paralelizado con
