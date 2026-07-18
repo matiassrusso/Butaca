@@ -48,7 +48,7 @@ def test_parse_letterboxd_zip_prefers_reviews_csv_over_ratings_csv() -> None:
     )
     data = _build_zip({"ratings.csv": RATINGS_CSV, "reviews.csv": reviews_csv})
 
-    ratings, _ = letterboxd_zip.parse_letterboxd_zip(data)
+    ratings, _, _ = letterboxd_zip.parse_letterboxd_zip(data)
 
     assert len(ratings) == 1
     assert ratings[0].review == "psychological and dark"
@@ -61,7 +61,7 @@ def test_parse_letterboxd_zip_boosts_rewatches() -> None:
     )
     data = _build_zip({"ratings.csv": RATINGS_CSV, "diary.csv": diary_csv})
 
-    ratings, _ = letterboxd_zip.parse_letterboxd_zip(data)
+    ratings, _, _ = letterboxd_zip.parse_letterboxd_zip(data)
 
     goodfellas = next(r for r in ratings if r.title == "GoodFellas")
     assert goodfellas.rating == 5.0  # already 5, clamped, not 5.5
@@ -78,7 +78,7 @@ def test_parse_letterboxd_zip_reads_tags_from_diary_and_reviews() -> None:
         "2024-09-28,GoodFellas,1990,https://boxd.it/29FA,5,No,\" psychological , dark \",2024-09-28\n"
     )
 
-    ratings, _ = letterboxd_zip.parse_letterboxd_zip(
+    ratings, _, _ = letterboxd_zip.parse_letterboxd_zip(
         _build_zip({"reviews.csv": reviews_csv, "diary.csv": diary_csv})
     )
 
@@ -92,8 +92,8 @@ def test_parse_letterboxd_zip_defaults_to_empty_tags_without_column() -> None:
         "Date,Name,Year,Letterboxd URI,Rating,Review,Tags\n"
         "2024-09-28,GoodFellas,1990,https://boxd.it/29FA,5,great,\n"
     )
-    ratings, _ = letterboxd_zip.parse_letterboxd_zip(_build_zip({"ratings.csv": RATINGS_CSV}))
-    reviews, _ = letterboxd_zip.parse_letterboxd_zip(
+    ratings, _, _ = letterboxd_zip.parse_letterboxd_zip(_build_zip({"ratings.csv": RATINGS_CSV}))
+    reviews, _, _ = letterboxd_zip.parse_letterboxd_zip(
         _build_zip({"reviews.csv": empty_tags_reviews})
     )
 
@@ -109,7 +109,7 @@ def test_parse_letterboxd_zip_adds_liked_titles_not_already_rated() -> None:
     )
     data = _build_zip({"ratings.csv": RATINGS_CSV, "likes/films.csv": likes_csv})
 
-    ratings, _ = letterboxd_zip.parse_letterboxd_zip(data)
+    ratings, _, _ = letterboxd_zip.parse_letterboxd_zip(data)
 
     titles = {r.title: r.rating for r in ratings}
     assert titles["Whiplash"] == 4.5
@@ -126,7 +126,7 @@ def test_parse_letterboxd_zip_resolves_favorite_films_via_watched_csv() -> None:
         {"ratings.csv": RATINGS_CSV, "watched.csv": watched_csv, "profile.csv": profile_csv}
     )
 
-    ratings, _ = letterboxd_zip.parse_letterboxd_zip(data)
+    ratings, _, _ = letterboxd_zip.parse_letterboxd_zip(data)
 
     favorite = next(r for r in ratings if r.title == "12 Angry Men")
     assert favorite.rating == 5.0
@@ -140,6 +140,21 @@ def test_parse_letterboxd_zip_returns_watched_titles_as_extra_seen() -> None:
     )
     data = _build_zip({"ratings.csv": RATINGS_CSV, "watched.csv": watched_csv})
 
-    _, extra_seen = letterboxd_zip.parse_letterboxd_zip(data)
+    _, extra_seen, _ = letterboxd_zip.parse_letterboxd_zip(data)
 
     assert "unrated movie" in extra_seen
+
+
+def test_parse_letterboxd_zip_reports_discarded_rows_from_base_csv() -> None:
+    ratings_with_gaps = (
+        "Date,Name,Year,Letterboxd URI,Rating\n"
+        "2024-09-28,GoodFellas,1990,https://boxd.it/29FA,5\n"
+        "2024-09-28,,1976,https://boxd.it/2b8y,4\n"  # no title
+        "2024-09-28,No Rating,1999,https://boxd.it/xyz1,\n"  # no rating
+    )
+    data = _build_zip({"ratings.csv": ratings_with_gaps})
+
+    ratings, _, discarded = letterboxd_zip.parse_letterboxd_zip(data)
+
+    assert len(ratings) == 1
+    assert discarded == 2

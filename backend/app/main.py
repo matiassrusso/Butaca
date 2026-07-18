@@ -27,6 +27,12 @@ MAX_ZIP_SIZE = 20 * 1024 * 1024  # 20MB — real Letterboxd exports run in the t
 VALID_MODES = {"profile", "recent", "genres"}
 VALID_KIND_FILTERS = {"movie", "series", "both"}
 RECENT_WINDOW = 10  # how many of the user's most-recently-watched titles count as "lo último que vi"
+
+# ponytail: uvicorn only wires handlers for its own "uvicorn.*" loggers, not
+# root — without this, logger.warning() calls below fall back to Python's
+# bare "handler of last resort" (WARNING+ only, no timestamp/level/module),
+# so nothing below WARNING ever reaches Render's log viewer at all.
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 # ponytail: recommend() only reads taste signal from review text and
 # explicit Letterboxd Tags — titles with neither (any username-scraped
@@ -222,6 +228,7 @@ def _finish_recommend(
     kind_filter: str,
     genres: str,
     user: sqlite3.Row,
+    discarded_rows: int = 0,
 ) -> RecommendResponse:
     """Shared tail of both /recommend/zip and /recommend/letterboxd: once a
     source has produced (ratings, extra_seen), the rest of the flow —
@@ -319,6 +326,17 @@ def _finish_recommend(
     for item, new_id in zip(response.recommendations, inserted_ids):
         item.id = new_id
 
+    response.discarded_rows = discarded_rows
+    logger.info(
+        "recommend done user=%s mode=%s kind=%s personalized=%s llm=%s picks=%d discarded_rows=%d",
+        user["id"],
+        mode,
+        kind_filter,
+        bool(profile),
+        llm_client.is_configured(),
+        len(response.recommendations),
+        discarded_rows,
+    )
     return response
 
 
@@ -341,11 +359,13 @@ async def recommend_titles_from_zip(
         raise HTTPException(status_code=400, detail="Ese zip es demasiado grande.")
 
     try:
-        ratings, extra_seen = letterboxd_zip.parse_letterboxd_zip(data)
+        ratings, extra_seen, discarded_rows = letterboxd_zip.parse_letterboxd_zip(data)
     except letterboxd_zip.ZipParseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    return _finish_recommend(ratings, extra_seen, mood, mode, kind_filter, genres, user)
+    return _finish_recommend(
+        ratings, extra_seen, mood, mode, kind_filter, genres, user, discarded_rows
+    )
 
 
 @app.post("/recommend/letterboxd", response_model=RecommendResponse)

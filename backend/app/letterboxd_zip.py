@@ -37,7 +37,10 @@ def _parse_tags(row: dict[str, str]) -> list[str]:
     return [tag.strip() for tag in row.get("Tags", "").split(",") if tag.strip()]
 
 
-def parse_letterboxd_zip(data: bytes) -> tuple[list[RatedItem], set[str]]:
+def parse_letterboxd_zip(data: bytes) -> tuple[list[RatedItem], set[str], int]:
+    """Returns (ratings, extra_seen, discarded_rows) — discarded_rows counts
+    rows from the base ratings/reviews CSV that had no usable title+rating,
+    so the caller can tell the user their import wasn't 100% complete."""
     try:
         zf = zipfile.ZipFile(io.BytesIO(data))
     except zipfile.BadZipFile as exc:
@@ -54,8 +57,9 @@ def parse_letterboxd_zip(data: bytes) -> tuple[list[RatedItem], set[str]]:
         )
 
     try:
+        parsed_ratings, discarded_count = parse_ratings_csv(base_rows)
         ratings_by_title: dict[str, RatedItem] = {
-            _normalize(item.title): item for item in parse_ratings_csv(base_rows)
+            _normalize(item.title): item for item in parsed_ratings
         }
 
         for row in _read_csv(zf, "reviews.csv"):
@@ -117,4 +121,4 @@ def parse_letterboxd_zip(data: bytes) -> tuple[list[RatedItem], set[str]]:
     except csv.Error as exc:
         raise ZipParseError("Uno de los CSV del zip vino mal formado.") from exc
 
-    return list(ratings_by_title.values()), extra_seen
+    return list(ratings_by_title.values()), extra_seen, discarded_count

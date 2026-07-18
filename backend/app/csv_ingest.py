@@ -35,17 +35,19 @@ def _parse_rating(value: str) -> float | None:
     return parsed
 
 
-def parse_ratings_csv(content: str) -> list[RatedItem]:
+def parse_ratings_csv(content: str) -> tuple[list[RatedItem], int]:
     stream = io.StringIO(content.lstrip("﻿").strip())
     reader = csv.DictReader(stream)
     if reader.fieldnames:
         reader.fieldnames = [name.strip() if name else name for name in reader.fieldnames]
     ratings: list[RatedItem] = []
+    discarded = 0
 
     for row in reader:
         title = _pick(row, TITLE_FIELDS)
         rating = _parse_rating(_pick(row, RATING_FIELDS))
         if not title or rating is None:
+            discarded += 1
             continue
 
         ratings.append(
@@ -57,4 +59,4 @@ def parse_ratings_csv(content: str) -> list[RatedItem]:
             )
         )
 
-    return ratings
+    return ratings, discarded

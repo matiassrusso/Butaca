@@ -39,6 +39,7 @@ type MovieDetails = {
 type RecommendResponse = {
   taste_summary: string;
   recommendations: Recommendation[];
+  discarded_rows: number;
 };
 
 type FeedbackStatus = "interested" | "not_interested" | "seen";
@@ -421,6 +422,13 @@ export default function Recommend() {
       setResult(data);
       setFeedbackState({});
       toast.success("Tus picks están listos.");
+      if (data.discarded_rows > 0) {
+        toast.warning(
+          `${data.discarded_rows} fila${data.discarded_rows === 1 ? "" : "s"} del CSV no se pudo${
+            data.discarded_rows === 1 ? "" : "ieron"
+          } importar (sin título o sin rating válido).`
+        );
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Falló la recomendación.";
       setError(message);

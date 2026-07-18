@@ -164,7 +164,6 @@
     `watched.csv`, `profile.csv`
   - usa `Tags` propios del usuario cuando coinciden directamente con el
     vocabulario interno de recomendación
-  - no reporta filas descartadas del CSV base
 
 - recomendación
   - ya scorea contra películas y series reales de TMDb, no solo el mock
@@ -181,10 +180,23 @@
   - la página de historial ya está, pero es una primera pasada: revisita
     picks y resumen; no recupera el zip original ni analytics más finos
 
-## Falta para un MVP más serio
+- `parse_ratings_csv` (`backend/app/csv_ingest.py`) ahora cuenta las filas del
+  CSV base sin título o sin rating parseable y ese conteo viaja hasta el
+  usuario: `parse_letterboxd_zip` lo devuelve como tercer valor de la tupla,
+  `RecommendResponse.discarded_rows` lo expone en `/recommend/zip`, y el
+  frontend (`Recommend.tsx`) muestra un toast de advertencia cuando es > 0.
+  El import por username no lo necesita (no viene de un CSV)
 
-- reportar filas descartadas del CSV base
-- observabilidad mínima
+- observabilidad mínima: antes los `logger.warning` de fallback (TMDb, Gemini,
+  taste profile) dependían del "handler de último recurso" de Python, que solo
+  muestra WARNING+ sin timestamp/módulo — nada por debajo de WARNING llegaba a
+  los logs de Render. `logging.basicConfig` en `backend/app/main.py` los deja
+  estructurados (`timestamp LEVEL module: mensaje`) y le suma un log INFO por
+  cada `/recommend/*` completado (usuario, mode, kind_filter, si fue
+  personalizado, si pasó por Gemini, cantidad de picks, filas descartadas) —
+  visibilidad de uso real, no solo de errores
+
+## Falta para un MVP más serio
 - envío real de mail para recuperación de contraseña (hoy el token nunca
   sale de la respuesta salvo con `PELIPICK_DEBUG=1`, así que el flujo
   funciona pero no hay forma real de que el usuario lo reciba)

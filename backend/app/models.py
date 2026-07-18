@@ -34,6 +34,7 @@ class Recommendation(BaseModel):
 class RecommendResponse(BaseModel):
     taste_summary: str
     recommendations: list[Recommendation]
+    discarded_rows: int = 0
 
 
 class RecommendationSession(BaseModel):
