@@ -317,8 +317,8 @@ def test_recommend_zip_carries_poster_and_overview_fields(monkeypatch) -> None:
     assert item["vote_average"] == 7.4
 
 
-def test_recommend_zip_uses_gemini_refinement_when_configured(monkeypatch) -> None:
-    monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
+def test_recommend_zip_uses_llm_refinement_when_configured(monkeypatch) -> None:
+    monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
 
     def fake_refine(ratings, mood, heuristic):
         picked = heuristic.recommendations[0].model_copy(update={"why": "elegido por el agente"})
@@ -328,7 +328,7 @@ def test_recommend_zip_uses_gemini_refinement_when_configured(monkeypatch) -> No
 
     monkeypatch.setattr("backend.app.main.llm_client.refine_recommendations", fake_refine)
 
-    headers = _auth_headers("geminiok")
+    headers = _auth_headers("llmok")
     response = _post_zip(headers)
 
     assert response.status_code == 200
@@ -339,15 +339,15 @@ def test_recommend_zip_uses_gemini_refinement_when_configured(monkeypatch) -> No
     assert body["recommendations"][0]["id"] is not None
 
 
-def test_recommend_zip_falls_back_to_heuristic_when_gemini_fails(monkeypatch) -> None:
-    monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
+def test_recommend_zip_falls_back_to_heuristic_when_llm_fails(monkeypatch) -> None:
+    monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
 
     def raise_llm_error(ratings, mood, heuristic):
         raise LlmError("boom")
 
     monkeypatch.setattr("backend.app.main.llm_client.refine_recommendations", raise_llm_error)
 
-    headers = _auth_headers("geminifallback")
+    headers = _auth_headers("llmfallback")
     response = _post_zip(headers)
 
     assert response.status_code == 200

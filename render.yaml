@@ -9,7 +9,9 @@ services:
     envVars:
       - key: TMDB_API_KEY
         sync: false
-      - key: GEMINI_API_KEY
+      - key: NVIDIA_API_KEY
+        sync: false
+      - key: RESEND_API_KEY
         sync: false
       - key: PELIPICK_ALLOWED_ORIGINS
         value: https://pelipick.vercel.app

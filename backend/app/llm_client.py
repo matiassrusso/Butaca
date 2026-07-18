@@ -1,10 +1,8 @@
 import json
 import os
-import socket
 import time
 import urllib.request
 from collections import Counter, OrderedDict
-from contextlib import contextmanager
 from pathlib import Path
 from urllib.error import URLError
 
@@ -12,49 +10,24 @@ from .models import RatedItem, RecommendResponse
 from .recommender import TAG_PHRASES, capitalize_sentence, positive_tags_from_text
 
 ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
-GENERATE_URL_TEMPLATE = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-# best model first, each with its own free-tier daily quota bucket — the
-# top pick (gemini-flash-latest) is the newest/best but capped at 20
-# requests/day and easy to exhaust while testing; when it (or the next one)
-# is out of quota for the day, _call_gemini falls through to the next model
-# instead of giving up and dropping straight to the heuristic why.
-GEMINI_MODELS = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-3-flash", "gemini-3.1-flash-lite"]
-# gemini-flash-latest reasons internally before answering (visible as
-# thoughtSignature in the response) — observed ~19s time-to-first-byte even
-# for a trivial prompt, so a short timeout was silently discarding every
-# real call and falling back to the heuristic every time.
-REQUEST_TIMEOUT = 30
+CHAT_COMPLETIONS_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
+# NVIDIA NIM model catalog (build.nvidia.com). Super over Nano/Ultra: more
+# reasoning capacity than Nano (12B vs 3B active params, still MoE so not as
+# slow as its 120B total suggests) without Ultra's frontier-scale latency.
+# chat_template_kwargs.enable_thinking=false below (a real API parameter for
+# this model family, not a system-prompt trick) skips its extended
+# chain-of-thought entirely — that hidden reasoning is what made Gemini's
+# "thinking" variant take ~20s per call before.
+MODEL = "nvidia/nemotron-3-super-120b-a12b"
+REQUEST_TIMEOUT = 20
 
-# Same OrderedDict TTL+LRU idiom as tmdb_client's _DISCOVER_CACHE. Longer TTL
-# than that cache's 5 minutes: a refine result isn't time-sensitive the way
-# TMDb discover pages are (those can go stale as TMDb's charts shift), and
-# free-tier Gemini quota is the scarcer resource here, so it's worth holding
-# a hit longer. Keyed off mood + candidate set, not the ratings history, so a
-# regenerate with the same mood right after an import (which usually changes
-# the heuristic's candidates) still misses and gets a fresh "why".
+# Same OrderedDict TTL+LRU idiom as tmdb_client's _DISCOVER_CACHE — avoids
+# repeating the call (and burning free-tier quota) when picks are
+# regenerated with the same mood/candidates.
 REFINE_CACHE_TTL_SECONDS = 15 * 60
 REFINE_CACHE_MAX_ENTRIES = 64
 
 _REFINE_CACHE: OrderedDict[tuple[str, tuple], tuple[float, dict]] = OrderedDict()
-
-_RESPONSE_SCHEMA = {
-    "type": "OBJECT",
-    "properties": {
-        "taste_summary": {"type": "STRING"},
-        "picks": {
-            "type": "ARRAY",
-            "items": {
-                "type": "OBJECT",
-                "properties": {
-                    "title": {"type": "STRING"},
-                    "why": {"type": "STRING"},
-                },
-                "required": ["title", "why"],
-            },
-        },
-    },
-    "required": ["taste_summary", "picks"],
-}
 
 
 class LlmError(Exception):
@@ -76,7 +49,7 @@ _load_env_file()
 
 
 def is_configured() -> bool:
-    return bool(os.environ.get("GEMINI_API_KEY"))
+    return bool(os.environ.get("NVIDIA_API_KEY"))
 
 
 def _phrase_for_tags(tags: list[str]) -> str:
@@ -89,10 +62,10 @@ def _phrase_for_tags(tags: list[str]) -> str:
 
 
 def _build_taste_digest(ratings: list[RatedItem]) -> str:
-    # a raw list of "title (rating): review" lines makes Gemini infer taste
-    # patterns itself, which it does inconsistently; naming the patterns
-    # explicitly (recurring tags, standout titles) up front gives it a
-    # concrete anchor to reference instead of writing generic praise
+    # a raw list of "title (rating): review" lines makes the model infer
+    # taste patterns itself, which it does inconsistently; naming the
+    # patterns explicitly (recurring tags, standout titles) up front gives
+    # it a concrete anchor to reference instead of writing generic praise
     if not ratings:
         return "Sin historial todavía."
 
@@ -141,70 +114,48 @@ def _build_prompt(ratings: list[RatedItem], mood: str, heuristic: RecommendRespo
         "frase genérica. Para cada pick elegido, una razón personalizada de 1-2 frases que "
         "nombre un patrón concreto del perfil o del historial (un tema recurrente, un tono, o "
         "una comparación explícita con un título que ya puntuó) — nada de elogios genéricos "
-        "que podrían aplicar a cualquier usuario."
+        "que podrían aplicar a cualquier usuario.\n\n"
+        "Respondé ÚNICAMENTE con un JSON válido, sin texto ni markdown alrededor, con esta forma "
+        'exacta: {"taste_summary": "...", "picks": [{"title": "...", "why": "..."}, ...]}'
     )
 
 
-@contextmanager
-def _force_ipv4_dns():
-    # ponytail: on networks where the local IPv6 route to Google's endpoint
-    # is broken but IPv4 works (observed here — generativelanguage's AAAA
-    # records hang to the full REQUEST_TIMEOUT with no error, while the A
-    # records respond in ~1s), urlopen tries the (unreachable) IPv6 address
-    # first and never gets to IPv4 within the timeout, so every call fails
-    # silently and this feature never actually runs. Forcing AF_INET here
-    # skips straight past that. Scoped to just this call, not global.
-    original = socket.getaddrinfo
-
-    def ipv4_only(host, port, family=0, type=0, proto=0, flags=0):
-        return original(host, port, socket.AF_INET, type, proto, flags)
-
-    socket.getaddrinfo = ipv4_only
-    try:
-        yield
-    finally:
-        socket.getaddrinfo = original
+def _extract_json(content: str) -> dict:
+    # models occasionally wrap the JSON in a ```json fence despite being told
+    # not to — strip that instead of failing the parse
+    text = content.strip()
+    if text.startswith("```"):
+        text = text.strip("`")
+        text = text.removeprefix("json").strip()
+    return json.loads(text)
 
 
-def _call_one_model(model: str, body: bytes, api_key: str) -> dict:
+def _call_nvidia(prompt: str, api_key: str) -> dict:
+    body = json.dumps(
+        {
+            "model": MODEL,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.4,
+            "chat_template_kwargs": {"enable_thinking": False},
+        }
+    ).encode("utf-8")
     request = urllib.request.Request(
-        f"{GENERATE_URL_TEMPLATE.format(model=model)}?key={api_key}",
+        CHAT_COMPLETIONS_URL,
         data=body,
-        headers={"Content-Type": "application/json"},
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
         method="POST",
     )
     try:
-        with _force_ipv4_dns(), urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT) as response:
+        with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT) as response:
             payload = json.loads(response.read())
     except (URLError, TimeoutError, json.JSONDecodeError) as exc:
-        raise LlmError(f"No pude consultar Gemini ({model}): {exc}") from exc
+        raise LlmError(f"No pude consultar NVIDIA ({MODEL}): {exc}") from exc
 
     try:
-        text = payload["candidates"][0]["content"]["parts"][0]["text"]
-        return json.loads(text)
+        text = payload["choices"][0]["message"]["content"]
+        return _extract_json(text)
     except (KeyError, IndexError, json.JSONDecodeError) as exc:
-        raise LlmError(f"Respuesta de Gemini ({model}) con formato inesperado: {exc}") from exc
-
-
-def _call_gemini(prompt: str, api_key: str) -> dict:
-    body = json.dumps(
-        {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {
-                "temperature": 0.4,
-                "responseMimeType": "application/json",
-                "responseSchema": _RESPONSE_SCHEMA,
-            },
-        }
-    ).encode("utf-8")
-
-    last_error: LlmError | None = None
-    for model in GEMINI_MODELS:
-        try:
-            return _call_one_model(model, body, api_key)
-        except LlmError as exc:
-            last_error = exc
-    raise last_error
+        raise LlmError(f"Respuesta de NVIDIA ({MODEL}) con formato inesperado: {exc}") from exc
 
 
 def _now_monotonic() -> float:
@@ -243,16 +194,16 @@ def _store_cached_refine(cache_key: tuple[str, tuple], result: dict) -> None:
 def refine_recommendations(
     ratings: list[RatedItem], mood: str, heuristic: RecommendResponse
 ) -> RecommendResponse:
-    api_key = os.environ.get("GEMINI_API_KEY")
+    api_key = os.environ.get("NVIDIA_API_KEY")
     if not api_key:
-        raise LlmError("GEMINI_API_KEY no configurada.")
+        raise LlmError("NVIDIA_API_KEY no configurada.")
     if not heuristic.recommendations:
         raise LlmError("No hay candidatos para refinar.")
 
     cache_key = _refine_cache_key(mood, heuristic)
     result = _get_cached_refine(cache_key)
     if result is None:
-        result = _call_gemini(_build_prompt(ratings, mood, heuristic), api_key)
+        result = _call_nvidia(_build_prompt(ratings, mood, heuristic), api_key)
         _store_cached_refine(cache_key, result)
 
     by_title = {rec.title.strip().lower(): rec for rec in heuristic.recommendations}
@@ -265,7 +216,7 @@ def refine_recommendations(
         reordered.append(rec.model_copy(update={"why": why or rec.why}))
 
     if not reordered:
-        raise LlmError("Gemini no devolvió picks válidos de la lista de candidatos.")
+        raise LlmError("NVIDIA no devolvió picks válidos de la lista de candidatos.")
 
     taste_summary = capitalize_sentence(str(result.get("taste_summary", "")).strip()) or heuristic.taste_summary
     return RecommendResponse(taste_summary=taste_summary, recommendations=reordered[:5])

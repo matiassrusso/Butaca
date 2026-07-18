@@ -71,11 +71,11 @@ Este documento base **no se toca por proyecto** — si algo acá deja de ser cie
 **PeliPick** — motor de recomendaciones de pelis/series basado en el gusto real de una persona (no en promedios genéricos). Stack: FastAPI + SQLite local / Postgres en producción (backend), React + Vite + Tailwind (frontend, tema "cinematic"). Repo: [github.com/matiassrusso/PeliPick](https://github.com/matiassrusso/PeliPick). Deploy: frontend [pelipick.vercel.app](https://pelipick.vercel.app/) (Vercel), backend [pelipick-backend.onrender.com](https://pelipick-backend.onrender.com) (Render, free tier — cold start en la primera request). Local para desarrollo: backend puerto 8001, frontend 4173.
 
 **Constraints técnicos:**
-- Requiere `TMDB_API_KEY` y `GEMINI_API_KEY` (free tier) en `backend/.env`
+- Requiere `TMDB_API_KEY` y `NVIDIA_API_KEY` (free tier) en `backend/.env`; `RESEND_API_KEY` opcional para mail real de recuperación
 - Persistencia: `backend/app/db.py` usa SQLite si no hay `DATABASE_URL` seteada (dev local y tests, sin cambios) y Postgres si la hay — en Render apunta a un proyecto free de Neon (permanente, sin tarjeta), porque el plan free de Render tiene filesystem efímero y borra el SQLite en cada redeploy
-- Recuperación de contraseña: el token de reset nunca sale de la respuesta salvo `PELIPICK_DEBUG=1` — no hay proveedor de mail real todavía
+- Recuperación de contraseña: manda mail real vía Resend si `RESEND_API_KEY` está seteada; si no, el token solo sale de la respuesta con `PELIPICK_DEBUG=1`
 - Workflow particular: coordinación multi-agente vía `TASKS.md` (varios agentes en worktrees separados) — leer ese archivo antes de tocar código
 
-**Estado actual** (detalle completo en `docs/mvp-status.md`): activo, motor de recomendación personalizado por perfil real de usuario (Fase 1 del plan cerrada), deployeado (Fase 2), 150 tests de backend. Falta: envío real de mail para recuperación de contraseña, observabilidad mínima, identidad visual propia (Fase 3, sin arrancar).
+**Estado actual** (detalle completo en `docs/mvp-status.md`): activo, motor de recomendación personalizado por perfil real de usuario (Fase 1 del plan cerrada), deployeado (Fase 2), 158 tests de backend. Falta: identidad visual propia (Fase 3, sin arrancar), y que Matías active la cuenta de Resend para que el mail de recuperación funcione en producción.
 
 **Identidad visual:** tema "cinematic" — paleta ámbar/dorada, tipografía Instrument Serif + IBM Plex Sans, animaciones con Framer Motion. Detalle en `docs/design-directions.md`.

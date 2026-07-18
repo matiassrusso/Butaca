@@ -30,23 +30,23 @@ HEURISTIC = RecommendResponse(
 
 
 def test_refine_requires_api_key(monkeypatch) -> None:
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
 
     with pytest.raises(llm_client.LlmError):
         llm_client.refine_recommendations([], "funny", HEURISTIC)
 
 
 def test_refine_requires_candidates(monkeypatch) -> None:
-    monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
+    monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
 
     with pytest.raises(llm_client.LlmError):
         llm_client.refine_recommendations([], "funny", RecommendResponse(taste_summary="", recommendations=[]))
 
 
 def test_refine_reorders_and_overrides_why(monkeypatch) -> None:
-    monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
+    monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
 
-    def fake_call_gemini(prompt: str, api_key: str) -> dict:
+    def fake_call_nvidia(prompt: str, api_key: str) -> dict:
         return {
             "taste_summary": "resumen del agente",
             "picks": [
@@ -55,7 +55,7 @@ def test_refine_reorders_and_overrides_why(monkeypatch) -> None:
             ],
         }
 
-    monkeypatch.setattr(llm_client, "_call_gemini", fake_call_gemini)
+    monkeypatch.setattr(llm_client, "_call_nvidia", fake_call_nvidia)
 
     ratings = [RatedItem(title="Old Movie", rating=4.5, review="genial")]
     result = llm_client.refine_recommendations(ratings, "funny", HEURISTIC)
@@ -69,52 +69,34 @@ def test_refine_reorders_and_overrides_why(monkeypatch) -> None:
 
 
 def test_refine_ignores_titles_outside_the_candidate_list(monkeypatch) -> None:
-    monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
+    monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
 
-    def fake_call_gemini(prompt: str, api_key: str) -> dict:
+    def fake_call_nvidia(prompt: str, api_key: str) -> dict:
         return {"taste_summary": "x", "picks": [{"title": "Made Up Movie", "why": "no existe"}]}
 
-    monkeypatch.setattr(llm_client, "_call_gemini", fake_call_gemini)
+    monkeypatch.setattr(llm_client, "_call_nvidia", fake_call_nvidia)
 
     with pytest.raises(llm_client.LlmError):
         llm_client.refine_recommendations([], "funny", HEURISTIC)
 
 
-def test_call_gemini_wraps_network_errors(monkeypatch) -> None:
+def test_call_nvidia_wraps_network_errors(monkeypatch) -> None:
     def raise_url_error(*args, **kwargs):
         raise llm_client.URLError("boom")
 
     monkeypatch.setattr(llm_client.urllib.request, "urlopen", raise_url_error)
 
     with pytest.raises(llm_client.LlmError):
-        llm_client._call_gemini("prompt", "fake-key")
+        llm_client._call_nvidia("prompt", "fake-key")
 
 
-def test_call_gemini_falls_through_to_next_model_on_failure(monkeypatch) -> None:
-    attempted_models = []
-
-    def fake_call_one_model(model, body, api_key):
-        attempted_models.append(model)
-        if model != llm_client.GEMINI_MODELS[-1]:
-            raise llm_client.LlmError(f"{model} out of quota")
-        return {"taste_summary": "ok", "picks": []}
-
-    monkeypatch.setattr(llm_client, "_call_one_model", fake_call_one_model)
-
-    result = llm_client._call_gemini("prompt", "fake-key")
-
-    assert attempted_models == llm_client.GEMINI_MODELS
-    assert result == {"taste_summary": "ok", "picks": []}
+def test_extract_json_parses_plain_json() -> None:
+    assert llm_client._extract_json('{"a": 1}') == {"a": 1}
 
 
-def test_call_gemini_raises_last_error_when_all_models_fail(monkeypatch) -> None:
-    def fake_call_one_model(model, body, api_key):
-        raise llm_client.LlmError(f"{model} failed")
-
-    monkeypatch.setattr(llm_client, "_call_one_model", fake_call_one_model)
-
-    with pytest.raises(llm_client.LlmError, match="gemini-3.1-flash-lite failed"):
-        llm_client._call_gemini("prompt", "fake-key")
+def test_extract_json_strips_markdown_fence() -> None:
+    fenced = '```json\n{"a": 1}\n```'
+    assert llm_client._extract_json(fenced) == {"a": 1}
 
 
 def test_build_taste_digest_handles_empty_history() -> None:
@@ -149,8 +131,8 @@ def test_build_prompt_includes_digest_and_grounding_instructions() -> None:
     assert "Fake Thriller" in prompt and "Fake Comedy" in prompt
 
 
-def _fake_gemini(call_count: list[int]):
-    def fake_call_gemini(prompt: str, api_key: str) -> dict:
+def _fake_nvidia(call_count: list[int]):
+    def fake_call_nvidia(prompt: str, api_key: str) -> dict:
         call_count.append(1)
         return {
             "taste_summary": "resumen del agente",
@@ -160,26 +142,26 @@ def _fake_gemini(call_count: list[int]):
             ],
         }
 
-    return fake_call_gemini
+    return fake_call_nvidia
 
 
 def test_refine_recommendations_caches_same_mood_and_candidates(monkeypatch) -> None:
-    monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
+    monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
     calls: list[int] = []
-    monkeypatch.setattr(llm_client, "_call_gemini", _fake_gemini(calls))
+    monkeypatch.setattr(llm_client, "_call_nvidia", _fake_nvidia(calls))
 
     first = llm_client.refine_recommendations([], "funny", HEURISTIC)
     second = llm_client.refine_recommendations([], "funny", HEURISTIC)
 
-    assert len(calls) == 1  # second call served from cache, no new Gemini hit
+    assert len(calls) == 1  # second call served from cache, no new NVIDIA hit
     assert first.taste_summary == second.taste_summary
     assert [r.title for r in first.recommendations] == [r.title for r in second.recommendations]
 
 
 def test_refine_recommendations_cache_misses_on_different_mood(monkeypatch) -> None:
-    monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
+    monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
     calls: list[int] = []
-    monkeypatch.setattr(llm_client, "_call_gemini", _fake_gemini(calls))
+    monkeypatch.setattr(llm_client, "_call_nvidia", _fake_nvidia(calls))
 
     llm_client.refine_recommendations([], "funny", HEURISTIC)
     llm_client.refine_recommendations([], "romance", HEURISTIC)
@@ -188,9 +170,9 @@ def test_refine_recommendations_cache_misses_on_different_mood(monkeypatch) -> N
 
 
 def test_refine_recommendations_cache_misses_on_different_candidates(monkeypatch) -> None:
-    monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
+    monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
     calls: list[int] = []
-    monkeypatch.setattr(llm_client, "_call_gemini", _fake_gemini(calls))
+    monkeypatch.setattr(llm_client, "_call_nvidia", _fake_nvidia(calls))
 
     other_heuristic = RecommendResponse(
         taste_summary="otro resumen",
@@ -209,9 +191,9 @@ def test_refine_recommendations_cache_misses_on_different_candidates(monkeypatch
 
 
 def test_refine_recommendations_cache_expires_after_ttl(monkeypatch) -> None:
-    monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
+    monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
     calls: list[int] = []
-    monkeypatch.setattr(llm_client, "_call_gemini", _fake_gemini(calls))
+    monkeypatch.setattr(llm_client, "_call_nvidia", _fake_nvidia(calls))
 
     fake_now = [1000.0]
     monkeypatch.setattr(llm_client, "_now_monotonic", lambda: fake_now[0])

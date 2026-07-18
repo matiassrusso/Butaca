@@ -5,7 +5,7 @@ Motor de recomendaciones de pelis y series basado en el gusto real de una person
 ## Estado actual
 
 - `backend` con FastAPI: DB en SQLite, login real, catálogo de TMDb (con
-  fallback a mock), agente de IA con Gemini (refina resumen y picks, con
+  fallback a mock), agente de IA con NVIDIA NIM (refina resumen y picks, con
   fallback al heurístico), import del `.zip` completo del export de
   Letterboxd (ratings, reviews, likes, rewatches, favoritos, watched),
   feedback explícito por pick
@@ -23,7 +23,7 @@ a mano). Ver
 - [Arquitectura actual](docs/architecture.md)
 - [Import del zip de Letterboxd](docs/letterboxd-zip-format.md)
 - [Setup de TMDb](docs/tmdb-setup.md)
-- [Setup de Gemini](docs/gemini-setup.md)
+- [Setup de NVIDIA NIM](docs/nvidia-setup.md)
 - [API actual](docs/api.md)
 - [Estado del MVP](docs/mvp-status.md)
 - [Build log](docs/build-log.md)
@@ -62,7 +62,7 @@ Nota:
 
 - uso `8001` por default porque en esta máquina `8000` ya estaba ocupado por otro backend
 - para el catálogo real necesitás `TMDB_API_KEY` en `backend/.env` — ver [tmdb-setup.md](docs/tmdb-setup.md)
-- para el agente de IA necesitás `GEMINI_API_KEY` (free tier) en `backend/.env` — ver [gemini-setup.md](docs/gemini-setup.md)
+- para el agente de IA necesitás `NVIDIA_API_KEY` (free tier) en `backend/.env` — ver [nvidia-setup.md](docs/nvidia-setup.md)
 - el zip tiene que traer `ratings.csv` o `reviews.csv` adentro; el resto de
   los archivos son opcionales — ver [letterboxd-zip-format.md](docs/letterboxd-zip-format.md)
 

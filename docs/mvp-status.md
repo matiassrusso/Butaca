@@ -36,7 +36,7 @@
   `llm_client.py`/`tmdb_client.py`, sin dependencia nueva) manda el mail vía
   la API REST de Resend si `RESEND_API_KEY` está seteada; si no, se
   comporta exactamente como antes (degrade gracioso, mismo patrón que
-  TMDb/Gemini). Frontend suma el campo email al registro, un flujo "¿Olvidaste
+  TMDb/LLM). Frontend suma el campo email al registro, un flujo "¿Olvidaste
   tu contraseña?" en `Login.tsx`, y la página `ResetPassword.tsx` que
   consume el link del mail. Verificado end-to-end en local con
   `PELIPICK_DEBUG=1` (sin Resend real configurado todavía): registro con
@@ -187,9 +187,9 @@
   - ya scorea contra películas y series reales de TMDb, no solo el mock
   - el mapeo género/overview → tags es heurístico y coarse, sin nuance real
     de tono/ritmo
-  - el agente de Gemini reordena y reescribe texto sobre esos candidatos,
-    pero no rescorea ni trae candidatos propios — sigue acotado a lo que
-    ya filtró el heurístico
+  - el agente de IA (NVIDIA NIM) reordena y reescribe texto sobre esos
+    candidatos, pero no rescorea ni trae candidatos propios — sigue acotado
+    a lo que ya filtró el heurístico
 
 - UX web
   - diseño generado con otra IA (plataforma "Manus"), adaptado a mano: nos
@@ -205,14 +205,35 @@
   frontend (`Recommend.tsx`) muestra un toast de advertencia cuando es > 0.
   El import por username no lo necesita (no viene de un CSV)
 
-- observabilidad mínima: antes los `logger.warning` de fallback (TMDb, Gemini,
+- observabilidad mínima: antes los `logger.warning` de fallback (TMDb, LLM,
   taste profile) dependían del "handler de último recurso" de Python, que solo
   muestra WARNING+ sin timestamp/módulo — nada por debajo de WARNING llegaba a
   los logs de Render. `logging.basicConfig` en `backend/app/main.py` los deja
   estructurados (`timestamp LEVEL module: mensaje`) y le suma un log INFO por
   cada `/recommend/*` completado (usuario, mode, kind_filter, si fue
-  personalizado, si pasó por Gemini, cantidad de picks, filas descartadas) —
+  personalizado, si pasó por el LLM, cantidad de picks, filas descartadas) —
   visibilidad de uso real, no solo de errores
+
+- migrado el agente de IA de Gemini a **NVIDIA NIM**
+  (`nvidia/nemotron-3-super-120b-a12b`, con
+  `chat_template_kwargs.enable_thinking=false`), reemplazando por completo
+  la sección de arriba sobre Gemini. Motivo: el modo "thinking" de
+  `gemini-flash-latest` no se podía desactivar (~20s por call) y forzaba una
+  cadena de 4 modelos de fallback solo para esquivar la cuota diaria. NVIDIA
+  da un solo endpoint compatible con la API de OpenAI
+  (`https://integrate.api.nvidia.com/v1/chat/completions`) con +100 modelos
+  gratis bajo una key. Se probó primero `llama-3.3-nemotron-super-49b-v1`
+  (con el toggle viejo de system prompt `"detailed thinking off"`), pero
+  resultó tener ~11 meses de antigüedad — se cambió a la familia Nemotron 3
+  (arquitectura MoE híbrida Mamba-Transformer propia de NVIDIA, más nueva),
+  eligiendo Super (120B total/12B activos) sobre Nano (30B/3B, más rápido
+  pero menos capaz) y Ultra (550B/55B, frontier, mismo riesgo de latencia que
+  Gemini) — apaga el razonamiento vía un parámetro real de la API, no un
+  truco de system prompt, ver `docs/nvidia-setup.md`. Ya no hay
+  `responseSchema`/JSON estructurado garantizado (no todos los modelos del
+  catálogo NIM lo soportan): el prompt pide JSON explícitamente y
+  `_extract_json` limpia el fence de markdown si el modelo lo agrega.
+  `GEMINI_API_KEY` → `NVIDIA_API_KEY`. 158 tests en verde
 
 ## Falta para un MVP más serio
 - terminar de activar el envío real de mail (ver más arriba): falta que

@@ -21,4 +21,4 @@ npm.cmd install
 npm.cmd run dev -- --host 127.0.0.1 --port 4173
 ```
 
-Requiere `TMDB_API_KEY` y `GEMINI_API_KEY` en `backend/.env` (ver `docs/tmdb-setup.md` y `docs/gemini-setup.md`).
+Requiere `TMDB_API_KEY` y `NVIDIA_API_KEY` en `backend/.env` (ver `docs/tmdb-setup.md` y `docs/nvidia-setup.md`).

@@ -322,7 +322,7 @@ def _finish_recommend(
         try:
             response = llm_client.refine_recommendations(ratings, mood, response)
         except llm_client.LlmError as exc:
-            logger.warning("Gemini refine failed, falling back to heuristic why: %s", exc)
+            logger.warning("LLM refine failed, falling back to heuristic why: %s", exc)
 
     session_id = db.create_recommendation_session(user["id"], mood, response.taste_summary)
     inserted_ids = db.save_recommendations(

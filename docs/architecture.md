@@ -8,7 +8,7 @@ Hoy `PeliPick` es una vertical slice local con dos partes:
 - `backend` en `FastAPI`
 
 Ya hay base de datos (`SQLite`), login, catálogo real (`TMDb`, con fallback a
-mock) y un agente de IA (`Gemini`) que refina el resumen de gusto y el orden/
+mock) y un agente de IA (`NVIDIA NIM`) que refina el resumen de gusto y el orden/
 razones de los picks. La ingesta es el `.zip` completo que exporta
 Letterboxd (no un CSV suelto) — no hay scraping ni import por username
 todavía.
@@ -27,7 +27,7 @@ todavía.
 5. El backend resume el gusto del usuario.
 6. El backend trae candidatos de `TMDb` (o cae al catálogo mock si no hay key
    configurada o TMDb falla) y los scorea.
-6.5. Si hay `GEMINI_API_KEY`, el agente reordena esos picks y reescribe el
+6.5. Si hay `NVIDIA_API_KEY`, el agente reordena esos picks y reescribe el
    resumen y las razones (o cae de vuelta al resultado heurístico si falla).
 7. El backend persiste los ratings importados y las recomendaciones servidas.
 8. El backend devuelve hasta 5 recomendaciones explicadas.
@@ -82,7 +82,7 @@ Piezas actuales:
 - [backend/app/db.py](../backend/app/db.py): SQLite (stdlib `sqlite3`, sin ORM), schema e inserts/queries
 - [backend/app/auth.py](../backend/app/auth.py): hashing de password (PBKDF2, stdlib) y dependencia de sesión
 - [backend/app/tmdb_client.py](../backend/app/tmdb_client.py): cliente TMDb (stdlib `urllib`), mapea género + overview a tags propios
-- [backend/app/llm_client.py](../backend/app/llm_client.py): cliente Gemini (stdlib `urllib`), refina resumen y picks del heurístico
+- [backend/app/llm_client.py](../backend/app/llm_client.py): cliente NVIDIA NIM (stdlib `urllib`), refina resumen y picks del heurístico
 
 ## Decisiones deliberadas
 
@@ -103,10 +103,10 @@ Piezas actuales:
   de fetchear y cachear `/genre/movie/list`
 - si TMDb falla o no está configurada, cae al catálogo mock en vez de romper
   la respuesta — ver `docs/tmdb-setup.md`
-- agente de IA con `Gemini` (free tier) en vez de pagar OpenAI de entrada —
-  ver `docs/gemini-setup.md`; el LLM solo reordena/reescribe texto sobre
+- agente de IA con `NVIDIA NIM` (free tier) en vez de pagar OpenAI de entrada —
+  ver `docs/nvidia-setup.md`; el LLM solo reordena/reescribe texto sobre
   candidatos ya filtrados por TMDb, nunca inventa títulos ni metadata
-- si Gemini falla, no está configurada, o devuelve picks fuera de la lista de
+- si el LLM falla, no está configurado, o devuelve picks fuera de la lista de
   candidatos, cae al resultado heurístico sin romper la respuesta
 - el ranking heurístico ordena por el score crudo (sin clamp), no por el
   `match_score` mostrado (clampeado a 99): con series reales sumadas al
@@ -136,14 +136,14 @@ Piezas actuales:
 
 - catálogo real de `TMDb` (películas y series), pero el mapeo género/overview
   → tags es heurístico y coarse (no hay nuance real de tono/ritmo todavía)
-- sin caché de resultados de Gemini
 - el agente de IA reordena y reescribe texto, no rescorea ni trae candidatos
   propios — sigue acotado a lo que ya filtró el heurístico
 - no hay scraping de Letterboxd por username, solo import del zip manual
 - no usa los `Tags` propios del usuario en `diary.csv`/`reviews.csv` (casi
   nadie los completa, pero cuando existen son señal directa)
-- recuperación de contraseña sin envío real de mail todavía — el flujo
-  funciona pero el token no llega al usuario sin `PELIPICK_DEBUG=1`
+- recuperación de contraseña con mail real vía Resend (`RESEND_API_KEY`), pero
+  sin dominio propio verificado solo llega a la cuenta dueña de la key, no a
+  usuarios reales de terceros
 
 ## Próxima arquitectura probable
 

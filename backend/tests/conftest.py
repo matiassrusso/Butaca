@@ -18,9 +18,15 @@ def no_real_tmdb(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def no_real_gemini(monkeypatch):
-    # same deal as TMDB_API_KEY, but for the Gemini refine step.
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+def no_real_nvidia(monkeypatch):
+    # same deal as TMDB_API_KEY, but for the LLM refine step.
+    monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def no_real_resend(monkeypatch):
+    # same deal as TMDB_API_KEY, but for the password reset email.
+    monkeypatch.delenv("RESEND_API_KEY", raising=False)
 
 
 @pytest.fixture(autouse=True)
