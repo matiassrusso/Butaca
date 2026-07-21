@@ -2,7 +2,7 @@ import json
 import os
 import urllib.request
 from pathlib import Path
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 
 ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
 RESEND_URL = "https://api.resend.com/emails"
@@ -43,6 +43,11 @@ def _send_request(body: bytes, api_key: str) -> None:
     try:
         with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT) as response:
             response.read()
+    except HTTPError as exc:
+        # El motivo real (dominio sin verificar, key inválida) viene en el body,
+        # no en el status — sin esto el log queda en "HTTP Error 403: Forbidden".
+        detail = exc.read().decode("utf-8", errors="replace")[:500]
+        raise MailError(f"Resend rechazó el mail ({exc.code}): {detail}") from exc
     except URLError as exc:
         raise MailError(f"No pude mandar el mail vía Resend: {exc}") from exc
 

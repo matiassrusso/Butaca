@@ -218,9 +218,14 @@ def forgot_password(payload: PasswordResetRequest) -> PasswordResetStartResponse
     expires_at = auth.now_ts() + auth.RESET_TOKEN_TTL_SECONDS
     db.save_password_reset_token(user["id"], token_hash, expires_at)
 
-    if mailer.is_configured() and user["email"]:
+    if not mailer.is_configured():
+        logger.warning("Password reset email skipped: RESEND_API_KEY no está configurada.")
+    elif not user["email"]:
+        logger.warning("Password reset email skipped: el usuario no tiene email cargado.")
+    else:
         try:
             mailer.send_password_reset_email(user["email"], token)
+            logger.info("Password reset email sent.")
         except mailer.MailError as exc:
             logger.warning("Password reset email failed to send: %s", exc)
 
