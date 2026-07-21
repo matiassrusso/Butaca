@@ -13,6 +13,8 @@ services:
         sync: false
       - key: RESEND_API_KEY
         sync: false
+      - key: RESEND_FROM_EMAIL
+        value: Butaca <no-reply@butaca.xyz>
       - key: BUTACA_ALLOWED_ORIGINS
         value: https://butaca.xyz,https://www.butaca.xyz,https://pelipick.vercel.app
       - key: DATABASE_URL
