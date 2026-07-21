@@ -41,14 +41,17 @@ const STEPS = [
   },
 ];
 
-// 50 actores + 15 directores, mezclados a mano para que los directores queden
-// repartidos y no en bloque. Curada a propósito y no traída de
-// /person/popular de TMDb: esa lista ordena por clics en el sitio de TMDb, no
-// por relevancia, y hoy arranca con nombres del cine adulto.
 // Ritmo del marquee en reposo. Menos segundos = más rápido.
 const MARQUEE_SECONDS_PER_NAME = 1.8;
 // Cuánto puede acelerarse como máximo al scrollear fuerte (multiplicador).
 const MARQUEE_MAX_BOOST = 6;
+
+// Sube rápido, baja despacio. Simétrico, el efecto era invisible: mientras
+// scrolleás fuerte el marquee se está yendo de pantalla, y al soltar volvía a
+// 1x en ~0.3s, así que cuando frenabas y mirabas ya no quedaba nada que ver.
+// Con la salida lenta lo ves desacelerando cuando llegás.
+const MARQUEE_ATTACK = 0.12;
+const MARQUEE_RELEASE = 0.02;
 
 /** Siguiente velocidad del marquee, dado cuánto se scrolleó en este frame.
  *
@@ -57,7 +60,8 @@ const MARQUEE_MAX_BOOST = 6;
  * El suavizado evita el temblor entre frames con velocidad despareja. */
 export function nextMarqueeRate(rate: number, pxPorFrame: number): number {
   const target = Math.min(1 + pxPorFrame * 0.12, MARQUEE_MAX_BOOST);
-  return rate + (target - rate) * 0.12;
+  const suavizado = target > rate ? MARQUEE_ATTACK : MARQUEE_RELEASE;
+  return rate + (target - rate) * suavizado;
 }
 
 /** Acelera el marquee según qué tan rápido scrollea el usuario.
@@ -100,6 +104,10 @@ function useScrollBoostedMarquee() {
   return ref;
 }
 
+// 50 actores + 15 directores, mezclados a mano para que los directores queden
+// repartidos y no en bloque. Curada a propósito y no traída de
+// /person/popular de TMDb: esa lista ordena por clics en el sitio de TMDb, no
+// por relevancia, y hoy arranca con nombres del cine adulto.
 const MARQUEE_NAMES = [
   "Meryl Streep", "Denzel Washington", "Martin Scorsese", "Cate Blanchett", "Tom Hanks",
   "Al Pacino", "Christopher Nolan", "Viola Davis", "Robert De Niro", "Frances McDormand",
