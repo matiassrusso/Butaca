@@ -171,8 +171,29 @@ def test_fetch_html_wraps_non_404_error_statuses(monkeypatch: pytest.MonkeyPatch
     class FakeResponse:
         status_code = 500
         ok = False
+        text = ""
+        headers: dict[str, str] = {}
 
     monkeypatch.setattr(ls.curl_requests, "get", lambda url, impersonate, timeout: FakeResponse())
 
     with pytest.raises(ls.ScrapeError):
         ls._fetch_html("https://letterboxd.com/someuser/diary/films/page/1/")
+
+
+def test_fetch_html_logs_cloudflare_error_code(monkeypatch, caplog) -> None:
+    # Distinguir 1010 (fingerprint, arreglable) de 1006/1015 (IP baneada) es lo
+    # único que dice si el bloqueo se puede resolver en código.
+    class BlockedResponse:
+        status_code = 403
+        ok = False
+        text = "<html>Access denied | error code: 1006</html>"
+        headers = {"cf-ray": "abc123-EZE"}
+
+    monkeypatch.setattr(ls.curl_requests, "get", lambda url, impersonate, timeout: BlockedResponse())
+
+    with caplog.at_level("WARNING"):
+        with pytest.raises(ls.ScrapeError):
+            ls._fetch_html("https://letterboxd.com/someuser/diary/films/page/1/")
+
+    assert "cf_error=1006" in caplog.text
+    assert "abc123-EZE" in caplog.text

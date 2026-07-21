@@ -1,4 +1,5 @@
 import html
+import logging
 import re
 import urllib.parse
 
@@ -6,6 +7,14 @@ from curl_cffi import requests as curl_requests
 from curl_cffi.requests.exceptions import RequestException
 
 from .models import RatedItem
+
+logger = logging.getLogger(__name__)
+
+# Cloudflare mete su código de bloqueo en el body como "error code: NNNN".
+# 1010 = fingerprint del cliente, 1006/1007/1008 = IP baneada, 1015 = rate
+# limit. Distinguirlos es la diferencia entre "arreglable en código" y "la IP
+# de Render está en la lista negra".
+CF_ERROR_RE = re.compile(r"error code:\s*(\d{4})")
 
 LETTERBOXD_BASE = "https://letterboxd.com"
 REQUEST_TIMEOUT = 10
@@ -50,6 +59,15 @@ def _fetch_html(url: str) -> str | None:
     if response.status_code == 404:
         return None
     if not response.ok:
+        # El motivo real no viene en el status sino en el body de Cloudflare;
+        # se loguea del lado del server y no se le muestra al usuario.
+        cf_match = CF_ERROR_RE.search(response.text or "")
+        logger.warning(
+            "Letterboxd devolvió %s (cf_error=%s, cf_ray=%s)",
+            response.status_code,
+            cf_match.group(1) if cf_match else "?",
+            response.headers.get("cf-ray", "?"),
+        )
         raise ScrapeError(f"Letterboxd devolvió un error ({response.status_code}).")
     return response.text
 
