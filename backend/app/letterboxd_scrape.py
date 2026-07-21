@@ -61,12 +61,16 @@ def _fetch_html(url: str) -> str | None:
     if not response.ok:
         # El motivo real no viene en el status sino en el body de Cloudflare;
         # se loguea del lado del server y no se le muestra al usuario.
-        cf_match = CF_ERROR_RE.search(response.text or "")
+        body = response.text or ""
+        cf_match = CF_ERROR_RE.search(body)
+        snippet = re.sub(r"<[^>]+>|\s+", " ", body).strip()[:200]
         logger.warning(
-            "Letterboxd devolvió %s (cf_error=%s, cf_ray=%s)",
+            "Letterboxd devolvió %s (cf_error=%s, cf_ray=%s, server=%s): %s",
             response.status_code,
             cf_match.group(1) if cf_match else "?",
             response.headers.get("cf-ray", "?"),
+            response.headers.get("server", "?"),
+            snippet,
         )
         raise ScrapeError(f"Letterboxd devolvió un error ({response.status_code}).")
     return response.text
