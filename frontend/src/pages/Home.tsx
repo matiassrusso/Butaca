@@ -41,9 +41,24 @@ const STEPS = [
   },
 ];
 
-const MARQUEE_DIRECTORS = [
-  "Tarkovsky", "Wong Kar-wai", "Chantal Akerman", "Bela Tarr", "Lynne Ramsay",
-  "Apichatpong", "Kelly Reichardt", "Hong Sang-soo", "Claire Denis", "Kiyoshi Kurosawa",
+// 50 actores + 15 directores, mezclados a mano para que los directores queden
+// repartidos y no en bloque. Curada a propósito y no traída de
+// /person/popular de TMDb: esa lista ordena por clics en el sitio de TMDb, no
+// por relevancia, y hoy arranca con nombres del cine adulto.
+const MARQUEE_NAMES = [
+  "Meryl Streep", "Denzel Washington", "Martin Scorsese", "Cate Blanchett", "Tom Hanks",
+  "Al Pacino", "Christopher Nolan", "Viola Davis", "Robert De Niro", "Frances McDormand",
+  "Leonardo DiCaprio", "Akira Kurosawa", "Nicole Kidman", "Daniel Day-Lewis", "Julianne Moore",
+  "Wes Anderson", "Joaquin Phoenix", "Charlize Theron", "Anthony Hopkins", "Tilda Swinton",
+  "Stanley Kubrick", "Morgan Freeman", "Kate Winslet", "Brad Pitt", "Bong Joon-ho",
+  "Christian Bale", "Emma Thompson", "Samuel L. Jackson", "Judi Dench", "Alfred Hitchcock",
+  "Gary Oldman", "Helen Mirren", "Michelle Yeoh", "Greta Gerwig", "Jack Nicholson",
+  "Sigourney Weaver", "Harrison Ford", "Ralph Fiennes", "Quentin Tarantino", "Penélope Cruz",
+  "Marion Cotillard", "Willem Dafoe", "Guillermo del Toro", "Isabelle Huppert", "Mads Mikkelsen",
+  "Ethan Hawke", "Saoirse Ronan", "Steven Spielberg", "Oscar Isaac", "Amy Adams",
+  "Ryan Gosling", "Denis Villeneuve", "Toni Collette", "Mahershala Ali", "Rachel Weisz",
+  "Javier Bardem", "Sofia Coppola", "Naomi Watts", "Song Kang-ho", "Jessica Chastain",
+  "Francis Ford Coppola", "Adam Driver", "Lupita Nyong'o", "Timothée Chalamet", "Pedro Almodóvar",
 ];
 
 // same tilt + glare treatment as the poster cards on /recommend
@@ -211,8 +226,13 @@ export default function Home() {
             con gap, el ancho total es (2n items + 2n-1 gaps) y el -50% de la
             animación no cae en la costura entre las dos copias — de ahí el
             salto visible cada vuelta. */}
-        <div className="flex whitespace-nowrap animate-marquee font-serif italic text-2xl md:text-3xl">
-          {[...MARQUEE_DIRECTORS, ...MARQUEE_DIRECTORS].map((name, i) => (
+        {/* La duración sale del largo de la lista (4s por nombre) para que la
+            velocidad no cambie si se agregan o sacan nombres. */}
+        <div
+          className="flex whitespace-nowrap animate-marquee font-serif italic text-2xl md:text-3xl"
+          style={{ animationDuration: `${MARQUEE_NAMES.length * 4}s` }}
+        >
+          {[...MARQUEE_NAMES, ...MARQUEE_NAMES].map((name, i) => (
             <span key={i} className="flex items-center gap-16 pr-16">
               {name}
               <span className="text-accent">✦</span>
