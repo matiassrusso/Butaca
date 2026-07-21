@@ -33,36 +33,37 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
 
 ## Pending
 
-> Estado al cerrar el 2026-07-20: **nada de lo hecho hoy está commiteado ni
-> deployado.** El working tree tiene las Olas 1-3 del plan de implementación
-> + el rebrand a Butaca + el fix de `/health`, todo junto. 180 tests en verde,
-> build de frontend limpio. Detalle en `docs/build-log.md`.
+> Estado al 2026-07-21: lo acumulado el 2026-07-20 (Olas 1-3 + rebrand +
+> fix de `/health`) ya está commiteado y pusheado a `main` (`c698ad3`), 180
+> tests en verde. GitHub y Vercel renombrados a Butaca puertas adentro. Falta
+> comprar el dominio para que las URLs públicas dejen de ser `pelipick.*`.
 
-- [ ] **Revisar y deployar lo acumulado** (bloquea varias cosas de abajo).
-      Al deployar, tener en cuenta:
-      - Si hay alguna env var `PELIPICK_*` seteada a mano en Render,
-        renombrarla a `BUTACA_*` (probablemente ninguna: casi todas usan
-        defaults; la de `render.yaml` ya quedó como `BUTACA_ALLOWED_ORIGINS`).
-      - Los usuarios existentes se van a desloguear una vez (cambió la clave
-        de localStorage `pelipick_token` → `butaca_token`). Trivial.
 - [ ] **Despausar el monitor de UptimeRobot** — está pausado a propósito;
-      solo tiene sentido reactivarlo una vez deployado el fix de `/health`
-      (si no, vuelve a alertar 405 cada 5 min).
-- [ ] **Comprar dominio** (Fase 0.4). Libres al 2026-07-20: `butaca.io`,
-      `butaca.co`, `butaca.me`, `butaca.film`. Tomados: `.com`, `.app`,
-      `.tv`, `.ar`, `.com.ar`.
+      solo tiene sentido reactivarlo una vez confirmado el fix de `/health`
+      en producción (si no, vuelve a alertar 405 cada 5 min).
+- [ ] **Comprar dominio** (Fase 0.4) — es ahora el único camino real para que
+      las URLs pasen a ser `butaca.*` (ver Done de hoy, `rebrand-externo-001`).
+      Libres al 2026-07-20: `butaca.io`, `butaca.co`, `butaca.me`,
+      `butaca.film`. Tomados: `.com`, `.app`, `.tv`, `.ar`, `.com.ar`. Ojo:
+      en la cuenta de Vercel figura `pelipick.com` registrado hace unos días
+      por un registrador de terceros — revisar si es intencional antes de
+      comprar otro.
+- [ ] **Setear el dominio como custom domain** en Vercel y Render una vez
+      comprado — recién ahí actualizar `render.yaml` (`BUTACA_ALLOWED_ORIGINS`
+      y opcionalmente el campo `name`), el fallback de `main.py`, el
+      `DEFAULT_RESET_URL` de `mailer.py`, la env var `VITE_API_BASE_URL` en
+      Vercel, y las ~6 referencias de docs a `pelipick.vercel.app` /
+      `pelipick-backend.onrender.com`.
 - [ ] **Resend** — bloqueado por el dominio. Verificar dominio + setear
       `RESEND_API_KEY` en Render. Cierra el último pendiente del MVP.
 - [ ] **Ola 4 del plan de implementación** (`docs/(C) plan-implementacion-codigo.md`):
       H (onboarding sin Letterboxd), I (verificación de email + borrar
       cuenta), J (README — decidir si se reescribe en inglés o se actualiza
       en español; hoy quedó actualizado solo el nombre).
-- [ ] **Rebrand externo (opcional)** — renombrar los proyectos en Vercel/
-      Render, y recién ahí actualizar las ~6 referencias a
-      `pelipick.vercel.app` / `pelipick-backend.onrender.com` en código y
-      docs. También quedan con el nombre viejo: la carpeta del proyecto
-      (`03 Projects/PeliPick/`) y la lista de proyectos del `CLAUDE.md` raíz
-      del vault (fuera de este repo).
+- [ ] **Renombrar la carpeta del proyecto** (`03 Projects/PeliPick/` →
+      `03 Projects/Butaca/`) y la lista de proyectos del `CLAUDE.md` raíz del
+      vault (fuera de este repo) — pendiente, requiere permiso explícito
+      porque toca archivos fuera de este repo.
 - [ ] **Borrar el proyecto viejo de Neon** (São Paulo) una vez confirmado
       que el nuevo (Oregon) anda sin sobresaltos unos días.
 
@@ -73,6 +74,36 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
 (vacío)
 
 ## Done
+
+- [x] [rebrand-externo-001] Commit + push de lo acumulado del 2026-07-20
+      (`c698ad3`, 180 tests en verde) y rebrand externo parcial | owner:
+      claude | GitHub: `gh repo rename` de `matiassrusso/PeliPick` →
+      `matiassrusso/Butaca` (remote local actualizado automáticamente, sin
+      downtime — GitHub deja redirect). Vercel: `vercel project rename
+      pelipick butaca` (mismo project ID, sin recrear nada). **Hallazgo
+      importante:** ninguna de las dos URLs públicas cambió, y no van a
+      cambiar sin comprar un dominio propio:
+      - `butaca.vercel.app` ya pertenece a un proyecto de terceros ajeno
+        (namespace `*.vercel.app` es global entre todos los usuarios de
+        Vercel, no solo la cuenta) — confirmado comparando `<title>` de
+        `pelipick.vercel.app` (nuestro, "Butaca") contra `butaca.vercel.app`
+        ("Butaca: Peliculas, libros y videojuegos", de otro dueño).
+        `pelipick.vercel.app` sigue siendo nuestra producción real.
+      - Render: el nombre del servicio es solo un label de dashboard, la URL
+        `.onrender.com` queda fija desde la creación del servicio y no se
+        puede cambiar sin recrearlo — Matías lo renombró a `butaca-backend`
+        en el dashboard, la URL siguió siendo `pelipick-backend.onrender.com`.
+        Recrear el servicio para forzar la URL nueva perdería las env vars
+        `sync: false` (`TMDB_API_KEY`, `NVIDIA_API_KEY`, `RESEND_API_KEY`,
+        `DATABASE_URL`) — **no se intentó**, demasiado riesgo para cero
+        beneficio real.
+      - **No se tocó `render.yaml`** (ni el `name:` ni `BUTACA_ALLOWED_ORIGINS`)
+        porque cambiar el campo `name` de un servicio ya existente en un
+        Blueprint sync puede hacer que Render lo interprete como un servicio
+        nuevo en vez de un rename — mismo riesgo de perder las env vars
+        `sync: false` de arriba.
+      Conclusión: el único camino real para URLs `butaca.*` es comprar el
+      dominio (ya en `Pending`) y setearlo como custom domain en ambos.
 
 - [x] [rebrand-butaca] Rebrand completo **PeliPick → Butaca** | owner: claude |
       Script de reemplazos ordenados (no sed global, que habría roto las URLs
