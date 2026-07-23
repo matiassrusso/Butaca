@@ -40,6 +40,15 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
 > proyectos, no se borró nada). Ver Done de hoy (`domain-001`) para el
 > detalle completo.
 
+- [ ] **⚠️ Empezar acá al retomar: feedback de amigos sin trabajar (20
+      puntos)** — Ola 4 ya cerrada, sitio ya mostrado a amigos, se juntó
+      feedback real (Gaspi, Pedro, Simón, Gerardo) más notas propias.
+      Todavía sin priorizar ni atacado, a propósito. Detalle completo,
+      agrupado por rápidos/medianos/grandes, en
+      [`03 Iteration Logs/(C) 2026-07-23 feedback-amigos-pre-lanzamiento.md`](<03 Iteration Logs/(C) 2026-07-23 feedback-amigos-pre-lanzamiento.md>).
+      Resumen de la sesión completa en `docs/build-log.md` (entrada
+      2026-07-23).
+
 - [x] **Setear `NVIDIA_API_KEY` en Render** — hecho por Matías. Verificado
       en vivo el 2026-07-23: cuenta de prueba descartable en butaca.xyz,
       picks con `refine` real (razones generadas cruzando películas

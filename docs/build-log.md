@@ -1,5 +1,86 @@
 # Build Log
 
+## 2026-07-23 (Ola 4 cierre, pulido pre-lanzamiento a amigos, seguridad de sesiones)
+
+Sesión enfocada en cerrar el MVP para mostrarlo a amigos y eventualmente
+LinkedIn. Verificado en producción con una cuenta descartable en cada paso
+en vez de asumir que un deploy exitoso significa que funciona.
+
+### Ola 4 cerrada + verificación de producción
+
+- Confirmado que Matías ya había seteado `NVIDIA_API_KEY` en Render y
+  rotado las credenciales filtradas el 21/07. Verificado en vivo (cuenta de
+  prueba en butaca.xyz, borrada después): `refine` de la IA corriendo de
+  verdad, ya no cae mudo al heurístico.
+- README reescrito bilingüe: `README.md` (inglés, primario — pensado para
+  portfolio internacional) + `README.es.md`, cruzados entre sí, con link a
+  producción y feature list actualizada. Cierra la tarea J de la Ola 4 —
+  **Ola 4 completa** (H onboarding sin Letterboxd, I verificación de email +
+  borrar cuenta, J README).
+- UptimeRobot confirmado activo por Matías.
+
+### Pulido de UI
+
+- Validación de formulario en Login/Registro reemplazada: se sacaron los
+  tooltips nativos feos del browser (`required`/`minLength`/`type="email"`)
+  por errores inline en la estética del sitio (`noValidate` + chequeo en
+  JS, se limpian al tipear).
+- Citas de cine rotativas: `frontend/src/lib/quotes.ts`, 26 frases (12 de
+  directores + 14 líneas icónicas de personajes/series), dos distintas por
+  carga de página (panel de login + footer), cambian en cada refresh.
+- Favicon propio: butaca de cine (papel sobre terracota), SVG + PNG 32px +
+  apple-touch-icon 180px. El sitio no tenía ninguno.
+- Los 3 picks de "Current picks" en el home ahora son clickeables y abren
+  el mismo modal de detalle que `/recommend` (reparto, tráiler, dónde
+  verla, feedback). El modal se extrajo de `Recommend.tsx` a un componente
+  compartido (`components/MovieModal.tsx`) en vez de duplicarlo.
+
+### Mails con la estética del sitio
+
+- Los mails de reset de contraseña y verificación de email (`mailer.py`)
+  pasaron de `<p>` sueltos a un template HTML compartido con la paleta
+  "Hybrid critic notebook" (papel/tinta/terracota, radius 0, wordmark +
+  labels mono, botón terracota). Confirmado por Matías: el mail de
+  verificación llega bien.
+
+### Observabilidad
+
+- Vercel Web Analytics + Speed Insights agregados (`@vercel/analytics`,
+  `@vercel/speed-insights`, imports `/react` — el proyecto es Vite, no
+  Next, así que las instrucciones default de Vercel no aplicaban tal
+  cual). Detalle técnico: el pre-bundling de Vite en dev le daba a estos
+  paquetes su propia copia de React ("Invalid hook call"); se resolvió con
+  `optimizeDeps.exclude` en `vite.config.ts`. El build de producción ya
+  dedupeaba bien — se confirmó sirviendo el `dist/` real antes de asumir
+  que estaba roto.
+
+### Seguridad: sesiones con expiración + tokens hasheados
+
+Auditoría rápida de seguridad a pedido de Matías (auth, SQL injection,
+CORS, XSS, secretos, rate limiting) — la mayoría ya estaba bien resuelto
+(PBKDF2 260k iteraciones, queries parametrizadas, tokens de reset/
+verificación ya hasheados con expiración, CORS con allowlist). Dos huecos
+reales, corregidos:
+
+- **Sesiones ahora expiran** (30 días) — antes un token de sesión era
+  válido para siempre hasta logout o reset de password.
+- **Tokens de sesión hasheados en DB** (sha256, mismo criterio que los de
+  reset/verificación) — antes vivían en texto plano en `sessions.token`;
+  una filtración de la DB de Neon habría regalado todas las sesiones
+  activas.
+- Migración: agrega `sessions.expires_at`, borra las filas viejas (token
+  crudo sin expiración) — un solo re-login para usuarios existentes,
+  confirmado contra Neon en producción antes de dar por cerrado.
+- 2 tests nuevos (sesión vencida rechaza, token crudo nunca toca la DB).
+  204 tests en verde.
+
+### Feedback de amigos (pendiente de trabajar)
+
+Se juntaron 20 puntos de feedback de gente probando el sitio (Gaspi,
+Pedro, Simón, Gerardo) más notas propias — sin actuar sobre ellos todavía,
+a propósito. Detalle completo, agrupado, en
+[`03 Iteration Logs/(C) 2026-07-23 feedback-amigos-pre-lanzamiento.md`](../03%20Iteration%20Logs/(C)%202026-07-23%20feedback-amigos-pre-lanzamiento.md).
+
 ## 2026-07-20 (rebrand a Butaca + fix de /health para uptime monitors)
 
 ### Fix: `/health` devolvía 405 a los monitores de uptime
