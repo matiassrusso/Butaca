@@ -3,11 +3,12 @@ import { Link, useLocation } from "wouter";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useAuth } from "@/hooks/useAuth";
 
+// Sin "Home": el logo ya lleva a /. Labels en español (feedback: navbar en
+// inglés en un sitio todo en español).
 const NAV_ITEMS = [
-  { label: "Home", href: "/" },
-  { label: "Recommend", href: "/recommend" },
-  { label: "Archive", href: "/history" },
-  { label: "Profile", href: "/profile" },
+  { label: "Recomendar", href: "/recommend" },
+  { label: "Archivo", href: "/history" },
+  { label: "Perfil", href: "/profile" },
 ];
 
 export function Navbar() {
@@ -50,7 +51,7 @@ export function Navbar() {
             to="/login"
             className="px-3 py-2 border border-foreground/20 hover:bg-foreground hover:text-background transition-colors"
           >
-            Sign in
+            Entrar
           </Link>
         )}
       </div>

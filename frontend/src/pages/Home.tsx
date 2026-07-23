@@ -144,7 +144,10 @@ export default function Home() {
     }
   }
 
-  const ctaHref = isAuthenticated ? "/recommend" : "/login";
+  // ?register=1 hace que /login arranque en modo registro (feedback: el CTA
+  // "Empezar gratis" caía en "Entrá" y el usuario nuevo tenía que buscar el
+  // link chico de abajo).
+  const ctaHref = isAuthenticated ? "/recommend" : "/login?register=1";
   const ctaLabel = isAuthenticated ? "Ir a mis recomendaciones" : "Empezar gratis";
 
   useEffect(() => {
@@ -186,7 +189,7 @@ export default function Home() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6 }}
-            className="flex items-center gap-3 mb-10 font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground"
+            className="flex items-center gap-3 mb-10 font-mono text-[10px] uppercase tracking-[0.3em] text-foreground"
           >
             <span className="size-2 bg-accent rounded-full animate-pulse" />
             <span>Basado en tu historial de Letterboxd</span>
@@ -224,9 +227,11 @@ export default function Home() {
               transition={{ delay: 0.9 }}
               className="flex flex-col items-start md:items-end gap-3"
             >
-              <span className="font-mono text-[10px] uppercase text-muted-foreground">
-                Sync con Letterboxd →
-              </span>
+              {!isAuthenticated && (
+                <span className="font-mono text-[10px] uppercase text-muted-foreground">
+                  Sync con Letterboxd →
+                </span>
+              )}
               <Link
                 href={ctaHref}
                 className="group relative overflow-hidden px-10 py-4 bg-foreground text-background font-mono text-xs uppercase tracking-widest transition-transform hover:-translate-y-0.5"

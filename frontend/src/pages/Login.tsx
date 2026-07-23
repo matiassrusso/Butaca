@@ -13,7 +13,10 @@ const COLD_START_HINT_MS = 4000;
 export default function Login() {
   const { login, register } = useAuth();
   const [, navigate] = useLocation();
-  const [mode, setMode] = useState<"login" | "register" | "forgot">("login");
+  // ?register=1 (CTA "Empezar gratis" del home) abre directo en modo registro.
+  const [mode, setMode] = useState<"login" | "register" | "forgot">(() =>
+    new URLSearchParams(window.location.search).has("register") ? "register" : "login",
+  );
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [email, setEmail] = useState("");

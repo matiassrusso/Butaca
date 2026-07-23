@@ -1,5 +1,37 @@
 # Build Log
 
+## 2026-07-23 (sesión 2 — lote rápido del feedback de amigos)
+
+Primer lote del feedback pre-lanzamiento (7 de 20 puntos, los marcados como
+"rápidos" en `03 Iteration Logs/(C) 2026-07-23 feedback-amigos-pre-lanzamiento.md`,
+donde quedaron tachados con fecha). Todo frontend, verificado con build
+limpio y en vivo en el preview local (deslogueado y logueado):
+
+- **CTA "Empezar gratis" abría el login en modo "Entrá"** — ahora apunta a
+  `/login?register=1` y `Login.tsx` lee el query param para arrancar en
+  modo registro (punto 1).
+- **Badge del hero con bajo contraste** sobre el orb terracota — pasó de
+  `text-muted-foreground` a `text-foreground` (punto 4).
+- **"Sync con Letterboxd →" quedaba fijo aunque ya estuvieras logueado** —
+  ahora solo se muestra sin sesión (punto 5).
+- **Botón de dark mode sin explicación visual** — `title` nativo dinámico
+  ("Cambiar a modo claro/oscuro") + `aria-label` alineado (punto 6).
+- **"Home" fuera del navbar** (el logo ya lleva a `/`) y **labels en
+  español**: Recomendar / Archivo / Perfil / Entrar (puntos 12 y 13).
+- **La pantalla del zip no explicaba cómo conseguirlo** — línea de
+  instrucción arriba del dropzone: "Descargalo desde Letterboxd:
+  Settings → Data → Export your data" (punto 19).
+
+Análisis del feedback completo: los 20 puntos se reducen a 4 problemas de
+fondo — (1) un usuario nuevo no entiende el flujo de `/recommend` (8, 9,
+10, 11, 19), (2) la navegación no refleja qué es central ni da entidad al
+usuario (12-16, 20), (3) el producto no explica su lógica ni sus límites
+donde importa (3, 17), (4) densidad visual en desktop (2). Lo positivo
+(paleta, watchlist, explicación de picks) confirma que motor e identidad
+visual funcionan — falla el camino de entrada. Próximo: rediseño de
+`/recommend` como multi-step (absorbe 7, 8, 9, 10, 11, 17 y mete el 3
+adentro).
+
 ## 2026-07-23 (Ola 4 cierre, pulido pre-lanzamiento a amigos, seguridad de sesiones)
 
 Sesión enfocada en cerrar el MVP para mostrarlo a amigos y eventualmente

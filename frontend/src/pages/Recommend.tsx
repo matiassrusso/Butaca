@@ -571,31 +571,36 @@ export default function Recommend() {
                     )}
                   </div>
                 ) : importMethod === "zip" ? (
-                  <div
-                    onDrop={handleDrop}
-                    onDragOver={(e) => {
-                      e.preventDefault();
-                      setIsDragging(true);
-                    }}
-                    onDragLeave={() => setIsDragging(false)}
-                    onClick={() => fileInputRef.current?.click()}
-                    className={`border-2 border-dashed p-8 text-center cursor-pointer transition-colors ${
-                      isDragging ? "border-accent bg-accent/5" : "border-foreground/30 hover:border-foreground"
-                    }`}
-                  >
-                    <input ref={fileInputRef} type="file" accept=".zip,application/zip" onChange={handleFileInput} className="hidden" />
-                    <div className="font-mono text-xs uppercase tracking-widest mb-2">
-                      {isDragging ? "Soltalo acá" : "Arrastrá tu .zip acá"}
-                    </div>
-                    <div className="font-mono text-[10px] text-muted-foreground mb-3">o click para elegir</div>
-                    {zipFile ? (
-                      <div className="inline-flex items-center gap-2 font-mono text-[10px] text-accent">
-                        <CheckCircle className="w-3 h-3" />
-                        {zipFile.name} · {formatFileSize(zipFile.size)}
+                  <div>
+                    <p className="font-mono text-[10px] uppercase leading-relaxed text-muted-foreground mb-3">
+                      Descargalo desde Letterboxd: Settings → Data → Export your data.
+                    </p>
+                    <div
+                      onDrop={handleDrop}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        setIsDragging(true);
+                      }}
+                      onDragLeave={() => setIsDragging(false)}
+                      onClick={() => fileInputRef.current?.click()}
+                      className={`border-2 border-dashed p-8 text-center cursor-pointer transition-colors ${
+                        isDragging ? "border-accent bg-accent/5" : "border-foreground/30 hover:border-foreground"
+                      }`}
+                    >
+                      <input ref={fileInputRef} type="file" accept=".zip,application/zip" onChange={handleFileInput} className="hidden" />
+                      <div className="font-mono text-xs uppercase tracking-widest mb-2">
+                        {isDragging ? "Soltalo acá" : "Arrastrá tu .zip acá"}
                       </div>
-                    ) : (
-                      <div className="font-mono text-[10px] text-muted-foreground/60">Solo .zip</div>
-                    )}
+                      <div className="font-mono text-[10px] text-muted-foreground mb-3">o click para elegir</div>
+                      {zipFile ? (
+                        <div className="inline-flex items-center gap-2 font-mono text-[10px] text-accent">
+                          <CheckCircle className="w-3 h-3" />
+                          {zipFile.name} · {formatFileSize(zipFile.size)}
+                        </div>
+                      ) : (
+                        <div className="font-mono text-[10px] text-muted-foreground/60">Solo .zip</div>
+                      )}
+                    </div>
                   </div>
                 ) : (
                   <div>
