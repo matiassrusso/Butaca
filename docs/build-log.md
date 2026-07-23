@@ -32,6 +32,37 @@ visual funcionan — falla el camino de entrada. Próximo: rediseño de
 `/recommend` como multi-step (absorbe 7, 8, 9, 10, 11, 17 y mete el 3
 adentro).
 
+### Rediseño de `/recommend`: wizard de 3 pasos
+
+Segunda parte de la sesión — ataca el problema de fondo nº 1 (usuarios
+nuevos no entendían el flujo). Todo dentro de `Recommend.tsx`, sin rutas
+ni componentes nuevos; la lógica de fetch/estado no cambió, solo el shell:
+
+- **Paso 1 "Tu historial"** (fuente): zip / username / manual, cada vía con
+  su explicación en contexto. El manual lleva la grilla de puntuar acá, con
+  dos textos nuevos: "estas pelis no son recomendaciones — son para
+  conocerte" (punto 8, Gaspi) y el aviso honesto de que el modo manual solo
+  conoce lo puntuado en la lista, así que puede recomendar algo ya visto
+  (punto 17, Simón/Gerardo).
+- **Paso 2 "Qué ver"** (modo): cada modo con descripción de una línea
+  (punto 10); los deshabilitados muestran el motivo inline. Inaccesible
+  hasta completar el paso 1 (punto 9) — Continuar deshabilitado con hint de
+  qué falta.
+- **Paso 3 "Formato"**: formato + recap de lo elegido ("Fuente: @user ·
+  Modo: Perfil completo") + `<details>` nativo "¿Cómo se calculan tus
+  picks?" con la explicación honesta del heurístico + refine de IA
+  (punto 3) + botón de generar.
+- Stepper arriba con pasos completados clickeables para volver; "Cambiar
+  búsqueda" desde los resultados vuelve al paso 3 con todo el estado
+  preservado (paso 1 y 2 accesibles por el stepper). Cierra el punto 11
+  (Pedro) y con él los puntos 8, 9 y 10 de una.
+
+Verificado end-to-end en el preview local: los 3 pasos renderizan y gatean
+bien por las tres fuentes, generar produce 6 picks (catálogo mock local por
+la TMDb key vieja del `.env`, esperado), volver/avanzar preserva estado.
+Build de frontend limpio. Del feedback quedan: 2 (grilla de resultados), 7
+(swipe), 14/15 (navbar), 16 (avatares), 20 (perfil real).
+
 ## 2026-07-23 (Ola 4 cierre, pulido pre-lanzamiento a amigos, seguridad de sesiones)
 
 Sesión enfocada en cerrar el MVP para mostrarlo a amigos y eventualmente

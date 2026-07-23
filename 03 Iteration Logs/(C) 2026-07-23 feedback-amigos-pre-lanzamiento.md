@@ -21,10 +21,12 @@
    poster sale ~900px de alto, más que el viewport. Confirmado con
    screenshot.
 
-3. **(producto) No está explicado en el sitio cómo se calculan las
+3. ~~**(producto) No está explicado en el sitio cómo se calculan las
    recomendaciones.** La gente pregunta. Hay una explicación honesta lista
    para reusar (heurístico por tags + IA que refina arriba), solo falta
-   ponerla visible en algún lado del sitio.
+   ponerla visible en algún lado del sitio.~~ **Resuelto 2026-07-23:**
+   `<details>` "¿Cómo se calculan tus picks?" en el paso final del wizard,
+   justo antes del botón de generar.
 
 4. ~~**Badge "Basado en tu historial de Letterboxd" del hero: bajo
    contraste.** `text-muted-foreground` sobre el orb `bg-accent` — dos
@@ -50,22 +52,31 @@
 
 ## Gaspi
 
-8. Al tocar "recomendaciones" no queda claro si las pelis que aparecen
+8. ~~Al tocar "recomendaciones" no queda claro si las pelis que aparecen
    abajo son los picks generados o las que hay que puntuar — falta
-   jerarquía visual entre "esto es para puntuar" y "esto es tu resultado".
-   (Positivo: le gustó la paleta de colores.)
+   jerarquía visual entre "esto es para puntuar" y "esto es tu resultado".~~
+   **Resuelto 2026-07-23** con el multi-step: la grilla de puntuar vive en
+   el paso 1 con el texto "Estas pelis no son recomendaciones — son para
+   conocerte [...] Tus picks aparecen al final"; los resultados son una
+   vista aparte. (Positivo: le gustó la paleta de colores.)
 
 ## Pedro
 
-9. Paso 2 ("Qué querés ver hoy") debería estar bloqueado hasta completar
+9. ~~Paso 2 ("Qué querés ver hoy") debería estar bloqueado hasta completar
    el paso 1 (fuente) — hoy se puede tocar sin que tenga efecto todavía,
-   lo cual confunde. Confirmado: solo el botón final de submit está
-   gateado por `canGenerate`, el selector de paso 2 no.
-10. No entiende qué significa cada opción del paso 2.
-11. **(cambio grande)** Propone convertir `/recommend` en un multi-step
+   lo cual confunde.~~ **Resuelto 2026-07-23:** el wizard no deja avanzar
+   al paso 2 sin fuente válida (botón Continuar deshabilitado + hint de
+   qué falta).
+10. ~~No entiende qué significa cada opción del paso 2.~~ **Resuelto
+    2026-07-23:** cada modo lleva una descripción de una línea; los
+    deshabilitados muestran el motivo inline en vez de solo un tooltip.
+11. ~~**(cambio grande)** Propone convertir `/recommend` en un multi-step
     form real (una pantalla por paso), para poder ir explicando cada
     decisión en el momento en el que importa. Englobaría los puntos 8, 9 y
-    10 de una.
+    10 de una.~~ **Resuelto 2026-07-23:** `/recommend` es ahora un wizard
+    de 3 pasos (Tu historial → Qué ver → Formato) con stepper clickeable
+    hacia atrás, recap de lo elegido en el paso final y "Cambiar búsqueda"
+    que vuelve al wizard con todo el estado preservado.
 12. ~~Sacaría "Home" de la navegación, no suma mucho como link propio.~~
     **Resuelto 2026-07-23:** "Home" fuera del navbar (el logo ya lleva a `/`).
 13. ~~Los labels del navbar están en inglés ("Home"/"Recommend"/"Archive"/
@@ -127,3 +138,10 @@ Sin priorizar todavía. A ojo, agrupando:
 - **No es un bug, es una limitación conocida:** 17 — mejor resuelto
   explicando el trade-off del modo manual en el momento (conecta con el
   punto 3), no forzando el algoritmo a adivinar lo que no sabe.
+  **Atacado 2026-07-23:** el modo manual ahora avisa "acá solo sabemos de
+  las pelis que puntúes en esta lista, así que algún pick puede ser una
+  que ya viste — el .zip evita eso".
+- **Estado 2026-07-23 (sesión 2):** resueltos 1, 3, 4, 5, 6, 8, 9, 10, 11,
+  12, 13, 19 + aviso del 17. Quedan: 2 (grilla de resultados), 7 (swipe
+  onboarding), 14/15 (navbar destacando Recomendar / estilo YouTube), 16
+  (avatares), 20 (perfil real).

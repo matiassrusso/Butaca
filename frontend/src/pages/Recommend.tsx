@@ -27,12 +27,35 @@ type RecommendResponse = {
 type RecommendMode = "profile" | "recent" | "genres" | "watchlist";
 type KindFilter = "movie" | "series" | "both";
 
-const modeOptions: { mode: RecommendMode; label: string }[] = [
-  { mode: "profile", label: "Perfil completo" },
-  { mode: "recent", label: "Últimas vistas" },
-  { mode: "genres", label: "Selección de géneros" },
-  { mode: "watchlist", label: "De mi watchlist" },
+// desc: qué hace cada modo, visible en el paso 2 del wizard (feedback: "no
+// entiendo qué significa cada opción")
+const modeOptions: { mode: RecommendMode; label: string; desc: string }[] = [
+  {
+    mode: "profile",
+    label: "Perfil completo",
+    desc: "Cruzamos todo tu historial: géneros, directores, décadas y tags.",
+  },
+  {
+    mode: "recent",
+    label: "Últimas vistas",
+    desc: "Le damos más peso a lo último que viste — para seguir la racha.",
+  },
+  {
+    mode: "genres",
+    label: "Selección de géneros",
+    desc: "Vos elegís los géneros, nosotros buscamos lo mejor adentro de eso.",
+  },
+  {
+    mode: "watchlist",
+    label: "De mi watchlist",
+    desc: "Ordenamos tu propia watchlist según tu perfil: cuál va primero.",
+  },
 ];
+
+// wizard de 3 pasos (feedback: la página anterior tiraba todo junto y los
+// usuarios nuevos no sabían por dónde empezar)
+type WizardStep = 1 | 2 | 3;
+const STEP_LABELS = ["Tu historial", "Qué ver", "Formato"];
 
 const kindFilterOptions: { value: KindFilter; label: string }[] = [
   { value: "movie", label: "Películas" },
@@ -243,6 +266,7 @@ export default function Recommend() {
   const { isAuthenticated, loading: authLoading, token } = useAuth();
   const [, navigate] = useLocation();
 
+  const [step, setStep] = useState<WizardStep>(1);
   const [mode, setMode] = useState<RecommendMode>("profile");
   const [kindFilter, setKindFilter] = useState<KindFilter>("both");
   const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
@@ -388,7 +412,16 @@ export default function Recommend() {
       : importMethod === "username"
         ? letterboxdUsername.trim().length > 0
         : manualCount >= MIN_MANUAL_RATINGS;
-  const canGenerate = hasSource && (mode !== "genres" || selectedGenres.length > 0);
+  const step2Valid = mode !== "genres" || selectedGenres.length > 0;
+  const canGenerate = hasSource && step2Valid;
+
+  // hint junto al botón deshabilitado: qué falta para poder continuar
+  const step1Hint =
+    importMethod === "zip"
+      ? "Subí tu .zip para continuar."
+      : importMethod === "username"
+        ? "Escribí tu usuario de Letterboxd para continuar."
+        : `Puntuá al menos ${MIN_MANUAL_RATINGS} pelis para continuar.`;
 
   async function handleGenerate() {
     if (!token || !canGenerate) return;
@@ -534,13 +567,57 @@ export default function Recommend() {
         </header>
 
         {!result && !loading && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-12">
-            <aside className="lg:col-span-4 space-y-10 lg:sticky lg:top-24 lg:self-start">
-              <div>
-                <div className="font-mono text-[10px] uppercase tracking-widest mb-3 text-muted-foreground">
-                  [01] Fuente
-                </div>
-                <div className="flex gap-0 mb-4">
+          <div className="max-w-4xl">
+            {/* Stepper: pasos completados clickeables para volver */}
+            <div className="flex items-center gap-3 mb-12 font-mono text-[10px] uppercase tracking-widest">
+              {STEP_LABELS.map((label, i) => {
+                const n = (i + 1) as WizardStep;
+                const done = step > n;
+                const current = step === n;
+                return (
+                  <React.Fragment key={label}>
+                    {i > 0 && <span className="text-muted-foreground/40">→</span>}
+                    <button
+                      type="button"
+                      onClick={() => done && setStep(n)}
+                      disabled={!done}
+                      className={`flex items-center gap-2 transition-colors ${
+                        current
+                          ? "text-foreground"
+                          : done
+                            ? "text-muted-foreground hover:text-accent"
+                            : "text-muted-foreground/40 cursor-default"
+                      }`}
+                    >
+                      <span
+                        className={`size-5 grid place-items-center border text-[10px] ${
+                          current
+                            ? "bg-accent text-accent-foreground border-accent"
+                            : done
+                              ? "bg-foreground text-background border-foreground"
+                              : "border-foreground/30"
+                        }`}
+                      >
+                        {done ? "✓" : n}
+                      </span>
+                      {label}
+                    </button>
+                  </React.Fragment>
+                );
+              })}
+            </div>
+
+            {step === 1 && (
+              <section>
+                <h2 className="text-3xl font-black uppercase tracking-tighter mb-3">
+                  ¿De dónde sacamos tu gusto?
+                </h2>
+                <p className="font-serif italic text-lg text-muted-foreground mb-8 max-w-2xl">
+                  Para recomendarte en serio primero tenemos que conocerte. Elegí cómo nos
+                  contás qué viste y qué te gustó.
+                </p>
+
+                <div className="flex gap-0 mb-6 max-w-xl">
                   <button onClick={() => setImportMethod("zip")} className={tabCls(importMethod === "zip")}>
                     Subir .zip
                   </button>
@@ -552,28 +629,12 @@ export default function Recommend() {
                   </button>
                 </div>
 
-                {importMethod === "manual" ? (
-                  <div>
+                {importMethod === "zip" ? (
+                  <div className="max-w-xl">
                     <p className="font-mono text-[10px] uppercase leading-relaxed text-muted-foreground mb-3">
-                      ¿No tenés Letterboxd? Puntuá pelis conocidas de la lista de la derecha y
-                      armamos tu perfil con eso.
-                    </p>
-                    <div className="font-mono text-xs uppercase tracking-widest">
-                      <span className={manualCount >= MIN_MANUAL_RATINGS ? "text-accent" : ""}>
-                        {manualCount}
-                      </span>{" "}
-                      / {MIN_MANUAL_RATINGS} puntuadas
-                    </div>
-                    {manualCount < MIN_MANUAL_RATINGS && (
-                      <p className="font-mono text-[10px] text-muted-foreground/60 mt-1">
-                        Puntuá al menos {MIN_MANUAL_RATINGS} para empezar.
-                      </p>
-                    )}
-                  </div>
-                ) : importMethod === "zip" ? (
-                  <div>
-                    <p className="font-mono text-[10px] uppercase leading-relaxed text-muted-foreground mb-3">
-                      Descargalo desde Letterboxd: Settings → Data → Export your data.
+                      La mejor opción: trae tu historial completo (ratings, reviews, likes,
+                      watchlist). Descargalo desde Letterboxd: Settings → Data → Export your
+                      data.
                     </p>
                     <div
                       onDrop={handleDrop}
@@ -602,11 +663,12 @@ export default function Recommend() {
                       )}
                     </div>
                   </div>
-                ) : (
-                  <div>
+                ) : importMethod === "username" ? (
+                  <div className="max-w-xl">
                     <p className="font-mono text-[10px] uppercase leading-relaxed text-muted-foreground mb-3">
-                      Leemos tu diario público de Letterboxd (ratings, fechas, rewatches). No
-                      cubre likes/favoritos. Tu perfil tiene que ser público.
+                      Leemos tu diario público de Letterboxd (ratings, fechas, rewatches).
+                      Trae solo lo reciente — el .zip arma un perfil más completo. Tu perfil
+                      tiene que ser público.
                     </p>
                     <input
                       value={letterboxdUsername}
@@ -615,47 +677,126 @@ export default function Recommend() {
                       className="w-full bg-transparent border-b-2 border-foreground py-3 font-mono text-sm placeholder:text-muted-foreground focus:outline-none focus:border-accent"
                     />
                   </div>
-                )}
-              </div>
+                ) : (
+                  <div>
+                    {/* feedback Gaspi: dejar clarísimo que esta grilla es para
+                        conocerte, no el resultado; feedback Simón: ser honestos
+                        con el límite del modo manual */}
+                    <p className="font-mono text-[10px] uppercase leading-relaxed text-muted-foreground mb-2 max-w-2xl">
+                      Estas pelis no son recomendaciones — son para conocerte. Puntuá las que
+                      hayas visto y con eso armamos tu perfil. Tus picks aparecen al final.
+                    </p>
+                    <p className="font-mono text-[10px] uppercase leading-relaxed text-muted-foreground/60 mb-6 max-w-2xl">
+                      Ojo: acá solo sabemos de las pelis que puntúes en esta lista, así que
+                      algún pick puede ser una que ya viste. Si tenés Letterboxd, el .zip
+                      evita eso.
+                    </p>
 
-              <div>
-                <div className="font-mono text-[10px] uppercase tracking-widest mb-3 text-muted-foreground">
-                  [02] Qué querés ver hoy
-                </div>
-                <div className="space-y-2">
+                    <div className="flex items-baseline justify-between gap-4 mb-4 flex-wrap">
+                      <div className="font-mono text-xs uppercase tracking-widest">
+                        <span className={manualCount >= MIN_MANUAL_RATINGS ? "text-accent" : ""}>
+                          {manualCount}
+                        </span>{" "}
+                        / {MIN_MANUAL_RATINGS} puntuadas
+                      </div>
+                    </div>
+
+                    {/* buscar una peli vista que no esté en la lista curada */}
+                    <div className="relative mb-6 max-w-xl">
+                      <input
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        placeholder="¿Viste otra? Buscala por nombre…"
+                        className="w-full bg-transparent border-b-2 border-foreground py-3 font-mono text-sm placeholder:text-muted-foreground focus:outline-none focus:border-accent"
+                      />
+                      {searchResults.length > 0 && (
+                        <div className="absolute z-20 left-0 right-0 mt-1 max-h-80 overflow-y-auto border-2 border-foreground bg-background shadow-lg">
+                          {searchResults.map((item) => (
+                            <button
+                              key={`${item.tmdb_id}-${item.title}`}
+                              onClick={() => addSearchedTitle(item)}
+                              className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-accent/10 transition-colors border-b border-foreground/10 last:border-b-0"
+                            >
+                              {item.poster_path ? (
+                                <img src={item.poster_path} alt="" className="w-8 h-12 object-cover shrink-0" />
+                              ) : (
+                                <div className="w-8 h-12 bg-secondary flex items-center justify-center shrink-0">
+                                  <Film className="w-3 h-3 text-muted-foreground/40" />
+                                </div>
+                              )}
+                              <span className="font-mono text-xs">
+                                {item.title} <span className="text-muted-foreground">({item.year})</span>
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <ManualRatingGrid
+                      titles={manualTitles}
+                      ratings={manualRatings}
+                      loading={loadingTitles}
+                      onRate={rateManual}
+                    />
+                  </div>
+                )}
+              </section>
+            )}
+
+            {step === 2 && (
+              <section>
+                <h2 className="text-3xl font-black uppercase tracking-tighter mb-3">
+                  ¿Qué querés ver hoy?
+                </h2>
+                <p className="font-serif italic text-lg text-muted-foreground mb-8 max-w-2xl">
+                  Todos los modos usan tu perfil — lo que cambia es desde dónde arranca la
+                  búsqueda.
+                </p>
+
+                <div className="space-y-3 max-w-2xl">
                   {modeOptions.map((option) => {
                     const disabled =
                       (option.mode === "watchlist" && importMethod !== "zip") ||
                       (option.mode === "recent" && importMethod === "manual");
                     const disabledReason =
                       option.mode === "watchlist"
-                        ? "La watchlist solo viene en el .zip de Letterboxd — subí tu .zip para usar este modo."
-                        : "Este modo necesita fechas de visto, que el modo sin cuenta no tiene.";
+                        ? "Solo con .zip: la watchlist no viene por las otras vías."
+                        : "Necesita fechas de visto, que el modo sin cuenta no tiene.";
                     return (
                       <button
                         key={option.mode}
                         onClick={() => !disabled && setMode(option.mode)}
                         disabled={disabled}
-                        title={disabled ? disabledReason : undefined}
-                        className={`w-full text-left px-4 py-3 border font-mono text-xs uppercase tracking-widest transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                        className={`w-full text-left px-5 py-4 border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                           mode === option.mode
                             ? "bg-foreground text-background border-foreground"
                             : "border-foreground/20 hover:border-foreground"
                         }`}
                       >
-                        <span className="text-accent mr-2">{mode === option.mode ? "●" : "○"}</span>
-                        {option.label}
+                        <div className="font-mono text-xs uppercase tracking-widest mb-1">
+                          <span className="text-accent mr-2">{mode === option.mode ? "●" : "○"}</span>
+                          {option.label}
+                        </div>
+                        <div
+                          className={`font-serif italic text-sm ${
+                            mode === option.mode ? "text-background/70" : "text-muted-foreground"
+                          }`}
+                        >
+                          {disabled ? disabledReason : option.desc}
+                        </div>
                       </button>
                     );
                   })}
                 </div>
+
                 {mode === "genres" && (
-                  <div className="mt-4 flex flex-wrap gap-2">
+                  <div className="mt-6 flex flex-wrap gap-2 max-w-2xl">
                     {genreOptions.map((genre) => (
                       <button
                         key={genre.key}
                         onClick={() => toggleGenre(genre.key)}
-                        className={`px-3 py-1 font-mono text-[10px] uppercase tracking-widest border transition-colors ${
+                        className={`px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest border transition-colors ${
                           selectedGenres.includes(genre.key)
                             ? "bg-accent text-accent-foreground border-accent"
                             : "border-foreground/20 hover:border-foreground"
@@ -667,86 +808,104 @@ export default function Recommend() {
                   </div>
                 )}
                 {mode === "genres" && selectedGenres.length === 0 && (
-                  <p className="font-mono text-[10px] text-destructive mt-2">Elegí al menos un género.</p>
+                  <p className="font-mono text-[10px] text-destructive mt-3">Elegí al menos un género.</p>
                 )}
-              </div>
+              </section>
+            )}
 
-              <div>
-                <div className="font-mono text-[10px] uppercase tracking-widest mb-3 text-muted-foreground">
-                  [03] Formato
-                </div>
-                <div className="flex gap-0">
+            {step === 3 && (
+              <section>
+                <h2 className="text-3xl font-black uppercase tracking-tighter mb-3">
+                  ¿Películas, series o ambas?
+                </h2>
+                <p className="font-serif italic text-lg text-muted-foreground mb-8 max-w-2xl">
+                  Último paso. Elegí el formato y pedí tus picks.
+                </p>
+
+                <div className="flex gap-0 max-w-xl mb-8">
                   {kindFilterOptions.map((option) => (
                     <button key={option.value} onClick={() => setKindFilter(option.value)} className={tabCls(kindFilter === option.value)}>
                       {option.label}
                     </button>
                   ))}
                 </div>
-              </div>
 
-              <button
-                onClick={handleGenerate}
-                disabled={loading || !canGenerate}
-                className="w-full px-8 py-4 bg-accent text-accent-foreground font-mono text-xs uppercase tracking-widest hover:bg-foreground hover:text-background transition-colors disabled:opacity-60"
-              >
-                Dame mis recomendaciones
-              </button>
-            </aside>
+                <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-8">
+                  Fuente:{" "}
+                  {importMethod === "zip"
+                    ? `.zip (${zipFile?.name ?? ""})`
+                    : importMethod === "username"
+                      ? `@${letterboxdUsername.trim()}`
+                      : `${manualCount} pelis puntuadas`}{" "}
+                  · Modo: {modeOptions.find((o) => o.mode === mode)?.label}
+                  {mode === "genres" &&
+                    ` (${selectedGenres
+                      .map((k) => genreOptions.find((g) => g.key === k)?.label)
+                      .filter(Boolean)
+                      .join(", ")})`}
+                </p>
 
-            <section className="lg:col-span-8">
-              {importMethod === "manual" ? (
-                <>
-                  <div className="flex items-center justify-between gap-4 mb-4">
-                    <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                      [Puntuá las que hayas visto]
-                    </div>
+                {/* feedback punto 3: explicar cómo se calculan los picks, en el
+                    lugar donde el usuario está por pedirlos */}
+                <details className="max-w-2xl mb-4 border border-foreground/20">
+                  <summary className="cursor-pointer px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-muted-foreground hover:text-accent transition-colors">
+                    ¿Cómo se calculan tus picks?
+                  </summary>
+                  <div className="px-4 pb-4 font-serif text-sm leading-relaxed space-y-2">
+                    <p>
+                      Armamos tu perfil con lo que puntuaste: géneros, directores, décadas y
+                      tags de lo que amaste y lo que odiaste. Con eso buscamos candidatos en
+                      TMDb y los puntuamos contra tu perfil — cada pick trae la razón
+                      concreta del match, no un promedio global.
+                    </p>
+                    <p>
+                      Arriba de eso, un agente de IA revisa los candidatos y reescribe las
+                      razones citando películas reales de tu historial. Tu feedback (ya la
+                      vi / no me interesa) entra al cálculo de la próxima tanda.
+                    </p>
                   </div>
+                </details>
+              </section>
+            )}
 
-                  {/* buscar una peli vista que no esté en la lista curada */}
-                  <div className="relative mb-6">
-                    <input
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="¿Viste otra? Buscala por nombre…"
-                      className="w-full bg-transparent border-b-2 border-foreground py-3 font-mono text-sm placeholder:text-muted-foreground focus:outline-none focus:border-accent"
-                    />
-                    {searchResults.length > 0 && (
-                      <div className="absolute z-20 left-0 right-0 mt-1 max-h-80 overflow-y-auto border-2 border-foreground bg-background shadow-lg">
-                        {searchResults.map((item) => (
-                          <button
-                            key={`${item.tmdb_id}-${item.title}`}
-                            onClick={() => addSearchedTitle(item)}
-                            className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-accent/10 transition-colors border-b border-foreground/10 last:border-b-0"
-                          >
-                            {item.poster_path ? (
-                              <img src={item.poster_path} alt="" className="w-8 h-12 object-cover shrink-0" />
-                            ) : (
-                              <div className="w-8 h-12 bg-secondary flex items-center justify-center shrink-0">
-                                <Film className="w-3 h-3 text-muted-foreground/40" />
-                              </div>
-                            )}
-                            <span className="font-mono text-xs">
-                              {item.title} <span className="text-muted-foreground">({item.year})</span>
-                            </span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  <ManualRatingGrid
-                    titles={manualTitles}
-                    ratings={manualRatings}
-                    loading={loadingTitles}
-                    onRate={rateManual}
-                  />
-                </>
+            {/* Navegación del wizard */}
+            <div className="flex items-center justify-between gap-4 mt-12 pt-8 border-t border-foreground/10">
+              {step > 1 ? (
+                <button
+                  onClick={() => setStep((s) => (s - 1) as WizardStep)}
+                  className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground hover:text-accent transition-colors"
+                >
+                  ← Volver
+                </button>
               ) : (
-                <div className="p-8 border-2 border-dashed border-foreground/20 text-center font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                  Tus picks van a aparecer acá
-                </div>
+                <span />
               )}
-            </section>
+
+              <div className="flex items-center gap-4">
+                {step === 1 && !hasSource && (
+                  <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground/60">
+                    {step1Hint}
+                  </span>
+                )}
+                {step < 3 ? (
+                  <button
+                    onClick={() => setStep((s) => (s + 1) as WizardStep)}
+                    disabled={step === 1 ? !hasSource : !step2Valid}
+                    className="px-8 py-4 bg-foreground text-background font-mono text-xs uppercase tracking-widest hover:bg-accent hover:text-accent-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    Continuar →
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleGenerate}
+                    disabled={loading || !canGenerate}
+                    className="px-8 py-4 bg-accent text-accent-foreground font-mono text-xs uppercase tracking-widest hover:bg-foreground hover:text-background transition-colors disabled:opacity-60"
+                  >
+                    Dame mis recomendaciones
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
         )}
 
