@@ -1,22 +1,13 @@
 import { motion, useScroll, useTransform } from "framer-motion";
 import { Film } from "lucide-react";
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { Link } from "wouter";
 
+import { MovieModal, type FeedbackStatus, type Recommendation } from "@/components/MovieModal";
 import { PageTransition } from "@/components/PageTransition";
 import { API_BASE_URL, useAuth } from "@/hooks/useAuth";
 import { useTiltCard } from "@/hooks/useTiltCard";
-
-type Recommendation = {
-  id: number;
-  title: string;
-  year: number;
-  kind: string;
-  why: string;
-  match_score: number;
-  poster_path: string | null;
-  backdrop_path: string | null;
-};
 
 type RecommendationSession = {
   id: number;
@@ -65,11 +56,24 @@ const MARQUEE_NAMES = [
 ];
 
 // same tilt + glare treatment as the poster cards on /recommend
-function CurrentPickCard({ rec }: { rec: Recommendation }) {
+function CurrentPickCard({ rec, onSelect }: { rec: Recommendation; onSelect: () => void }) {
   const { wrapRef, onMouseMove, onMouseLeave } = useTiltCard();
 
   return (
-    <article className="group" style={{ perspective: "1000px" }}>
+    <article
+      className="group cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+      style={{ perspective: "1000px" }}
+      role="button"
+      tabIndex={0}
+      aria-label={`Ver detalle de ${rec.title}`}
+      onClick={onSelect}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect();
+        }
+      }}
+    >
       <div
         ref={wrapRef}
         onMouseMove={onMouseMove}
@@ -122,6 +126,23 @@ export default function Home() {
   const heroY = useTransform(scrollY, [0, 600], [0, -80]);
   const heroOpacity = useTransform(scrollY, [0, 500], [1, 0.3]);
   const [latestSession, setLatestSession] = useState<RecommendationSession | null>(null);
+  const [selectedRec, setSelectedRec] = useState<Recommendation | null>(null);
+  const [feedbackState, setFeedbackState] = useState<Record<number, FeedbackStatus>>({});
+
+  async function submitFeedback(recommendationId: number, status: FeedbackStatus) {
+    if (!token) return;
+    try {
+      const response = await fetch(`${API_BASE_URL}/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ recommendation_id: recommendationId, status }),
+      });
+      if (!response.ok) throw new Error();
+      setFeedbackState((prev) => ({ ...prev, [recommendationId]: status }));
+    } catch {
+      toast.error("No se pudo guardar el feedback.");
+    }
+  }
 
   const ctaHref = isAuthenticated ? "/recommend" : "/login";
   const ctaLabel = isAuthenticated ? "Ir a mis recomendaciones" : "Empezar gratis";
@@ -259,7 +280,7 @@ export default function Home() {
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
             {currentPicks.map((rec) => (
-              <CurrentPickCard key={rec.id} rec={rec} />
+              <CurrentPickCard key={rec.id} rec={rec} onSelect={() => setSelectedRec(rec)} />
             ))}
           </div>
         </section>
@@ -318,6 +339,16 @@ export default function Home() {
           </Link>
         </section>
       </div>
+
+      {selectedRec && (
+        <MovieModal
+          rec={selectedRec}
+          token={token}
+          feedback={feedbackState[selectedRec.id]}
+          onClose={() => setSelectedRec(null)}
+          onFeedback={(status) => submitFeedback(selectedRec.id, status)}
+        />
+      )}
     </PageTransition>
   );
 }
