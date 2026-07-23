@@ -116,6 +116,23 @@ navbar sigue siendo la inicial a propósito (evita un fetch extra por
 página). Con esto el feedback queda 19/20 — solo falta 7 (swipe), a
 validar si sigue haciendo falta con el wizard nuevo.
 
+### Dos bugs reportados por Matías probando en producción
+
+- **"Toy Story" (1995) mostraba el poster de Toy Story 5.** Causa raíz:
+  `search_title` toma `results[0]` de TMDb, que ordena por popularidad —
+  para nombres de franquicia eso devuelve la entrega en cartelera, no la
+  curada. Fix en la función compartida: `search_title(title, year=None)`
+  pasa `primary_release_year` (pelis) / `first_air_date_year` (series) a
+  la búsqueda cuando el año se conoce, con el año dentro de la cache key;
+  `/onboarding/titles` ahora busca cada seed con su año curado. 2 tests de
+  regresión (year en la URL + cache key separada; cada seed buscado con su
+  año). **208 tests.**
+- **Los posters de la grilla "Sin cuenta" no tenían el tilt 3D + glare**
+  del resto de los posters del sitio. La card se extrajo a
+  `ManualRatingCard` (el hook `useTiltCard` necesita una instancia por
+  card) con el mismo tratamiento que `RecommendationCard`. Verificado en
+  el preview: mousemove produce `rotateX/rotateY` + glare.
+
 ## 2026-07-23 (Ola 4 cierre, pulido pre-lanzamiento a amigos, seguridad de sesiones)
 
 Sesión enfocada en cerrar el MVP para mostrarlo a amigos y eventualmente

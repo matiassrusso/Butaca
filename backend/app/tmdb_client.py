@@ -460,8 +460,14 @@ def _search_one(
     genre_tag_map: dict[int, list[str]],
     title: str,
     api_key: str,
+    year: int | None = None,
 ) -> dict | None:
     params = {"api_key": api_key, "query": title, "language": "en-US", "include_adult": "false"}
+    # sin año, results[0] es "el más popular que matchea el texto" — para
+    # títulos de franquicia eso puede ser otra película (ej. "Toy Story"
+    # devolvía Toy Story 5 por hype de estreno en vez de la de 1995)
+    if year is not None:
+        params["primary_release_year" if kind == "movie" else "first_air_date_year"] = str(year)
     data = _get_json(f"{url}?{urllib.parse.urlencode(params)}")
     results = data.get("results", [])
     if not results:
@@ -498,17 +504,18 @@ def _search_one(
     }
 
 
-def search_title(title: str) -> dict | None:
+def search_title(title: str, year: int | None = None) -> dict | None:
     """Best-effort match of a free-text (e.g. Letterboxd) title against TMDb:
     tries movie search first, then TV. Cached for a day since a title's
-    genres/year don't change."""
+    genres/year don't change. Pass `year` when known to pin the exact film
+    (franchise names resolve to the currently-hyped entry otherwise)."""
     api_key = os.environ.get("TMDB_API_KEY")
     if not api_key:
         raise TmdbError("TMDB_API_KEY no configurada.")
 
-    cache_key = title.strip().lower()
-    if not cache_key:
+    if not title.strip():
         return None
+    cache_key = f"{title.strip().lower()}|{year}" if year is not None else title.strip().lower()
 
     cached = _SEARCH_CACHE.get(cache_key)
     if cached is not None:
@@ -521,9 +528,9 @@ def search_title(title: str) -> dict | None:
         # thread may have already evicted this same expired key.
         _SEARCH_CACHE.pop(cache_key, None)
 
-    result = _search_one(SEARCH_URL, "movie", GENRE_ID_NAME_MAP, GENRE_ID_TAG_MAP, title, api_key)
+    result = _search_one(SEARCH_URL, "movie", GENRE_ID_NAME_MAP, GENRE_ID_TAG_MAP, title, api_key, year)
     if result is None:
-        result = _search_one(SEARCH_TV_URL, "series", TV_GENRE_ID_NAME_MAP, TV_GENRE_ID_TAG_MAP, title, api_key)
+        result = _search_one(SEARCH_TV_URL, "series", TV_GENRE_ID_NAME_MAP, TV_GENRE_ID_TAG_MAP, title, api_key, year)
 
     _SEARCH_CACHE[cache_key] = (_now_monotonic() + TITLE_CACHE_TTL_SECONDS, result)
     _SEARCH_CACHE.move_to_end(cache_key)

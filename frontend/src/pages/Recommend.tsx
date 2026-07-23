@@ -192,6 +192,81 @@ function RecommendationCard({
 
 // ─── Onboarding rating grid (no Letterboxd) ─────────────────────────────────
 
+// mismo tilt 3D + glare que los posters de picks (useTiltCard necesita una
+// instancia por card, por eso es un componente y no un map inline)
+function ManualRatingCard({
+  item,
+  current,
+  onRate,
+}: {
+  item: OnboardingTitle;
+  current: number | undefined;
+  onRate: (title: string, rating: number | null) => void;
+}) {
+  const { wrapRef, onMouseMove, onMouseLeave } = useTiltCard();
+
+  return (
+    <div className="flex flex-col">
+      <div style={{ perspective: "1000px" }}>
+        <div
+          ref={wrapRef}
+          onMouseMove={onMouseMove}
+          onMouseLeave={onMouseLeave}
+          className="group relative overflow-hidden aspect-[2/3] bg-secondary mb-2 border border-foreground/10 transition-transform duration-200 ease-out"
+          style={{ transformStyle: "preserve-3d" }}
+        >
+          {item.poster_path ? (
+            <img
+              src={item.poster_path}
+              alt={item.title}
+              loading="lazy"
+              className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-[1.04]"
+            />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center">
+              <Film className="w-7 h-7 text-muted-foreground/40" />
+            </div>
+          )}
+          <div
+            className="pointer-events-none absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 mix-blend-overlay"
+            style={{
+              background:
+                "radial-gradient(circle at var(--mx, 50%) var(--my, 50%), rgba(255,255,255,0.5), transparent 55%)",
+            }}
+          />
+        </div>
+      </div>
+      <div className="font-black uppercase text-xs tracking-tighter leading-none mb-0.5">{item.title}</div>
+      <div className="font-mono text-[10px] text-muted-foreground mb-2">{item.year}</div>
+      <div className="mt-auto grid grid-cols-2 gap-1">
+        {manualRatingOptions.map((option) => (
+          <button
+            key={option.value}
+            onClick={() => onRate(item.title, current === option.value ? null : option.value)}
+            className={`px-1.5 py-1.5 font-mono text-[9px] uppercase tracking-wider border transition-colors ${
+              current === option.value
+                ? "bg-accent text-accent-foreground border-accent"
+                : "border-foreground/20 hover:border-foreground"
+            }`}
+          >
+            {option.label}
+          </button>
+        ))}
+        <button
+          onClick={() => onRate(item.title, null)}
+          className={`px-1.5 py-1.5 font-mono text-[9px] uppercase tracking-wider border transition-colors ${
+            current === undefined
+              ? "bg-foreground text-background border-foreground"
+              : "border-foreground/20 hover:border-foreground"
+          }`}
+        >
+          No la vi
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function ManualRatingGrid({
   titles,
   ratings,
@@ -213,49 +288,9 @@ function ManualRatingGrid({
 
   return (
     <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
-      {titles.map((item) => {
-        const current = ratings[item.title];
-        return (
-          <div key={item.title} className="flex flex-col">
-            <div className="relative overflow-hidden aspect-[2/3] bg-secondary mb-2 border border-foreground/10">
-              {item.poster_path ? (
-                <img src={item.poster_path} alt={item.title} className="w-full h-full object-cover" />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center">
-                  <Film className="w-7 h-7 text-muted-foreground/40" />
-                </div>
-              )}
-            </div>
-            <div className="font-black uppercase text-xs tracking-tighter leading-none mb-0.5">{item.title}</div>
-            <div className="font-mono text-[10px] text-muted-foreground mb-2">{item.year}</div>
-            <div className="mt-auto grid grid-cols-2 gap-1">
-              {manualRatingOptions.map((option) => (
-                <button
-                  key={option.value}
-                  onClick={() => onRate(item.title, current === option.value ? null : option.value)}
-                  className={`px-1.5 py-1.5 font-mono text-[9px] uppercase tracking-wider border transition-colors ${
-                    current === option.value
-                      ? "bg-accent text-accent-foreground border-accent"
-                      : "border-foreground/20 hover:border-foreground"
-                  }`}
-                >
-                  {option.label}
-                </button>
-              ))}
-              <button
-                onClick={() => onRate(item.title, null)}
-                className={`px-1.5 py-1.5 font-mono text-[9px] uppercase tracking-wider border transition-colors ${
-                  current === undefined
-                    ? "bg-foreground text-background border-foreground"
-                    : "border-foreground/20 hover:border-foreground"
-                }`}
-              >
-                No la vi
-              </button>
-            </div>
-          </div>
-        );
-      })}
+      {titles.map((item) => (
+        <ManualRatingCard key={item.title} item={item} current={ratings[item.title]} onRate={onRate} />
+      ))}
     </div>
   );
 }

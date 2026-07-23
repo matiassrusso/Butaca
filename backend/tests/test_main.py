@@ -984,10 +984,13 @@ def test_onboarding_titles_returns_seeds_without_tmdb_key(monkeypatch) -> None:
 
 def test_onboarding_titles_resolves_posters_with_tmdb(monkeypatch) -> None:
     monkeypatch.setenv("TMDB_API_KEY", "fake-key")
-    monkeypatch.setattr(
-        "backend.app.main.tmdb_client.search_title",
-        lambda title: {"tmdb_id": 42, "poster_path": "https://img/p.jpg"},
-    )
+    seen_years: list[int] = []
+
+    def fake_search(title: str, year: int | None = None) -> dict:
+        seen_years.append(year)
+        return {"tmdb_id": 42, "poster_path": "https://img/p.jpg"}
+
+    monkeypatch.setattr("backend.app.main.tmdb_client.search_title", fake_search)
     headers = _auth_headers("onbposter")
 
     response = client.get("/onboarding/titles", headers=headers)
@@ -996,6 +999,8 @@ def test_onboarding_titles_resolves_posters_with_tmdb(monkeypatch) -> None:
     titles = response.json()["titles"]
     assert all(item["poster_path"] == "https://img/p.jpg" for item in titles)
     assert all(item["tmdb_id"] == 42 for item in titles)
+    # cada seed tiene que buscarse con su año curado (regresión Toy Story 5)
+    assert sorted(seen_years) == sorted(s["year"] for s in onboarding_titles.ONBOARDING_TITLES)
 
 
 def test_onboarding_titles_requires_auth() -> None:

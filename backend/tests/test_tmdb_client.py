@@ -370,6 +370,34 @@ def test_search_title_caches_result(monkeypatch) -> None:
     assert len(calls) == 1
 
 
+def test_search_title_with_year_pins_the_release_year(monkeypatch) -> None:
+    # regresión: "Toy Story" sin año resolvía al Toy Story 5 en cartelera
+    # (results[0] ordena por popularidad) en vez de la película de 1995
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    urls: list[str] = []
+
+    def fake_get_json(url: str) -> dict:
+        urls.append(url)
+        assert "primary_release_year=1995" in url
+        return {
+            "results": [
+                {"id": 862, "title": "Toy Story", "release_date": "1995-11-22", "genre_ids": [16]}
+            ]
+        }
+
+    monkeypatch.setattr(tmdb_client, "_get_json", fake_get_json)
+
+    match = tmdb_client.search_title("Toy Story", 1995)
+
+    assert match is not None
+    assert match["tmdb_id"] == 862
+    assert match["year"] == 1995
+    # el año participa de la cache key: la misma búsqueda sin año no debe
+    # pisar ni reusar la entrada con año
+    tmdb_client.search_title("Toy Story", 1995)
+    assert len(urls) == 1
+
+
 def test_resolve_person_id_defaults_to_first_result_sorted_by_popularity(monkeypatch) -> None:
     monkeypatch.setenv("TMDB_API_KEY", "fake-key")
 

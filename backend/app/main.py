@@ -707,7 +707,9 @@ def onboarding_titles_endpoint(
     if tmdb_client.is_configured():
         def _match(seed: dict) -> tuple[str, dict | None]:
             try:
-                return seed["title"], tmdb_client.search_title(seed["title"])
+                # el año curado fija la película exacta — sin él, "Toy Story"
+                # resolvía al Toy Story 5 en cartelera, no al de 1995
+                return seed["title"], tmdb_client.search_title(seed["title"], seed["year"])
             except tmdb_client.TmdbError:
                 return seed["title"], None
 
