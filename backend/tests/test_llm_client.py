@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from backend.app import llm_client
@@ -88,6 +90,32 @@ def test_call_nvidia_wraps_network_errors(monkeypatch) -> None:
 
     with pytest.raises(llm_client.LlmError):
         llm_client._call_nvidia("prompt", "fake-key")
+
+
+def test_call_nvidia_requests_json_object_format(monkeypatch) -> None:
+    # el modelo devuelve JSON inválido de forma intermitente sin esto; regresión
+    # del "refine caía siempre al heurístico" reportado desde producción
+    captured = {}
+
+    class _Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return b'{"choices": [{"message": {"content": "{\\"ok\\": true}"}}]}'
+
+    def fake_urlopen(request, timeout):
+        captured["body"] = json.loads(request.data)
+        return _Resp()
+
+    monkeypatch.setattr(llm_client.urllib.request, "urlopen", fake_urlopen)
+
+    llm_client._call_nvidia("prompt", "fake-key")
+
+    assert captured["body"]["response_format"] == {"type": "json_object"}
 
 
 def test_extract_json_parses_plain_json() -> None:

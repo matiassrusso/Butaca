@@ -142,6 +142,11 @@ def _call_nvidia(prompt: str, api_key: str) -> dict:
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.4,
             "chat_template_kwargs": {"enable_thinking": False},
+            # sin esto el modelo devuelve JSON casi-válido de forma intermitente
+            # (comillas internas sin escapar, trailing commas) y ~1 de cada 3
+            # refines caía al heurístico; con prompts largos reales, siempre.
+            # json_object garantiza sintaxis parseable (medido: 8/8 vs 4/6).
+            "response_format": {"type": "json_object"},
         }
     ).encode("utf-8")
     request = urllib.request.Request(

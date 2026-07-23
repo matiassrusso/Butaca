@@ -132,6 +132,34 @@ validar si sigue haciendo falta con el wizard nuevo.
   `ManualRatingCard` (el hook `useTiltCard` necesita una instancia por
   card) con el mismo tratamiento que `RecommendationCard`. Verificado en
   el preview: mousemove produce `rotateX/rotateY` + glare.
+- Default del formato en el wizard: **Películas** en vez de Ambas (pedido
+  de Matías) — `kindFilter` arranca en `"movie"`.
+
+### El refine del LLM caía SIEMPRE al heurístico en producción (bug real)
+
+Matías notó que los 6 "why" de sus picks eran casi calcados ("tira para el
+foco en los personajes, que es lo que venís premiando, y cae dentro de...")
+— la plantilla de `recommender.py`, no la IA. Diagnóstico con los logs de
+Render (vía su API REST, misma vía que se usó para las env vars): todas las
+requests recientes daban `refined=False` con
+`Session refine failed: ... formato inesperado: Expecting value: line 1
+column 19 (char 18)`. O sea el modelo **sí** corría (`llm=True`, key OK),
+pero su respuesta no parseaba como JSON.
+
+Reproducido contra la API real de NVIDIA con el prompt largo real: el modelo
+devuelve JSON casi-válido de forma **intermitente** (comillas dobles
+internas sin escapar, trailing commas, comillas tipográficas) — **4 de 6**
+corridas OK con prompt largo, y como en prod los prompts son aún más largos
+(perfil + 40 reseñas + candidatos con overviews), fallaba prácticamente
+siempre. No había reintento ni parseo tolerante, y `_extract_json` solo
+manejaba el fence de markdown.
+
+Fix de raíz: `response_format: {"type": "json_object"}` en el payload de
+`_call_nvidia` — NVIDIA NIM es compatible con OpenAI y el modelo lo respeta.
+Medido: **8/8 corridas OK** con el flag vs 4/6 sin él; y `refine_recommendations`
+end-to-end 4/4 con razones reales citando títulos del historial ("Como en
+Prisoners, explora secretos familiares traumáticos..."). 1 test de regresión
+(el payload manda `response_format`). **209 tests.**
 
 ## 2026-07-23 (Ola 4 cierre, pulido pre-lanzamiento a amigos, seguridad de sesiones)
 

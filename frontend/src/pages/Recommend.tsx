@@ -303,7 +303,7 @@ export default function Recommend() {
 
   const [step, setStep] = useState<WizardStep>(1);
   const [mode, setMode] = useState<RecommendMode>("profile");
-  const [kindFilter, setKindFilter] = useState<KindFilter>("both");
+  const [kindFilter, setKindFilter] = useState<KindFilter>("movie");
   const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
   const [importMethod, setImportMethod] = useState<ImportMethod>("zip");
   const [zipFile, setZipFile] = useState<File | null>(null);
