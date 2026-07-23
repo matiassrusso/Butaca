@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- butaca de cine: paleta papel/terracota del tema, radius 0 -->
+  <rect width="64" height="64" fill="#C2410C"/>
+  <rect x="20" y="10" width="24" height="26" fill="#FAF7F0"/>
+  <rect x="18" y="38" width="28" height="8" fill="#FAF7F0"/>
+  <rect x="10" y="24" width="8" height="30" fill="#FAF7F0"/>
+  <rect x="46" y="24" width="8" height="30" fill="#FAF7F0"/>
+</svg>
