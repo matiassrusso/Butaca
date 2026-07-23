@@ -72,6 +72,25 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
       butaca.xyz y confirme que cada "why" es distinto y cita títulos del
       historial. **Es lo primero a chequear al retomar.**
 
+- [ ] **Idea (a diseñar bien antes de implementar): esconder los "why" del
+      menú y revelarlos con efecto máquina de escribir al entrar al poster.**
+      Pedido de Matías. Dos partes:
+      1. Los "why" ya NO se muestran de entrada en la grilla de resultados de
+         `/recommend` — la card muestra solo poster + título + año. La razón
+         aparece recién al abrir el detalle del poster (el `MovieModal`).
+      2. La primera vez que abrís cada poster, el texto del "why" se anima
+         como escrito por una máquina de escribir (typewriter). Solo la
+         primera vez por poster en la sesión — reabrir el mismo no re-anima.
+      A pensar al implementar: dónde vive el "ya lo vi" (state en el
+      componente de resultados, keyed por rec.id); respetar
+      `prefers-reduced-motion` (sin animación → texto completo directo);
+      velocidad del efecto; que no pelee con el render progresivo del refine
+      (si el "why" del LLM llega mientras el modal está abierto). Archivos
+      probables: `frontend/src/pages/Recommend.tsx` (sacar el "why" de
+      `RecommendationCard`) y `frontend/src/components/MovieModal.tsx`
+      (typewriter + flag de primera-vez). "Después lo pensamos bien" (Matías)
+      — no arrancar sin cerrar el diseño.
+
 - [ ] **Decidir el fallback del LLM: ¿sumar kimi-k2.6 o quedarnos con
       llama-3.1-70b?** — hoy el fallback es `meta/llama-3.1-70b-instruct`
       (drop-in probado 5/5). Kimi-k2.6 lo pidió Matías: aparece en el catálogo
