@@ -15,11 +15,12 @@
    `/login?register=1` y `Login.tsx` lee el query param para arrancar en
    modo registro.
 
-2. **Grilla de resultados en `/recommend`: posters demasiado grandes en
+2. ~~**Grilla de resultados en `/recommend`: posters demasiado grandes en
    pantallas anchas, mucho scroll.** Los posters usan `aspect-[2/3]
    w-full` en una grilla de 2 columnas — en desktop ancho (1280px) cada
    poster sale ~900px de alto, más que el viewport. Confirmado con
-   screenshot.
+   screenshot.~~ **Resuelto 2026-07-23:** `lg:grid-cols-3` — en desktop
+   ancho los 6 picks entran en 2 filas de 3 con posters de ~600px.
 
 3. ~~**(producto) No está explicado en el sitio cómo se calculan las
    recomendaciones.** La gente pregunta. Hay una explicación honesta lista
@@ -141,7 +142,7 @@ Sin priorizar todavía. A ojo, agrupando:
   **Atacado 2026-07-23:** el modo manual ahora avisa "acá solo sabemos de
   las pelis que puntúes en esta lista, así que algún pick puede ser una
   que ya viste — el .zip evita eso".
-- **Estado 2026-07-23 (sesión 2):** resueltos 1, 3, 4, 5, 6, 8, 9, 10, 11,
-  12, 13, 19 + aviso del 17. Quedan: 2 (grilla de resultados), 7 (swipe
-  onboarding), 14/15 (navbar destacando Recomendar / estilo YouTube), 16
-  (avatares), 20 (perfil real).
+- **Estado 2026-07-23 (sesión 2):** resueltos 1, 2, 3, 4, 5, 6, 8, 9, 10,
+  11, 12, 13, 19 + aviso del 17. Quedan: 7 (swipe onboarding), 14/15
+  (navbar destacando Recomendar / estilo YouTube), 16 (avatares), 20
+  (perfil real).

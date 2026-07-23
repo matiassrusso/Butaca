@@ -63,6 +63,15 @@ la TMDb key vieja del `.env`, esperado), volver/avanzar preserva estado.
 Build de frontend limpio. Del feedback quedan: 2 (grilla de resultados), 7
 (swipe), 14/15 (navbar), 16 (avatares), 20 (perfil real).
 
+### Grilla de resultados a 3 columnas en desktop (punto 2)
+
+Los posters (`aspect-[2/3] w-full`) en la grilla de 2 columnas salían ~900px
+de alto en pantallas anchas — más que el viewport. Fix de una línea:
+`lg:grid-cols-3` en la grilla de resultados de `Recommend.tsx`; los 6 picks
+entran en 2 filas de 3 con posters de ~600px. Verificado con
+`getComputedStyle` en el preview (3 columnas computadas a 1280px). En
+mobile/tablet no cambia nada (1 y 2 columnas como antes).
+
 ## 2026-07-23 (Ola 4 cierre, pulido pre-lanzamiento a amigos, seguridad de sesiones)
 
 Sesión enfocada en cerrar el MVP para mostrarlo a amigos y eventualmente

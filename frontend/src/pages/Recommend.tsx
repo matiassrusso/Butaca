@@ -962,7 +962,10 @@ export default function Recommend() {
               </p>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-10">
+            {/* feedback: a 2 columnas en desktop ancho cada poster salía más
+                alto que el viewport — 3 columnas achican a ~600px y los 6
+                picks entran en 2 filas */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-10">
               {result.recommendations.map((rec, i) => (
                 <RecommendationCard
                   key={rec.id}
