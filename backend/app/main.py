@@ -380,6 +380,25 @@ def taste_profile_endpoint(
     return TasteProfileResponse(**profile)
 
 
+@app.get("/profile/summary")
+def profile_summary(user: sqlite3.Row = Depends(auth.get_current_user)) -> dict:
+    summary = db.get_profile_summary(user["id"])
+
+    # avatar (feedback #16): un still de la peli mejor puntuada del usuario —
+    # personal y determinístico en vez de random. Best-effort: sin TMDb (o si
+    # falla la búsqueda) queda null y el frontend cae a la inicial.
+    avatar_url = None
+    if summary["top_title"]:
+        try:
+            match = tmdb_client.search_title(summary["top_title"])
+            if match:
+                avatar_url = match.get("backdrop_path") or match.get("poster_path")
+        except Exception as exc:  # noqa: BLE001 - mismo criterio que _finish_recommend
+            logger.warning("profile summary avatar lookup failed: %s", exc)
+    summary["avatar_url"] = avatar_url
+    return summary
+
+
 def _validate_recommend_params(mode: str, kind_filter: str) -> None:
     if mode not in VALID_MODES:
         raise HTTPException(status_code=400, detail="Modo de recomendación inválido.")

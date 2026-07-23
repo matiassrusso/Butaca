@@ -568,6 +568,50 @@ def get_watched_items(user_id: int) -> list[dict]:
     return items
 
 
+def get_profile_summary(user_id: int) -> dict:
+    """Datos de cuenta + resumen de actividad para la página de perfil, todo
+    en una conexión. AS n en los COUNT para que la fila lea igual vía
+    sqlite3.Row y RealDictCursor (mismo criterio que count_sessions_since)."""
+    with get_connection() as conn:
+        user = conn.execute(
+            "SELECT username, email, email_verified, created_at FROM users WHERE id = ?",
+            (user_id,),
+        ).fetchone()
+        rated = conn.execute(
+            "SELECT COUNT(DISTINCT title) AS n FROM rated_items WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()["n"]
+        sessions = conn.execute(
+            "SELECT COUNT(*) AS n FROM recommendation_sessions WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()["n"]
+        feedback_count = conn.execute(
+            "SELECT COUNT(*) AS n FROM feedback WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()["n"]
+        watchlist = conn.execute(
+            "SELECT COUNT(*) AS n FROM watchlist_items WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()["n"]
+        top = conn.execute(
+            "SELECT title, rating FROM rated_items WHERE user_id = ? ORDER BY rating DESC, id DESC LIMIT 1",
+            (user_id,),
+        ).fetchone()
+
+    return {
+        "username": user["username"],
+        "email": user["email"],
+        "email_verified": bool(user["email_verified"]),
+        "member_since": user["created_at"],
+        "rated_count": rated,
+        "session_count": sessions,
+        "feedback_count": feedback_count,
+        "watchlist_count": watchlist,
+        "top_title": top["title"] if top else None,
+        "top_rating": top["rating"] if top else None,
+    }
+
+
 def create_recommendation_session(user_id: int, mood: str, taste_summary: str) -> int:
     with get_connection() as conn:
         cursor = conn.execute(

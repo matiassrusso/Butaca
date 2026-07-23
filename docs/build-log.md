@@ -87,6 +87,35 @@ lo persiste, navegar desde el menú cierra y va a la ruta. El avatar con
 stills de películas (punto 16) queda para cuando exista el perfil real
 (punto 20).
 
+### Perfil real con avatar de película (puntos 16 y 20)
+
+`/profile` deja de ser solo el mapa de afinidad y abre con identidad:
+
+- **Backend:** `GET /profile/summary` nuevo (`main.py`) sobre
+  `db.get_profile_summary` — cuenta (username, email, verificado, miembro
+  desde) + actividad (vistas distintas, sesiones, watchlist, feedback) en
+  una sola conexión, más el título mejor puntuado. El **avatar** sale del
+  still (backdrop, cae a poster) de esa mejor puntuada vía el
+  `search_title` cacheado que ya existía — personal y determinístico en
+  vez del "random" que proponía el punto 16; sin TMDb o sin historial
+  degrada a null con warning logueado, no a error. 3 tests nuevos
+  (auth requerido, usuario fresco todo en cero, usuario con actividad y
+  top_title correcto por rating, no por orden de import). **207 tests.**
+- **Frontend:** header de `Profile.tsx` rearmado — avatar (img del still o
+  bloque con la inicial), username en negro grande, línea "miembro desde ·
+  email · verificado", strip de 4 stats, y leyenda "tu avatar sale de tu
+  mejor puntuada: X". El mapa de afinidad pasó a sección `[Mapa de
+  afinidad]` con el contador de matcheados al costado. El fetch del
+  summary es independiente del de taste: si TMDb falla, la identidad se
+  muestra igual.
+
+Verificado en el preview local: header con stats reales (19 vistas / 2
+sesiones del usuario de prueba), avatar cayendo a la inicial porque la
+TMDb key local sigue vieja (en producción sale el still). El avatar del
+navbar sigue siendo la inicial a propósito (evita un fetch extra por
+página). Con esto el feedback queda 19/20 — solo falta 7 (swipe), a
+validar si sigue haciendo falta con el wizard nuevo.
+
 ## 2026-07-23 (Ola 4 cierre, pulido pre-lanzamiento a amigos, seguridad de sesiones)
 
 Sesión enfocada en cerrar el MVP para mostrarlo a amigos y eventualmente

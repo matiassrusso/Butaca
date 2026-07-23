@@ -1081,3 +1081,51 @@ def test_recommend_manual_excludes_rated_titles_from_picks() -> None:
     rated = {item["title"] for item in _MANUAL_RATINGS}
     returned = {item["title"] for item in response.json()["recommendations"]}
     assert not (rated & returned)
+
+
+def test_profile_summary_requires_auth() -> None:
+    assert client.get("/profile/summary").status_code == 401
+
+
+def test_profile_summary_fresh_user_has_empty_activity() -> None:
+    headers = _auth_headers("summaryfresh")
+
+    response = client.get("/profile/summary", headers=headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["username"] == "summaryfresh"
+    assert body["email"] == "summaryfresh@example.com"
+    assert body["email_verified"] is False
+    assert body["member_since"]
+    assert body["rated_count"] == 0
+    assert body["session_count"] == 0
+    assert body["feedback_count"] == 0
+    assert body["watchlist_count"] == 0
+    assert body["top_title"] is None
+    # sin TMDB_API_KEY el lookup del avatar degrada a null, no a error
+    assert body["avatar_url"] is None
+
+
+def test_profile_summary_counts_activity() -> None:
+    headers = _auth_headers("summaryactive")
+    picks = _post_zip(
+        headers,
+        ratings_csv="Name,Rating,Review\nWhiplash,4.5,intense\nMad Max: Fury Road,1.5,too loud",
+    ).json()["recommendations"]
+    client.post(
+        "/feedback",
+        headers=headers,
+        json={"recommendation_id": picks[0]["id"], "status": "interested"},
+    )
+
+    response = client.get("/profile/summary", headers=headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["rated_count"] == 2
+    assert body["session_count"] == 1
+    assert body["feedback_count"] == 1
+    # top_title = la mejor puntuada, no la última importada
+    assert body["top_title"] == "Whiplash"
+    assert body["top_rating"] == 4.5

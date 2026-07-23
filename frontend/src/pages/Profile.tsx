@@ -19,6 +19,26 @@ type TasteProfile = {
   top_actors: PersonCount[];
 };
 
+type ProfileSummary = {
+  username: string;
+  email: string | null;
+  email_verified: boolean;
+  member_since: string;
+  rated_count: number;
+  session_count: number;
+  feedback_count: number;
+  watchlist_count: number;
+  top_title: string | null;
+  avatar_url: string | null;
+};
+
+// created_at viene como "YYYY-MM-DD HH:MM:SS" UTC de ambos backends
+function formatMemberSince(value: string): string {
+  const date = new Date(value.replace(" ", "T") + "Z");
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString("es-AR", { month: "long", year: "numeric" });
+}
+
 const RADAR_SIZE = 360;
 const RADAR_CENTER = RADAR_SIZE / 2;
 const RADAR_RADIUS = 140;
@@ -116,6 +136,7 @@ export default function Profile() {
   const { isAuthenticated, loading: authLoading, token, user, deleteAccount } = useAuth();
   const [, navigate] = useLocation();
   const [profile, setProfile] = useState<TasteProfile | null>(null);
+  const [summary, setSummary] = useState<ProfileSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -155,6 +176,17 @@ export default function Profile() {
     setLoading(true);
     setError("");
 
+    // el summary (cuenta + actividad) es independiente del mapa de afinidad:
+    // si TMDb falla, el header del perfil se muestra igual
+    fetch(`${API_BASE_URL}/profile/summary`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body: ProfileSummary | null) => {
+        if (!cancelled && body) setSummary(body);
+      })
+      .catch(() => {});
+
     fetch(`${API_BASE_URL}/profile/taste`, {
       headers: { Authorization: `Bearer ${token}` },
     })
@@ -193,18 +225,86 @@ export default function Profile() {
   return (
     <PageTransition>
       <main className="max-w-7xl mx-auto px-6 pt-16 pb-24">
+        {/* Perfil real (feedback #20): identidad + actividad, no solo el mapa */}
         <header className="pb-10 border-b-2 border-foreground mb-16">
-          {profile && profile.matched_count < profile.total_count && (
-            <div className="flex items-baseline justify-end mb-4">
-              <span className="font-mono text-xs text-muted-foreground">
-                {profile.matched_count} de {profile.total_count} títulos matcheados
-              </span>
+          <div className="flex flex-col md:flex-row md:items-end gap-8">
+            {/* avatar: still de la peli mejor puntuada (feedback #16), cae a la inicial */}
+            <div className="shrink-0">
+              {summary?.avatar_url ? (
+                <img
+                  src={summary.avatar_url}
+                  alt={summary.top_title ? `Still de ${summary.top_title}` : "Avatar"}
+                  className="size-28 md:size-32 object-cover border-2 border-foreground"
+                />
+              ) : (
+                <div className="size-28 md:size-32 grid place-items-center bg-foreground text-background border-2 border-foreground font-black text-5xl uppercase">
+                  {user?.username?.[0]?.toUpperCase() ?? "?"}
+                </div>
+              )}
+            </div>
+
+            <div className="min-w-0">
+              <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-3">
+                [Perfil]
+              </div>
+              <h1 className="text-5xl md:text-6xl font-black uppercase tracking-tighter leading-[0.9] break-words">
+                {user?.username}
+              </h1>
+              <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mt-4">
+                {summary?.member_since && <>Miembro desde {formatMemberSince(summary.member_since)}</>}
+                {summary?.email && (
+                  <>
+                    {" · "}
+                    <span className="normal-case tracking-normal">{summary.email}</span>
+                    {summary.email_verified ? (
+                      <span className="text-accent"> ✓ verificado</span>
+                    ) : (
+                      <span> · sin verificar</span>
+                    )}
+                  </>
+                )}
+              </p>
+              {summary?.avatar_url && summary.top_title && (
+                <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground/60 mt-1">
+                  Tu avatar sale de tu mejor puntuada: {summary.top_title}
+                </p>
+              )}
+            </div>
+          </div>
+
+          {summary && (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-0 mt-10 border-2 border-foreground">
+              {[
+                { label: "Vistas", value: summary.rated_count },
+                { label: "Sesiones de picks", value: summary.session_count },
+                { label: "En watchlist", value: summary.watchlist_count },
+                { label: "Feedback dado", value: summary.feedback_count },
+              ].map((stat, i) => (
+                <div
+                  key={stat.label}
+                  className={`px-5 py-4 border-foreground/20 ${i % 2 === 1 ? "border-l" : ""} ${
+                    i > 0 ? "md:border-l" : ""
+                  } ${i >= 2 ? "border-t md:border-t-0" : ""}`}
+                >
+                  <div className="text-3xl font-black tracking-tighter">{stat.value}</div>
+                  <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                    {stat.label}
+                  </div>
+                </div>
+              ))}
             </div>
           )}
-          <h1 className="text-6xl md:text-7xl font-black uppercase tracking-tighter leading-[0.9]">
-            Mapa de <span className="text-accent italic font-serif normal-case tracking-normal">afinidad</span>
-          </h1>
         </header>
+
+        <div className="flex items-baseline gap-4 mb-10">
+          <span className="font-mono text-xs px-2 py-1 border border-foreground/20">[Mapa de afinidad]</span>
+          <div className="h-px flex-grow bg-foreground/10" />
+          {profile && profile.matched_count < profile.total_count && (
+            <span className="font-mono text-xs text-muted-foreground shrink-0">
+              {profile.matched_count} de {profile.total_count} títulos matcheados
+            </span>
+          )}
+        </div>
 
         {loading && (
           <div className="py-20 text-center">

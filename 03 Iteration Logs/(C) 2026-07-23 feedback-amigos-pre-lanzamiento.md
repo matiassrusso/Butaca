@@ -97,9 +97,13 @@
     oscuro/claro, Salir), con cierre por click afuera/Escape/navegación.
     El avatar con stills de películas (16) queda para cuando exista el
     perfil real (20).
-16. Avatares random generados con fotos/stills de películas en vez de un
+16. ~~Avatares random generados con fotos/stills de películas en vez de un
     círculo con inicial — hoy no existe ningún concepto de avatar en el
-    sitio.
+    sitio.~~ **Resuelto 2026-07-23** (variante mejor que random): el avatar
+    del perfil es el still (backdrop de TMDb) de **tu película mejor
+    puntuada** — personal y determinístico. Sin TMDb o sin historial cae a
+    la inicial. Pendiente menor: el avatar del navbar sigue siendo la
+    inicial (usar el still ahí pediría un fetch extra en cada página).
 
 ## Simón
 
@@ -126,10 +130,15 @@
 
 ## Notas propias (Matías)
 
-20. Hacer una sección de perfil propio real. Hoy `/profile` es solo el
+20. ~~Hacer una sección de perfil propio real. Hoy `/profile` es solo el
     mapa de afinidad (géneros/directores/décadas/actores) + la zona de
     borrar cuenta — nada de "vos" (sin avatar, sin bio, sin datos de
-    cuenta ni resumen de actividad). Conecta con la idea 16.
+    cuenta ni resumen de actividad). Conecta con la idea 16.~~ **Resuelto
+    2026-07-23:** `/profile` ahora abre con identidad real — avatar (still
+    de tu mejor puntuada, ver 16), username grande, "miembro desde" + email
+    con estado de verificación, y 4 stats de actividad (vistas, sesiones de
+    picks, watchlist, feedback) vía `GET /profile/summary` nuevo. El mapa
+    de afinidad pasó a ser una sección debajo.
 
 ## Para retomar
 
@@ -150,5 +159,6 @@ Sin priorizar todavía. A ojo, agrupando:
   las pelis que puntúes en esta lista, así que algún pick puede ser una
   que ya viste — el .zip evita eso".
 - **Estado 2026-07-23 (sesión 2):** resueltos 1, 2, 3, 4, 5, 6, 8, 9, 10,
-  11, 12, 13, 14, 15, 19 + aviso del 17. Quedan: 7 (swipe onboarding), 16
-  (avatares), 20 (perfil real).
+  11, 12, 13, 14, 15, 16, 19, 20 + aviso del 17. Queda solo: 7 (swipe
+  onboarding) — a validar si hace falta después de que los amigos prueben
+  el wizard nuevo.
