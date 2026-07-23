@@ -53,6 +53,36 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
       resolvió la confusión antes de invertir en un rediseño de
       interacción. Decidir cuando los amigos vuelvan a probar.
 
+- [x] **Bugs post-feedback + refine del LLM (2026-07-23, sesión 3)** — 4
+      commits (`0feed46`..`eb393be`), 213 tests, todo deployado. Detalle en
+      `docs/build-log.md` (entradas de sesión 3):
+      - Poster equivocado en onboarding (Toy Story 1995 mostraba Toy Story 5):
+        `search_title` ahora acepta `year` y lo pasa como `primary_release_year`.
+      - Tilt 3D + glare en los posters de la grilla "Sin cuenta" (faltaba).
+      - Default del wizard a Películas en vez de Ambas.
+      - **El refine del LLM caía SIEMPRE al heurístico en prod** (los "why"
+        calcados "tira para el foco..."): NVIDIA devolvía JSON casi-válido
+        intermitente; fix con `response_format: json_object` (medido 8/8 vs
+        4/6). Diagnosticado con logs de Render + repro contra la API real.
+      - Reintento + fallback de modelo (nemotron → llama-3.1-70b).
+
+- [ ] **Confirmar en producción que los picks salen con razón real del LLM**
+      (no la plantilla "tira para el foco..."). El fix de `response_format`
+      está deployado y live; falta que Matías pida una tanda de picks en
+      butaca.xyz y confirme que cada "why" es distinto y cita títulos del
+      historial. **Es lo primero a chequear al retomar.**
+
+- [ ] **Decidir el fallback del LLM: ¿sumar kimi-k2.6 o quedarnos con
+      llama-3.1-70b?** — hoy el fallback es `meta/llama-3.1-70b-instruct`
+      (drop-in probado 5/5). Kimi-k2.6 lo pidió Matías: aparece en el catálogo
+      con la misma `NVIDIA_API_KEY` (119 modelos accesibles con una key vía
+      `integrate.api.nvidia.com`), PERO al invocarlo por el endpoint estándar
+      da `404 "Function not found"` — necesita otro endpoint/deployment. Queda
+      decidir: dejarlo con llama (recomendado, anda) o investigar cómo se
+      invoca kimi de verdad. Recordar: cualquier modelo del mismo NVIDIA
+      comparte key/host → no cubre caída total ni rate limit de cuenta; para
+      eso haría falta otro proveedor.
+
 - [x] **Setear `NVIDIA_API_KEY` en Render** — hecho por Matías. Verificado
       en vivo el 2026-07-23: cuenta de prueba descartable en butaca.xyz,
       picks con `refine` real (razones generadas cruzando películas

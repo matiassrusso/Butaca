@@ -15,7 +15,7 @@ If a session is drifting without moving hacia calidad de recomendación o clarid
 1. Definición corta del alcance (ver `docs/product-mvp.md`)
 2. Implementación en `backend` (FastAPI + SQLite) y/o `frontend` (React + Vite + Tailwind)
 3. Si hay varios agentes en paralelo: coordinación por `TASKS.md` (worktrees separados, marcar In Progress → Done, nunca mergear a `main` solo)
-4. Tests de backend en verde antes de cerrar (207 tests a la fecha)
+4. Tests de backend en verde antes de cerrar (213 tests a la fecha)
 5. Deployeado: frontend [butaca.xyz](https://butaca.xyz/) (Vercel), backend [api.butaca.xyz](https://api.butaca.xyz) (Render, free tier — cold start en la primera request)
 
 ## Key People
@@ -43,7 +43,7 @@ Solo yo (Matías), con posible coordinación multi-agente (Claude, Codex) docume
 
 ## Current Status
 
-> **Last updated:** 2026-07-23, sesión 2 (feedback de amigos: 19 de 20 puntos resueltos)
+> **Last updated:** 2026-07-23, sesión 3 (bugs post-feedback + fix del refine del LLM)
 >
 > ### ⚠️ Leer primero al retomar
 >
@@ -52,12 +52,19 @@ Solo yo (Matías), con posible coordinación multi-agente (Claude, Codex) docume
 > [api.butaca.xyz](https://api.butaca.xyz) (Render). Las URLs `pelipick.*`
 > siguen funcionando en paralelo pero ya no son la identidad real. Todo lo
 > operativo grande ya está cerrado: dominio, Resend activo, UptimeRobot
-> activo, `NVIDIA_API_KEY` en producción (agente de IA corriendo de verdad),
-> Ola 4 completa (onboarding sin Letterboxd, verificación de email + borrar
-> cuenta, README bilingüe), y el **feedback de amigos pre-lanzamiento
-> trabajado 19/20** (ver abajo). 207 tests de backend en verde.
+> activo, `NVIDIA_API_KEY` en producción, Ola 4 completa, y el **feedback de
+> amigos pre-lanzamiento trabajado 19/20**. **213 tests de backend en verde.**
+>
+> **Primero al retomar:** confirmar en butaca.xyz que los picks salen con
+> razón real del LLM (no la plantilla "tira para el foco..."). El fix del
+> refine (ver sesión 3 abajo) está deployado y live, pero falta la
+> confirmación en vivo pidiendo una tanda de picks.
 >
 > **Pendientes reales** (detalle en `Pending` de `TASKS.md`):
+> - Confirmar picks con razón real del LLM en producción (arriba).
+> - Decidir el fallback del LLM: quedarnos con `llama-3.1-70b` (anda) o
+>   investigar cómo invocar `kimi-k2.6` (aparece en el catálogo con la misma
+>   key pero da 404 por el endpoint estándar).
 > - Punto 7 del feedback (onboarding manual estilo swipe) — decidir recién
 >   cuando los amigos prueben el wizard nuevo.
 > - Borrar el usuario de prueba `test-resend-qa` en producción.
@@ -70,6 +77,24 @@ Solo yo (Matías), con posible coordinación multi-agente (Claude, Codex) docume
 >   RSS y avisar en el frontend que esa vía trae solo historial reciente.
 > - La TMDb key del `backend/.env` **local** está vieja (401): corriendo
 >   local las recs degradan al catálogo mock. Producción tiene la key buena.
+>
+> **2026-07-23 (sesión 3) — bugs post-feedback + refine del LLM, 4 commits
+> (`0feed46`..`eb393be`), 213 tests:** Matías siguió probando en producción y
+> salieron cosas, todas resueltas y deployadas (detalle en `docs/build-log.md`):
+> - **Poster equivocado en onboarding:** "Toy Story" (1995) mostraba Toy
+>   Story 5 — `search_title(title, year)` ahora fija el año
+>   (`primary_release_year`) porque `results[0]` de TMDb ordena por
+>   popularidad y devolvía el estreno de franquicia.
+> - **Tilt 3D + glare** en los posters de la grilla "Sin cuenta" (faltaban).
+> - **Default del wizard a Películas** en vez de Ambas.
+> - **El refine del LLM caía SIEMPRE al heurístico en prod** (los 6 "why"
+>   calcados "tira para el foco..."): NVIDIA devolvía JSON casi-válido de
+>   forma intermitente (comillas sin escapar, trailing commas). Fix de raíz:
+>   `response_format: {"type":"json_object"}` (medido 8/8 vs 4/6).
+>   Diagnosticado con los logs de Render + repro contra la API real.
+> - **Reintento + fallback de modelo:** nemotron → reintento →
+>   `llama-3.1-70b` → reintento → heurístico. Cubre modelo puntual caído/con
+>   basura y red; NO caída total ni rate limit de cuenta (misma key/host).
 >
 > **2026-07-23 (sesión 2) — feedback de amigos, 19/20 resueltos en 6 commits
 > (`7512cf3`..`58f0715`):** el feedback juntado en sesión 1 (Gaspi, Pedro,
