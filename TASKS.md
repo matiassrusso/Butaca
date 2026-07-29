@@ -40,6 +40,34 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
 > proyectos, no se borró nada). Ver Done de hoy (`domain-001`) para el
 > detalle completo.
 
+- [x] **Tags de keywords de TMDb (2026-07-29)** — 3 commits
+      (`0fdeb78`..`e936f9f`), 215 → 228 tests. Salió de un video sobre Flick
+      (app que categoriza por "vibes" con embeddings + Leiden): se descartó
+      replicar ese pipeline (necesita un corpus enorme de reviews que Butaca no
+      tiene) y en cambio se explotó data que ya estaba a la vista —
+      `/movie/{id}/keywords`, que el proyecto nunca consumía usando solo los 19
+      `genre_ids` gruesos. `KEYWORD_TAG_MAP` (19 strings → 10 tags, **todos
+      verificados contra páginas públicas de TMDb**, lo que descartó "one
+      location" → es `huis clos`, "robbery" → es `caper`, "assassin" → es
+      `hitman`), `fetch_keywords` calcado de `fetch_taste_credits`, entradas de
+      `TAG_PHRASES`/`POSITIVE_HINTS`, y enganche en el loop de enriquecimiento
+      (movies **y series**, que antes no recibían ninguno). Detalle largo en
+      `docs/build-log.md` (entrada 2026-07-29). Sin tocar frontend ni schema.
+- [ ] **Verificar los keyword tags en producción** — no se puede en local: con
+      la TMDb key local en 401 `fetch_personalized_candidates` nunca corre
+      (degrada al catálogo mock). Falta confirmar en butaca.xyz que aparecen
+      pills nuevas tipo `HEIST`/`REVENGE` y medir la latencia de un
+      `/recommend` con cache frío (pasa de ~30 a ~70 llamadas a TMDb; si
+      duele, bajar `CREDITS_ENRICH_CAP` o acortar el slice de series).
+- [ ] **Ideas descartadas de la línea Flick, por si se retoman:** embeddings +
+      Leiden clustering real, o embeddings + k-means/coseno. Ambas resuelven
+      *descubrir* una taxonomía desconocida y necesitan corpus de reviews en
+      volumen; Butaca no lo tiene (TMDb `/reviews` es escaso, Letterboxd da 403
+      desde datacenter). El activo propio de largo plazo es otro: cuando haya
+      cientos de usuarios reales, `rated_items` guarda qué pelis puntúan juntas
+      *nuestros* usuarios — data que ni TMDb ni Letterboxd tienen y que Butaca
+      genera sola. Hoy no hay escala para que sirva.
+
 - [x] **Feedback de amigos ronda 2 (2026-07-29): modo manual no reusaba el
       perfil guardado** — el usuario que puntuaba a mano tenía que
       re-tildar las mismas pelis en cada sesión aunque el backend ya las

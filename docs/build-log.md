@@ -1,5 +1,101 @@
 # Build Log
 
+## 2026-07-29 (tags de keywords de TMDb: crear señal donde ya había data)
+
+Disparador: un video sobre Flick, una app que categoriza pelis por "vibes" con
+embeddings + Leiden clustering sobre reviews de Letterboxd. Lo que interesó no
+fue el pipeline sino la jugada de fondo — ese dev **explotó data que ya era
+pública y que nadie miraba**. Pregunta de Matías: ¿qué podemos crear nosotros
+donde hoy no hay?
+
+Se descartaron las dos opciones "a lo Flick" (embeddings + Leiden real, o
+embeddings + k-means) por la misma razón: **todo ese pipeline existe para
+*descubrir* una taxonomía que no se conoce a priori, y necesita un corpus enorme
+de reviews para que el clustering tenga señal estadística** (el propio video
+muestra 3 iteraciones peleando para que los clusters no colapsaran en "idioma" o
+"franquicia"). Butaca no tiene ese corpus: no hay catálogo persistido, TMDb
+`/reviews` es escaso, y scrapear Letterboxd ya pegó contra el 403 de Cloudflare
+(`docs/letterboxd-username-import.md`).
+
+Pero revisando el código apareció algo más literal: **Butaca ya usa TMDb y solo
+consume `genre_ids`** — 19 categorías gruesas. Nunca tocaba
+`/movie/{id}/keywords`, donde TMDb publica tags atómicos por título ("heist",
+"time loop", "coming of age"). Es exactamente el tipo de señal que Flick tuvo
+que *construir*, servida gratis con la misma key. Confirmado antes de arrancar:
+`grep -rn "keyword" backend/app/*.py` sin resultados.
+
+### Lo que se hizo (3 commits, `0fdeb78`..`e936f9f`, 215 → 228 tests)
+
+1. **`KEYWORD_TAG_MAP` + `fetch_keywords` + cache** (`tmdb_client.py`). Calca
+   `fetch_taste_credits`: mismo idioma OrderedDict TTL+LRU (24h, 500 entradas),
+   mismo manejo de errores. Devuelve los nombres **crudos**, no los tags
+   mapeados, para que editar el map no invalide el cache. Lee el array bajo
+   `"keywords"` (movies) **y** bajo `"results"` (tv) — TMDb usa distinto nombre
+   de campo en la misma ruta.
+2. **Vocabulario y scoring** (`recommender.py`): 10 entradas en `TAG_PHRASES`
+   (para que el "why" los nombre en español en vez de filtrar el tag crudo en
+   inglés) y 4 en `POSITIVE_HINTS` (`heist`, `revenge`, `road trip`, `coming of
+   age`) — sin esto un tag se muestra en la UI pero **nunca puede ganar score**.
+3. **Integración** en el loop de enriquecimiento de `fetch_personalized_candidates`.
+
+### Los strings se verificaron uno por uno, y ahí estuvo el valor
+
+La key local de TMDb está en 401, así que la verificación se hizo contra las
+**páginas públicas** de TMDb (Ocean's Eleven, Oldboy, Little Miss Sunshine,
+Groundhog Day, Mad Max, Blair Witch, Lady Bird, John Wick, Back to the Future,
+12 Angry Men, The Social Network). Valió la pena: **un string equivocado no
+falla, simplemente nunca matchea**, y varios candidatos "obvios" no existen:
+
+- `"one location"` → TMDb usa **`huis clos`** (el término teatral francés).
+- `"robbery"` → Ocean's Eleven usa `heist` y **`caper`**.
+- `"assassin"` → John Wick usa solo **`hitman`**.
+- `"twist ending"` y `"anthology"` → no se pudieron verificar, así que **los
+  tags `twist` y `anthology` se descartaron** en vez de shippear entradas
+  muertas (de los 12 planeados quedaron 10).
+- Aparecieron variantes no previstas: `time warp`, `road movie`, `dark future`,
+  `pseudo-documentary`, `faux documentary`.
+
+### Tres decisiones técnicas que no son obvias
+
+- **Tope de 2 keyword tags por título, y no es cosmético.** El scoring de
+  `recommend()` divide el término de match positivo por `len(tags)`
+  (`recommender.py:275-277`), así que **un tag que el perfil del usuario no
+  matchea *baja* el score del candidato**: una peli `{dark, psychological}` con
+  usuario que ama `dark` da `30 × 1/2 = 15`; enriquecida con `{heist, revenge}`
+  que no matchea, `30 × 1/4 = 7.5`. Y es asimétrico, porque solo los primeros
+  `CREDITS_ENRICH_CAP` items se enriquecen. Era una regresión real de ranking.
+- **`except TmdbError: continue` → `pass`/`else`.** Credits y keywords son
+  enriquecimientos independientes; con el `continue` un fallo de credits
+  salteaba los keywords del mismo item.
+- **Nunca mutar `item["tags"]` in place.** `_clone_items` es una copia
+  **shallow**, así que `item["tags"]` es el mismo objeto lista que vive dentro
+  de `_PERSONALIZED_CACHE`: un `.append()` contaminaría el cache y acumularía
+  tags en cada request por los 5 min de esa entrada.
+
+Los dos tests críticos se validaron **reintroduciendo los bugs a propósito** —
+sin el fix del shallow copy el test da `['character','heist','heist']`, y sin el
+`pass/else` el de credits da `assert 'revenge' in ['character']`. Un test que
+pasa igual con y sin el bug no sirve.
+
+### Valor neto extra y límites
+
+- **Las series ganan más que las pelis:** hoy no recibían **ningún**
+  enriquecimiento por item (la limitación de `with_people` en `/discover/tv`
+  bloquea credits), pero `/tv/{id}/keywords` **sí** funciona.
+- **Dos wins gratis sin código nuevo:** `_map_result` ya corre
+  `positive_tags_from_text` sobre el overview, así que las 4 hint words nuevas
+  captan candidatos sin llamadas extra (incluido el slice de exploration que el
+  enriquecimiento no toca); y el loop de feedback cierra solo (descartar picks
+  de un tag lo penaliza vía `rejected_tags`).
+- **No verificable en local:** con la key en 401 `fetch_personalized_candidates`
+  nunca corre localmente (degrada al catálogo mock, sin `tmdb_id`), así que el
+  código nuevo es inalcanzable en el preview local. Verificación en producción.
+- **Costo:** un `/recommend` personalizado con cache frío pasa de ~30 a ~70
+  llamadas secuenciales a TMDb. Si molesta, hay dos palancas de una línea (bajar
+  `CREDITS_ENRICH_CAP`, o acortar el slice de series).
+- Sin tocar frontend ni schema: los pills ya renderizan cualquier string y los
+  tags se persisten con `json.dumps`.
+
 ## 2026-07-29 (feedback de amigos ronda 2: perfil guardado en modo manual)
 
 Matías siguió juntando reseñas después del lanzamiento a amigos. Detalle
