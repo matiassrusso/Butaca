@@ -133,12 +133,9 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
 - [x] **Rotar credenciales** — hecho por Matías (Neon, `RESEND_API_KEY`,
       `TMDB_API_KEY`). Verificado indirectamente: TMDb y la DB (Neon)
       responden bien en el smoke test del 2026-07-23.
-- [ ] **Borrar el usuario de prueba `test-resend-qa`** (creado hoy vía API
-      para probar el mail real, con el mail de Matías). Ya hay endpoint de
-      borrar cuenta (Ola 4 tarea I) — usarlo o a mano por SQL contra Neon.
-- [ ] **Borrar el usuario de prueba `claude-verify-qa`** (creado 2026-07-29
-      en producción para verificar el fix del perfil guardado y el "why"
-      real del LLM) — mismo endpoint, `/profile` → Zona de peligro.
+- [x] **Cuentas de prueba en producción** (`test-resend-qa`,
+      `claude-verify-qa`) — descartado 2026-07-29: a Matías no le importa
+      que queden, no vale la pena la acción.
 - [ ] **Aprovechar el `tmdb:movieId` del RSS** (mejora, no bug) — el feed trae
       el id de TMDb ya resuelto por entrada, pero el flujo sigue matcheando
       por título como con el zip. Usarlo ahorraría requests a TMDb y evitaría
@@ -152,10 +149,9 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
       historial completo, usá el .zip." Verificado en el browser local.
 - [x] **Despausar el monitor de UptimeRobot** — activo, confirmado por
       Matías el 2026-07-23.
-- [ ] **Activar auto-renew de `butaca.xyz`** en Namecheap antes de que venza
-      (21 de julio de 2027) — hoy está apagado a propósito para no llevarse
-      un cargo sorpresa, pero eso también significa que se pierde el dominio
-      si nadie lo renueva a mano.
+- [x] **Auto-renew de `butaca.xyz`** — descartado 2026-07-29: a Matías no le
+      importa, queda apagado a propósito. Vence 21 de julio de 2027; si en
+      algún momento quiere renovarlo a mano, tiene tiempo de sobra.
 - [x] **Ola 4 del plan de implementación** (`docs/(C) plan-implementacion-codigo.md`):
       H (onboarding sin Letterboxd), I (verificación de email + borrar cuenta),
       J (README) — las tres cerradas. J se resolvió en bilingüe:
