@@ -53,12 +53,30 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
       `TAG_PHRASES`/`POSITIVE_HINTS`, y enganche en el loop de enriquecimiento
       (movies **y series**, que antes no recibían ninguno). Detalle largo en
       `docs/build-log.md` (entrada 2026-07-29). Sin tocar frontend ni schema.
-- [ ] **Verificar los keyword tags en producción** — no se puede en local: con
-      la TMDb key local en 401 `fetch_personalized_candidates` nunca corre
-      (degrada al catálogo mock). Falta confirmar en butaca.xyz que aparecen
-      pills nuevas tipo `HEIST`/`REVENGE` y medir la latencia de un
-      `/recommend` con cache frío (pasa de ~30 a ~70 llamadas a TMDb; si
-      duele, bajar `CREDITS_ENRICH_CAP` o acortar el slice de series).
+- [x] **Verificado en producción (2026-07-29)** — hizo falta un 4to commit
+      (`8445e9d`) porque el enriquecimiento **moría en silencio**: 3 tandas de
+      picks, 18 candidatos, cero keyword tags, y sin logs no se distinguía "map
+      angosto" de "roto". Con el log agregado, veredicto: **funciona, 0 fallos
+      en 20 candidatos, hit rate ~30%** (Fight Club → dystopian, City of God →
+      coming-of-age + true-story, Gladiator → revenge, Blade Runner →
+      dystopian, Thelma & Louise → road-trip, Lords of Dogtown → true-story).
+      Latencia real de los 20 enriquecimientos con cache frío: **1,44s**
+      (~72ms cada uno), mucho menos de lo estimado — no hace falta tocar
+      ningún cap.
+- [ ] **Los keyword tags casi no se ven en los picks finales** — hallazgo de la
+      verificación, no bug. Los títulos que más se enriquecen son los que mejor
+      matchean el gusto, y por eso muchos ya están puntuados → se excluyen por
+      "ya vista"; sumado a que solo los primeros `CREDITS_ENRICH_CAP` (20)
+      candidatos se enriquecen y el slice de exploration nunca. Dos palancas si
+      se quiere subir la visibilidad: subir el cap, o enriquecer la exploration.
+- [ ] **Ampliar `KEYWORD_TAG_MAP`** (opcional, es una edición de dict) — con 19
+      strings el hit rate es ~30%. De los logs y las páginas verificadas
+      quedaron strings reales sin mapear que valdrían: `hold-up robbery`
+      (Jesse James, un asalto que `heist`/`caper` no captan), `revisionist
+      western`, `historical`, `dark comedy`, `neo-noir`, `psychological
+      thriller`, `character study`, `folk horror`, `survival`, `on the run`.
+      Ojo: sumar tags que el perfil del usuario no puede matchear diluye el
+      score (ver el tope de 2 en `_enrich_with_keyword_tags`).
 - [ ] **Ideas descartadas de la línea Flick, por si se retoman:** embeddings +
       Leiden clustering real, o embeddings + k-means/coseno. Ambas resuelven
       *descubrir* una taxonomía desconocida y necesitan corpus de reviews en

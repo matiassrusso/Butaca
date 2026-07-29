@@ -90,11 +90,54 @@ pasa igual con y sin el bug no sirve.
 - **No verificable en local:** con la key en 401 `fetch_personalized_candidates`
   nunca corre localmente (degrada al catálogo mock, sin `tmdb_id`), así que el
   código nuevo es inalcanzable en el preview local. Verificación en producción.
-- **Costo:** un `/recommend` personalizado con cache frío pasa de ~30 a ~70
-  llamadas secuenciales a TMDb. Si molesta, hay dos palancas de una línea (bajar
-  `CREDITS_ENRICH_CAP`, o acortar el slice de series).
 - Sin tocar frontend ni schema: los pills ya renderizan cualquier string y los
   tags se persisten con `json.dumps`.
+
+### Verificación en producción, y por qué hizo falta un cuarto commit
+
+Pedidas 3 tandas de picks en butaca.xyz: **18 candidatos, cero keyword tags**. Y
+un caso que descartaba "el map es angosto": The Godfather Part II salió con
+`[character, dark, psychological]` cuando su página de TMDb tiene `revenge`, que
+sí está en el map. Desde afuera no se podía distinguir entre dos causas
+(el título vino del slice de exploration, que no se enriquece / el
+enriquecimiento está roto), porque `_enrich_with_keyword_tags` se comía el
+`TmdbError` en silencio — calcado de credits, pero para credits eso está bien
+porque su ausencia se ve en la UI ("Dir. X") y la de los keywords no.
+
+Commit `8445e9d` agrega el log que faltaba (WARNING por fallo, INFO por
+candidato con cuántos keywords crudos llegaron y qué tags salieron). Con eso los
+logs de Render dieron el veredicto: **el feature funciona, 0 fallos en 20
+candidatos, hit rate ~30%**:
+
+```
+Keywords Fight Club (movie): 14 crudos -> ['dystopian']
+Keywords City of God (movie): 10 crudos -> ['coming-of-age', 'true-story']
+Keywords Gladiator (movie): 26 crudos -> ['revenge']
+Keywords Blade Runner (movie): 25 crudos -> ['dystopian']
+Keywords Thelma & Louise (movie): 46 crudos -> ['road-trip']
+Keywords Lords of Dogtown (movie): 16 crudos -> ['true-story']
+Keywords Se7en (movie): 22 crudos -> sin match
+Keywords Panic Room (movie): 21 crudos -> sin match
+```
+
+**Por qué casi no se ven en los picks finales**, que es el hallazgo real: los
+títulos que más se enriquecen son justo los que mejor matchean el gusto del
+usuario, y por eso muchos ya están puntuados → se excluyen por "ya vista"
+(Fight Club, City of God, Blade Runner y Gladiator estaban todos en el historial
+de la cuenta de prueba). Sumado a que solo los primeros `CREDITS_ENRICH_CAP`
+(20) candidatos se enriquecen y el slice de exploration nunca, los 6 picks que
+sobreviven tienden a ser los que no matchearon. Si se quiere subir la
+visibilidad hay dos palancas: subir el cap, o enriquecer también la exploration.
+
+Dos misses confirman que descartar tags sin keyword verificado fue lo correcto:
+**Se7en** (22 keywords, ninguno es `twist ending` — el tag `twist` se había
+descartado por eso) y **Panic Room** (21 keywords, no usa `huis clos` a pesar de
+ser un thriller de un solo ambiente).
+
+**Latencia real, mucho menor a la estimada:** los 20 enriquecimientos con cache
+frío corrieron en **~1,44s totales** (timestamps 23:39:54,360 → 23:39:55,806),
+o sea ~72ms por llamada. La preocupación por el salto de ~30 a ~70 llamadas era
+correcta en el conteo pero no en el impacto — no hace falta tocar ningún cap.
 
 ## 2026-07-29 (feedback de amigos ronda 2: perfil guardado en modo manual)
 
