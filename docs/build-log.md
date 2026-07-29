@@ -1,5 +1,51 @@
 # Build Log
 
+## 2026-07-29 (feedback de amigos ronda 2: perfil guardado en modo manual)
+
+Matías siguió juntando reseñas después del lanzamiento a amigos. Detalle
+completo en `03 Iteration Logs/(C) 2026-07-29 feedback-amigos-ronda-2.md`.
+
+### Bug real: modo manual no reusaba el perfil ya guardado
+
+Reporte: un usuario que puntuaba pelis a mano (sin Letterboxd) tenía que
+volver a tildar las mismas ~10 pelis cada vez que quería una tanda nueva de
+recomendaciones. El backend ya guardaba los ratings manuales
+(`db.save_rated_items` en cada `/recommend/manual`), pero no había forma de
+regenerar picks a partir de ese perfil sin resubir una fuente — a
+diferencia de zip/username, donde repetir la fuente tiene sentido porque
+vive afuera (Letterboxd), acá la fuente era el propio usuario tipeando algo
+que Butaca ya sabía.
+
+Fix:
+- `_finish_recommend` (`backend/app/main.py`) suma un flag `persist: bool =
+  True` — `False` cuando los ratings vienen de vuelta de la DB, para no
+  reinsertar filas duplicadas en `rated_items`.
+- Endpoint nuevo `POST /recommend/profile` (+ `ProfileRecommendRequest` en
+  `models.py`): arma los ratings con `_rebuild_ratings(user_id)` (ya
+  existía, reusado de `refine_session`) y pide al menos
+  `MIN_MANUAL_RATINGS` (10) para servir, si no 400.
+- Frontend (`Recommend.tsx`): al abrir el wizard se chequea
+  `GET /history/watched`; si ya hay ≥10 pelis guardadas, aparece un banner
+  "Ya tenés un perfil guardado (N pelis)" con botón "Usar mi perfil" que
+  saltea el paso de elegir fuente y llama a `/recommend/profile` en el
+  submit.
+
+Verificado en el browser local (Chrome MCP): cuenta nueva → 10 pelis
+puntuadas a mano → picks generados → recarga simulando salir y volver →
+banner visible → "Usar mi perfil" → segunda tanda de picks distinta, sin
+duplicar las 10 filas de `rated_items` (confirmado por consulta directa a
+la DB). 213 → 215 tests (2 nuevos: reuso sin duplicar, rechazo sin perfil
+guardado). `tsc --noEmit` limpio.
+
+### Sin resolver: "Load failed" al importar por username (reporte de Bauti)
+
+Sin logs del momento no se puede confirmar la causa. Sospechoso principal:
+cold start de Render (free tier) combinado con la latencia extra que
+agrega el username (Letterboxd RSS antes de TMDb) — zip y manual no tienen
+ese salto de red. `letterboxd_scrape.py` en sí se ve correcto (timeout de
+15s, manejo de 404/error de conexión). Queda pendiente pedirle a Bauti que
+reintente con el backend despierto y, si repite, revisar logs de Render.
+
 ## 2026-07-23 (sesión 2 — lote rápido del feedback de amigos)
 
 Primer lote del feedback pre-lanzamiento (7 de 20 puntos, los marcados como

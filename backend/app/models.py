@@ -32,6 +32,16 @@ class ManualRecommendRequest(BaseModel):
     refine: bool = True
 
 
+class ProfileRecommendRequest(BaseModel):
+    # regenerate picks from the profile already saved in the DB, no new
+    # source needed — the "usar mi perfil" shortcut for repeat manual users
+    mood: str = ""
+    mode: str = "profile"
+    kind_filter: str = "both"
+    genres: str = ""
+    refine: bool = True
+
+
 class OnboardingTitle(BaseModel):
     title: str
     year: int

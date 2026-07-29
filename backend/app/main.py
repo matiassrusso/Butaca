@@ -34,6 +34,7 @@ from .models import (
     OnboardingTitlesResponse,
     PasswordResetConfirmRequest,
     PasswordResetRequest,
+    ProfileRecommendRequest,
     RatedItem,
     RecommendationHistoryResponse,
     PasswordResetStartResponse,
@@ -463,13 +464,16 @@ def _finish_recommend(
     user: sqlite3.Row,
     discarded_rows: int = 0,
     refine: bool = True,
+    persist: bool = True,
 ) -> RecommendResponse:
     """Shared tail of both /recommend/zip and /recommend/letterboxd: once a
     source has produced (ratings, extra_seen), the rest of the flow —
     candidates, exclusion, scoring, LLM refine, persistence — is identical.
     refine=False skips the (slow) LLM step and returns the heuristic picks
     immediately; the frontend then calls /recommend/sessions/{id}/refine to
-    swap in the LLM-written reasons without blocking the first render."""
+    swap in the LLM-written reasons without blocking the first render.
+    persist=False when ratings were just read back from the DB (the "usar mi
+    perfil" shortcut) — re-saving them would insert duplicate rated_items."""
     _enforce_recommend_rate_limit(user["id"])
 
     if not ratings:
@@ -480,14 +484,15 @@ def _finish_recommend(
 
     _enrich_loved_ratings_with_genre_tags(ratings)
 
-    # save ratings before computing the taste profile (moved up from the end
-    # of this function) so the profile reflects this import and can bias
-    # *this* request's own candidates below, not just future ones — see
-    # docs/(C) plan-de-trabajo.md §4 for why this used to run too late.
-    db.save_rated_items(
-        user["id"],
-        [(item.title, item.rating, item.review, item.watched_date) for item in ratings],
-    )
+    if persist:
+        # save ratings before computing the taste profile (moved up from the
+        # end of this function) so the profile reflects this import and can
+        # bias *this* request's own candidates below, not just future ones —
+        # see docs/(C) plan-de-trabajo.md §4 for why this used to run too late.
+        db.save_rated_items(
+            user["id"],
+            [(item.title, item.rating, item.review, item.watched_date) for item in ratings],
+        )
 
     # Guarded broadly: this is a personalization/caching side effect, not the
     # point of the request — a TMDb hiccup (or a mocked search_title missing
@@ -775,6 +780,29 @@ def recommend_titles_manual(
         payload.genres,
         user,
         refine=payload.refine,
+    )
+
+
+@app.post("/recommend/profile", response_model=RecommendResponse)
+def recommend_titles_from_profile(
+    payload: ProfileRecommendRequest,
+    user: sqlite3.Row = Depends(auth.get_current_user),
+) -> RecommendResponse:
+    """Regenerar picks con el perfil ya guardado, sin pedir la fuente de
+    nuevo — feedback: los usuarios de modo manual tenían que re-puntuar las
+    mismas pelis cada vez que volvían, aunque el perfil ya estaba guardado."""
+    _validate_recommend_params(payload.mode, payload.kind_filter)
+
+    ratings = _rebuild_ratings(user["id"])
+    if len(ratings) < MIN_MANUAL_RATINGS:
+        raise HTTPException(
+            status_code=400,
+            detail="Todavía no tenés un perfil guardado — importá tu historial primero.",
+        )
+
+    return _finish_recommend(
+        ratings, set(), payload.mood, payload.mode, payload.kind_filter, payload.genres,
+        user, refine=payload.refine, persist=False,
     )
 
 

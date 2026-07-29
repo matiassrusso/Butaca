@@ -1088,6 +1088,29 @@ def test_recommend_manual_excludes_rated_titles_from_picks() -> None:
     assert not (rated & returned)
 
 
+def test_recommend_profile_reuses_saved_ratings_without_duplicating() -> None:
+    headers = _auth_headers("profileshortcut")
+    client.post("/recommend/manual", headers=headers, json={"ratings": _MANUAL_RATINGS})
+    user_id = db.get_user_by_username("profileshortcut")["id"]
+    watched_before = len(db.get_watched_items(user_id))
+
+    response = client.post("/recommend/profile", headers=headers, json={})
+
+    assert response.status_code == 200
+    assert response.json()["recommendations"]
+    # persist=False: regenerating from the saved profile must not re-insert
+    # the same rated_items rows
+    assert len(db.get_watched_items(user_id)) == watched_before
+
+
+def test_recommend_profile_requires_existing_profile() -> None:
+    headers = _auth_headers("profilenoprofile")
+
+    response = client.post("/recommend/profile", headers=headers, json={})
+
+    assert response.status_code == 400
+
+
 def test_profile_summary_requires_auth() -> None:
     assert client.get("/profile/summary").status_code == 401
 

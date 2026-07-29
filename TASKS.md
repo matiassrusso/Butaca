@@ -40,6 +40,24 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
 > proyectos, no se borró nada). Ver Done de hoy (`domain-001`) para el
 > detalle completo.
 
+- [x] **Feedback de amigos ronda 2 (2026-07-29): modo manual no reusaba el
+      perfil guardado** — el usuario que puntuaba a mano tenía que
+      re-tildar las mismas pelis en cada sesión aunque el backend ya las
+      guardaba. Fix: endpoint `POST /recommend/profile` (regenera con
+      `_rebuild_ratings`, sin resubir fuente, `persist=False` para no
+      duplicar `rated_items`) + banner "Ya tenés un perfil guardado" con
+      botón "Usar mi perfil" en el paso 1 del wizard, visible con ≥10 pelis
+      guardadas. Verificado en el browser local, 213 → 215 tests. Detalle en
+      [`03 Iteration Logs/(C) 2026-07-29 feedback-amigos-ronda-2.md`](<03 Iteration Logs/(C) 2026-07-29 feedback-amigos-ronda-2.md>)
+      y `docs/build-log.md` (entrada 2026-07-29).
+- [ ] **Deployar el fix de arriba a producción** para que se vea resuelto
+      en butaca.xyz — verificado solo en local por ahora.
+- [ ] **Bauti: "Load failed" al importar por username (feedback ronda 2)**
+      — sin logs del momento no se pudo confirmar la causa. Sospechoso
+      principal: cold start de Render + latencia extra del RSS de
+      Letterboxd. Pendiente pedirle que reintente con el backend despierto
+      y, si repite, revisar logs de Render en el momento exacto.
+
 - [x] **Feedback de amigos: 19 de 20 puntos resueltos (2026-07-23, sesión
       2)** — lote rápido (1,4,5,6,12,13,19), wizard multi-step en
       `/recommend` (3,8,9,10,11 + aviso del 17), grilla a 3 columnas (2),
