@@ -91,11 +91,9 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
         4/6). Diagnosticado con logs de Render + repro contra la API real.
       - Reintento + fallback de modelo (nemotron → llama-3.1-70b).
 
-- [ ] **Confirmar en producción que los picks salen con razón real del LLM**
-      (no la plantilla "tira para el foco..."). El fix de `response_format`
-      está deployado y live; falta que Matías pida una tanda de picks en
-      butaca.xyz y confirme que cada "why" es distinto y cita títulos del
-      historial. **Es lo primero a chequear al retomar.**
+- [x] **Confirmar en producción que los picks salen con razón real del LLM**
+      — confirmado 2026-07-29 (ver entrada duplicada más arriba en este
+      mismo `Pending`, cerca del feedback ronda 2).
 
 - [ ] **Idea (a diseñar bien antes de implementar): esconder los "why" del
       menú y revelarlos con efecto máquina de escribir al entrar al poster.**
