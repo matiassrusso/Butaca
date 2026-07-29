@@ -75,6 +75,46 @@ TV_GENRE_ID_TAG_MAP: dict[int, list[str]] = {
     37: ["character"],  # Western
 }
 
+# /movie/{id}/keywords (y /tv/) publica tags atómicos y específicos por título
+# ("heist", "time loop"), un eje narrativo que los genre_ids de arriba no tienen
+# y que el escaneo de overview de positive_tags_from_text no puede inferir.
+# El vocabulario de TMDb es enorme y sin curar, así que esto es una allowlist
+# deliberada: solo keywords que un usuario reconocería como razón de un pick.
+# Match EXACTO sobre el nombre en minúsculas, no substring — los nombres ya
+# vienen atomizados, que es justamente la ventaja sobre el escaneo de overview.
+#
+# Todos estos strings están verificados contra las páginas públicas de TMDb
+# (Ocean's Eleven, Oldboy, Little Miss Sunshine, Groundhog Day, Mad Max: Fury
+# Road, Blair Witch, Lady Bird, John Wick, Back to the Future, 12 Angry Men,
+# The Social Network). Importa: un string equivocado no falla, simplemente
+# nunca matchea — quedan varios descartados por eso ("one location", que en
+# realidad TMDb llama `huis clos`; "robbery" → es `caper`; "assassin" → es
+# `hitman`). Verificar contra un título real antes de sumar entradas nuevas.
+# ponytail: tabla semilla. Crecerla es editar este dict + su entrada en
+# recommender.TAG_PHRASES; no hay código que cambiar.
+KEYWORD_TAG_MAP: dict[str, list[str]] = {
+    "heist": ["heist"],
+    "caper": ["heist"],
+    "based on true story": ["true-story"],
+    "biography": ["true-story"],
+    "time loop": ["time-travel"],
+    "time travel": ["time-travel"],
+    "time warp": ["time-travel"],
+    "coming of age": ["coming-of-age"],
+    "revenge": ["revenge"],
+    "road trip": ["road-trip"],
+    "road movie": ["road-trip"],
+    "hitman": ["hitman"],
+    "dystopia": ["dystopian"],
+    "post-apocalyptic future": ["dystopian"],
+    "dark future": ["dystopian"],
+    "found footage": ["found-footage"],
+    "pseudo-documentary": ["found-footage"],
+    "faux documentary": ["found-footage"],
+    # TMDb usa el término teatral francés para "todo pasa en un solo ambiente"
+    "huis clos": ["single-location"],
+}
+
 # Only "funny" and "action" have a clean TV genre match; the rest fall back
 # to unfiltered discovery + tag scoring, same as MOOD_GENRE_ID_MAP.
 MOOD_TV_GENRE_ID_MAP: dict[str, int] = {
@@ -145,6 +185,7 @@ _TASTE_CREDITS_CACHE: OrderedDict[tuple[str, int], tuple[float, dict]] = Ordered
 _PERSON_CACHE: OrderedDict[str, tuple[float, int | None]] = OrderedDict()
 _PERSONALIZED_CACHE: OrderedDict[tuple, tuple[float, list[dict]]] = OrderedDict()
 _WATCH_PROVIDERS_CACHE: OrderedDict[tuple[str, int, str], tuple[float, dict]] = OrderedDict()
+_KEYWORDS_CACHE: OrderedDict[tuple[str, int], tuple[float, list[str]]] = OrderedDict()
 # single entry, not keyed — there's only one "the catalog" to count
 _CATALOG_STATS_CACHE_TTL_SECONDS = 24 * 60 * 60
 _catalog_stats_cache: tuple[float, dict] | None = None
@@ -621,6 +662,77 @@ def fetch_taste_credits(tmdb_id: int, kind: str = "movie") -> dict:
     while len(_TASTE_CREDITS_CACHE) > TITLE_CACHE_MAX_ENTRIES:
         _TASTE_CREDITS_CACHE.popitem(last=False)
     return result
+
+
+def fetch_keywords(tmdb_id: int, kind: str = "movie") -> list[str]:
+    """Los keywords freeform de TMDb para un título ("heist", "time loop"), que
+    KEYWORD_TAG_MAP traduce a nuestro vocabulario interno.
+
+    Devuelve los nombres CRUDOS, no los tags ya mapeados: así el cache guarda
+    data de TMDb y editar KEYWORD_TAG_MAP toma efecto sin invalidarlo. Cacheado
+    un día, mismo idioma OrderedDict TTL+LRU que el resto de este módulo."""
+    api_key = os.environ.get("TMDB_API_KEY")
+    if not api_key:
+        raise TmdbError("TMDB_API_KEY no configurada.")
+
+    cache_key = (kind, tmdb_id)
+    cached = _KEYWORDS_CACHE.get(cache_key)
+    if cached is not None:
+        expires_at, names = cached
+        if expires_at > _now_monotonic():
+            _KEYWORDS_CACHE.move_to_end(cache_key)
+            # copia, no el objeto cacheado: el bug que esta feature tiene que
+            # evitar es justamente aliasing de listas entre requests
+            return list(names)
+        # .pop(..., None) en vez de del: misma race de eviction concurrente que
+        # el resto de los caches de este módulo.
+        _KEYWORDS_CACHE.pop(cache_key, None)
+
+    endpoint = _tmdb_endpoint_kind(kind)
+    url = f"https://api.themoviedb.org/3/{endpoint}/{tmdb_id}/keywords?api_key={api_key}"
+    data = _get_json(url)
+
+    # /movie/{id}/keywords devuelve el array bajo "keywords", /tv/{id}/keywords
+    # bajo "results" — mismo path, distinto nombre de campo. Se leen los dos en
+    # vez de ramificar por kind.
+    raw = data.get("keywords") or data.get("results") or []
+    names = [name.strip() for entry in raw if (name := entry.get("name"))]
+
+    _KEYWORDS_CACHE[cache_key] = (_now_monotonic() + TITLE_CACHE_TTL_SECONDS, names)
+    _KEYWORDS_CACHE.move_to_end(cache_key)
+    while len(_KEYWORDS_CACHE) > TITLE_CACHE_MAX_ENTRIES:
+        _KEYWORDS_CACHE.popitem(last=False)
+    return list(names)
+
+
+def _tags_from_keywords(keywords: list[str]) -> set[str]:
+    tags: set[str] = set()
+    for keyword in keywords:
+        tags.update(KEYWORD_TAG_MAP.get(keyword.strip().lower(), ()))
+    return tags
+
+
+def _enrich_with_keyword_tags(item: dict, kind: str) -> None:
+    """Suma a los tags de un candidato los que salen de sus keywords de TMDb.
+
+    Asigna una lista NUEVA en vez de mutar item["tags"]: los dicts que reparte
+    _get_cached_personalized vienen de _clone_items, que es una copia shallow —
+    item["tags"] sigue siendo el mismo objeto lista que vive adentro de
+    _PERSONALIZED_CACHE, así que un .append()/.extend() acá acumularía tags en
+    cada request servido desde esa entrada mientras viva (5 min)."""
+    try:
+        keywords = fetch_keywords(item["tmdb_id"], kind=kind)
+    except TmdbError:
+        return
+    # Tope de 2 tags por título, y no es cosmético: el scoring de recommend()
+    # divide el término de match positivo por len(tags), así que un tag que el
+    # perfil del usuario no matchea DILUYE el score del candidato (y solo los
+    # primeros CREDITS_ENRICH_CAP se enriquecen, así que sería asimétrico
+    # contra el resto del pool). 2 lo acota a algo comparable al spread de tags
+    # de género que ya existe, y coincide con los 2 que muestra la card.
+    extra = set(sorted(_tags_from_keywords(keywords))[:2])
+    if extra:
+        item["tags"] = sorted(set(item["tags"]) | extra)
 
 
 def _resolve_person_id(name: str, expected_department: str | None = None) -> int | None:

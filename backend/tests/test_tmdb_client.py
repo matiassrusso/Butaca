@@ -11,6 +11,7 @@ def clear_tmdb_cache() -> None:
     tmdb_client._PERSON_CACHE.clear()
     tmdb_client._PERSONALIZED_CACHE.clear()
     tmdb_client._WATCH_PROVIDERS_CACHE.clear()
+    tmdb_client._KEYWORDS_CACHE.clear()
 
 
 def test_fetch_candidates_requires_api_key(monkeypatch) -> None:
@@ -638,6 +639,76 @@ def test_fetch_taste_credits_extracts_director_and_top_cast(monkeypatch) -> None
 
     assert credits == {"director": "The Director", "actors": ["First", "Second", "Third"]}
 
+
+def test_fetch_keywords_requires_api_key(monkeypatch) -> None:
+    monkeypatch.delenv("TMDB_API_KEY", raising=False)
+
+    with pytest.raises(tmdb_client.TmdbError):
+        tmdb_client.fetch_keywords(42)
+
+
+def test_fetch_keywords_reads_movie_keywords_field(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+
+    def fake_get_json(url: str) -> dict:
+        assert "/movie/42/keywords" in url
+        return {"id": 42, "keywords": [{"id": 1, "name": "heist"}, {"id": 2, "name": "revenge"}]}
+
+    monkeypatch.setattr(tmdb_client, "_get_json", fake_get_json)
+
+    assert tmdb_client.fetch_keywords(42, kind="movie") == ["heist", "revenge"]
+
+
+def test_fetch_keywords_reads_series_results_field(monkeypatch) -> None:
+    # /movie/{id}/keywords devuelve el array bajo "keywords" y /tv/{id}/keywords
+    # bajo "results": misma ruta, distinto nombre de campo. Además el endpoint
+    # de series es /tv/, no /series/ (_tmdb_endpoint_kind).
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+
+    def fake_get_json(url: str) -> dict:
+        assert "/tv/42/keywords" in url
+        return {"id": 42, "results": [{"id": 1, "name": "time loop"}]}
+
+    monkeypatch.setattr(tmdb_client, "_get_json", fake_get_json)
+
+    assert tmdb_client.fetch_keywords(42, kind="series") == ["time loop"]
+
+
+def test_fetch_keywords_tolerates_missing_array_and_nameless_entries(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setattr(tmdb_client, "_get_json", lambda url: {"id": 42})
+    assert tmdb_client.fetch_keywords(42) == []
+
+    monkeypatch.setattr(
+        tmdb_client, "_get_json", lambda url: {"keywords": [{"id": 1}, {"id": 2, "name": "heist"}]}
+    )
+    tmdb_client._KEYWORDS_CACHE.clear()
+    assert tmdb_client.fetch_keywords(42) == ["heist"]
+
+
+def test_fetch_keywords_caches_result_and_returns_a_copy(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    calls: list[str] = []
+
+    def fake_get_json(url: str) -> dict:
+        calls.append(url)
+        return {"keywords": [{"id": 1, "name": "heist"}]}
+
+    monkeypatch.setattr(tmdb_client, "_get_json", fake_get_json)
+
+    first = tmdb_client.fetch_keywords(42)
+    tmdb_client.fetch_keywords(42)
+    assert len(calls) == 1
+
+    # mutar lo devuelto no puede contaminar el cache
+    first.append("bogus")
+    assert tmdb_client.fetch_keywords(42) == ["heist"]
+
+
+def test_tags_from_keywords_maps_only_curated_keywords() -> None:
+    tags = tmdb_client._tags_from_keywords(["Heist", "  revenge ", "unmapped nonsense"])
+
+    assert tags == {"heist", "revenge"}
 
 
 def test_fetch_watch_providers_maps_region_offers(monkeypatch) -> None:
