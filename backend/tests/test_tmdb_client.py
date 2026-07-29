@@ -495,6 +495,125 @@ def test_fetch_personalized_candidates_biases_movie_discover_by_profile(monkeypa
     assert profile_movie["director"] == "A Director"
 
 
+def _profile_movie_fake_get_json(calls: list[str]):
+    """Fake _get_json compartido por los tests de enriquecimiento con keywords:
+    un solo candidato movie (género 18 -> tag "character")."""
+
+    def fake_get_json(url: str) -> dict:
+        calls.append(url)
+        if "search/person" in url:
+            return {"results": []}
+        if "discover/movie" in url:
+            return {
+                "results": [
+                    {
+                        "id": 1,
+                        "title": "Profile Movie",
+                        "release_date": "2010-01-01",
+                        "genre_ids": [18],
+                        "overview": "",
+                    }
+                ]
+            }
+        return {"results": []}
+
+    return fake_get_json
+
+
+_KEYWORD_PROFILE = {
+    "genre_breakdown": [{"genre": "Drama", "weight": 10.0}],
+    "decade_breakdown": [{"decade": 2010, "count": 3}],
+    "top_directors": [],
+    "top_actors": [],
+}
+
+
+def test_fetch_personalized_candidates_folds_keyword_tags_into_movie_candidates(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setattr(tmdb_client, "_get_json", _profile_movie_fake_get_json([]))
+    monkeypatch.setattr(
+        tmdb_client, "fetch_taste_credits", lambda tmdb_id, kind="movie": {"director": None, "actors": []}
+    )
+    monkeypatch.setattr(tmdb_client, "fetch_keywords", lambda tmdb_id, kind="movie": ["heist"])
+
+    candidates = tmdb_client.fetch_personalized_candidates(_KEYWORD_PROFILE, mood="", kind_filter="movie")
+
+    movie = next(c for c in candidates if c["title"] == "Profile Movie")
+    assert "heist" in movie["tags"]
+    # el tag de género no se pierde: los keywords se suman, no reemplazan
+    assert "character" in movie["tags"]
+
+
+def test_fetch_personalized_candidates_keeps_keyword_tags_when_credits_fail(monkeypatch) -> None:
+    # credits y keywords son independientes: un TmdbError en credits no puede
+    # saltear el enriquecimiento por keywords del mismo item.
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setattr(tmdb_client, "_get_json", _profile_movie_fake_get_json([]))
+
+    def boom(tmdb_id, kind="movie"):
+        raise tmdb_client.TmdbError("credits caidos")
+
+    monkeypatch.setattr(tmdb_client, "fetch_taste_credits", boom)
+    monkeypatch.setattr(tmdb_client, "fetch_keywords", lambda tmdb_id, kind="movie": ["revenge"])
+
+    candidates = tmdb_client.fetch_personalized_candidates(_KEYWORD_PROFILE, mood="", kind_filter="movie")
+
+    movie = next(c for c in candidates if c["title"] == "Profile Movie")
+    assert "director" not in movie
+    assert "revenge" in movie["tags"]
+
+
+def test_fetch_personalized_candidates_enriches_series_keyword_tags(monkeypatch) -> None:
+    # las series no reciben credits (with_people no anda en /discover/tv) pero
+    # sí keywords — este es su único enriquecimiento por item.
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+
+    def fake_get_json(url: str) -> dict:
+        if "discover/tv" in url:
+            return {
+                "results": [
+                    {
+                        "id": 7,
+                        "name": "Profile Series",
+                        "first_air_date": "2015-01-01",
+                        "genre_ids": [18],
+                        "overview": "",
+                    }
+                ]
+            }
+        return {"results": []}
+
+    monkeypatch.setattr(tmdb_client, "_get_json", fake_get_json)
+    monkeypatch.setattr(tmdb_client, "fetch_keywords", lambda tmdb_id, kind="movie": ["dystopia"])
+
+    candidates = tmdb_client.fetch_personalized_candidates(_KEYWORD_PROFILE, mood="", kind_filter="series")
+
+    series = next(c for c in candidates if c["title"] == "Profile Series")
+    assert "dystopian" in series["tags"]
+
+
+def test_keyword_enrichment_does_not_poison_the_personalized_cache(monkeypatch) -> None:
+    # _PERSONALIZED_CACHE guarda los items PRE-enriquecimiento, y _clone_items es
+    # una copia shallow: item["tags"] es el mismo objeto lista que el cacheado.
+    # Un .append() acá acumularía tags en cada request servido desde ese cache.
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setattr(tmdb_client, "_get_json", _profile_movie_fake_get_json([]))
+    monkeypatch.setattr(
+        tmdb_client, "fetch_taste_credits", lambda tmdb_id, kind="movie": {"director": None, "actors": []}
+    )
+    monkeypatch.setattr(tmdb_client, "fetch_keywords", lambda tmdb_id, kind="movie": ["heist"])
+    # tiempo congelado -> el cache de 5 min es un hit garantizado en la 2da vuelta
+    monkeypatch.setattr(tmdb_client, "_now_monotonic", lambda: 100.0)
+
+    first = tmdb_client.fetch_personalized_candidates(_KEYWORD_PROFILE, mood="", kind_filter="movie")
+    second = tmdb_client.fetch_personalized_candidates(_KEYWORD_PROFILE, mood="", kind_filter="movie")
+
+    tags_first = next(c for c in first if c["title"] == "Profile Movie")["tags"]
+    tags_second = next(c for c in second if c["title"] == "Profile Movie")["tags"]
+    assert tags_first == tags_second
+    assert tags_second.count("heist") == 1
+
+
 def test_fetch_personalized_candidates_skips_with_people_for_series(monkeypatch) -> None:
     monkeypatch.setenv("TMDB_API_KEY", "fake-key")
     calls: list[str] = []

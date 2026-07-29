@@ -851,10 +851,13 @@ def fetch_personalized_candidates(profile: dict, mood: str, kind_filter: str = "
     top-rated list, so two users with different tastes see different pools.
     Movie candidates get enriched with director/cast (for recommender.py's
     scoring) since with_people only works on /discover/movie (confirmed in
-    the research doc — /discover/tv silently ignores it). Always mixes in a
-    small unpersonalized "exploration" slice (reusing fetch_candidates
-    as-is) so the pool doesn't fully collapse into the user's existing taste
-    bubble; recommender.py reserves a pick slot for it via the "_source" tag."""
+    the research doc — /discover/tv silently ignores it). Movies AND series
+    also get TMDb-keyword tags folded into "tags" (KEYWORD_TAG_MAP): that
+    endpoint does work on /tv, so it's the only per-item signal series get.
+    Always mixes in a small unpersonalized "exploration" slice (reusing
+    fetch_candidates as-is) so the pool doesn't fully collapse into the user's
+    existing taste bubble; recommender.py reserves a pick slot for it via the
+    "_source" tag."""
     api_key = os.environ.get("TMDB_API_KEY")
     if not api_key:
         raise TmdbError("TMDB_API_KEY no configurada.")
@@ -884,12 +887,17 @@ def fetch_personalized_candidates(profile: dict, mood: str, kind_filter: str = "
             DISCOVER_URL, "movie", GENRE_ID_TAG_MAP, movie_genre_ids, person_ids, top_decade, api_key
         )
         for item in movies[:CREDITS_ENRICH_CAP]:
+            # credits y keywords son enriquecimientos independientes: que falle
+            # uno no tiene que saltear el otro para el mismo item (esto era un
+            # `continue` antes de que existieran los keywords).
             try:
                 credits = fetch_taste_credits(item["tmdb_id"], kind="movie")
             except TmdbError:
-                continue
-            item["director"] = credits["director"]
-            item["actors"] = credits["actors"]
+                pass
+            else:
+                item["director"] = credits["director"]
+                item["actors"] = credits["actors"]
+            _enrich_with_keyword_tags(item, "movie")
         candidates.extend(movies)
 
     if has_profile_signal and kind_filter in ("series", "both"):
@@ -899,6 +907,10 @@ def fetch_personalized_candidates(profile: dict, mood: str, kind_filter: str = "
         series = _fetch_personalized_discover(
             DISCOVER_TV_URL, "series", TV_GENRE_ID_TAG_MAP, tv_genre_ids, [], top_decade, api_key
         )
+        # los keywords, a diferencia de with_people, SÍ funcionan en /tv — así
+        # que este es el primer enriquecimiento por item que reciben las series
+        for item in series[:CREDITS_ENRICH_CAP]:
+            _enrich_with_keyword_tags(item, "series")
         candidates.extend(series)
 
     exploration = fetch_candidates(mood, pages=1)
