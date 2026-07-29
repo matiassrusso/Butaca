@@ -37,6 +37,18 @@ duplicar las 10 filas de `rated_items` (confirmado por consulta directa a
 la DB). 213 → 215 tests (2 nuevos: reuso sin duplicar, rechazo sin perfil
 guardado). `tsc --noEmit` limpio.
 
+### Aviso más claro: el import por username trae solo historial reciente
+
+El tab "Username" del wizard ya mencionaba de pasada que traía "solo lo
+reciente", pero mezclado en la misma línea que la descripción general — no
+tenía la misma jerarquía visual que el aviso honesto que ya existe en modo
+manual (feedback punto 17, "Ojo: acá solo sabemos de las pelis que
+puntúes..."). Separado en dos párrafos en `Recommend.tsx`: descripción
+arriba, "Ojo: esto solo trae tu actividad reciente (~50 entradas) — para tu
+historial completo, usá el .zip." abajo en `text-muted-foreground/60`,
+mismo patrón. Solo texto/JSX, sin cambios de lógica — verificado con
+`tsc --noEmit` y en el browser local.
+
 ### Sin resolver: "Load failed" al importar por username (reporte de Bauti)
 
 Sin logs del momento no se puede confirmar la causa. Sospechoso principal:

@@ -762,10 +762,13 @@ export default function Recommend() {
                   </div>
                 ) : importMethod === "username" ? (
                   <div className="max-w-xl">
-                    <p className="font-mono text-[10px] uppercase leading-relaxed text-muted-foreground mb-3">
-                      Leemos tu diario público de Letterboxd (ratings, fechas, rewatches).
-                      Trae solo lo reciente — el .zip arma un perfil más completo. Tu perfil
-                      tiene que ser público.
+                    <p className="font-mono text-[10px] uppercase leading-relaxed text-muted-foreground mb-2">
+                      Leemos tu diario público de Letterboxd (ratings, fechas, rewatches). Tu
+                      perfil tiene que ser público.
+                    </p>
+                    <p className="font-mono text-[10px] uppercase leading-relaxed text-muted-foreground/60 mb-3">
+                      Ojo: esto solo trae tu actividad reciente (~50 entradas) — para tu
+                      historial completo, usá el .zip.
                     </p>
                     <input
                       value={letterboxdUsername}

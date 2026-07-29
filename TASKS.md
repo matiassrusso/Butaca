@@ -144,10 +144,12 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
       por título como con el zip. Usarlo ahorraría requests a TMDb y evitaría
       errores de matcheo, pero pedía tocar el pipeline compartido con el zip,
       así que quedó afuera. Detalle en `docs/letterboxd-username-import.md`.
-- [ ] **Avisar en el frontend que el import por username trae solo historial
+- [x] **Avisar en el frontend que el import por username trae solo historial
       reciente** (~50 entradas del RSS, contra el historial completo del zip).
-      Hoy los dos caminos se ofrecen sin distinción y el zip da un perfil
-      bastante mejor. Decisión de producto, no técnica.
+      **Resuelto 2026-07-29:** el tab "Username" del wizard ahora separa la
+      descripción del aviso, mismo patrón que el "Ojo:" del modo manual —
+      "Ojo: esto solo trae tu actividad reciente (~50 entradas) — para tu
+      historial completo, usá el .zip." Verificado en el browser local.
 - [x] **Despausar el monitor de UptimeRobot** — activo, confirmado por
       Matías el 2026-07-23.
 - [ ] **Activar auto-renew de `butaca.xyz`** en Namecheap antes de que venza
