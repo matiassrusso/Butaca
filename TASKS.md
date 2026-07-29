@@ -47,16 +47,23 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
       `_rebuild_ratings`, sin resubir fuente, `persist=False` para no
       duplicar `rated_items`) + banner "Ya tenés un perfil guardado" con
       botón "Usar mi perfil" en el paso 1 del wizard, visible con ≥10 pelis
-      guardadas. Verificado en el browser local, 213 → 215 tests. Detalle en
+      guardadas. Verificado en el browser local **y en producción**
+      (butaca.xyz, cuenta `claude-verify-qa`): banner "Ya tenés un perfil
+      guardado" aparece y "Usar mi perfil" regenera picks sin re-tildar
+      nada. 213 → 215 tests. Detalle en
       [`03 Iteration Logs/(C) 2026-07-29 feedback-amigos-ronda-2.md`](<03 Iteration Logs/(C) 2026-07-29 feedback-amigos-ronda-2.md>)
       y `docs/build-log.md` (entrada 2026-07-29).
-- [ ] **Deployar el fix de arriba a producción** para que se vea resuelto
-      en butaca.xyz — verificado solo en local por ahora.
+- [x] **Confirmar en producción que los picks salen con razón real del
+      LLM** (pendiente desde la sesión 3, "lo primero a chequear al
+      retomar") — confirmado 2026-07-29 en butaca.xyz: 6 "why" distintos,
+      cada uno cita títulos reales del historial rateado (Fight Club, Pulp
+      Fiction, Terminator 2, City of God, The Godfather), nada de la
+      plantilla vieja "tira para el foco...".
 - [ ] **Bauti: "Load failed" al importar por username (feedback ronda 2)**
-      — sin logs del momento no se pudo confirmar la causa. Sospechoso
-      principal: cold start de Render + latencia extra del RSS de
-      Letterboxd. Pendiente pedirle que reintente con el backend despierto
-      y, si repite, revisar logs de Render en el momento exacto.
+      — no prioritario por ahora (Matías). Sin logs del momento no se pudo
+      confirmar la causa. Sospechoso principal: cold start de Render +
+      latencia extra del RSS de Letterboxd. Si vuelve a salir, revisar
+      logs de Render en el momento exacto.
 
 - [x] **Feedback de amigos: 19 de 20 puntos resueltos (2026-07-23, sesión
       2)** — lote rápido (1,4,5,6,12,13,19), wizard multi-step en
@@ -131,6 +138,9 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
 - [ ] **Borrar el usuario de prueba `test-resend-qa`** (creado hoy vía API
       para probar el mail real, con el mail de Matías). Ya hay endpoint de
       borrar cuenta (Ola 4 tarea I) — usarlo o a mano por SQL contra Neon.
+- [ ] **Borrar el usuario de prueba `claude-verify-qa`** (creado 2026-07-29
+      en producción para verificar el fix del perfil guardado y el "why"
+      real del LLM) — mismo endpoint, `/profile` → Zona de peligro.
 - [ ] **Aprovechar el `tmdb:movieId` del RSS** (mejora, no bug) — el feed trae
       el id de TMDb ya resuelto por entrada, pero el flujo sigue matcheando
       por título como con el zip. Usarlo ahorraría requests a TMDb y evitaría
