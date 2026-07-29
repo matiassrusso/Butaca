@@ -1,7 +1,7 @@
 from collections import Counter
 
 from backend.app.models import RatedItem
-from backend.app.recommender import GENRE_OPTIONS, capitalize_sentence, recommend
+from backend.app.recommender import GENRE_OPTIONS, TAG_PHRASES, capitalize_sentence, recommend
 
 
 def test_recommend_filters_seen_titles_and_prefers_matching_mood() -> None:
@@ -237,6 +237,40 @@ def test_recommend_uses_matching_user_tags_as_positive_signal() -> None:
     )
 
     assert response.recommendations[0].match_score > 50
+
+
+def test_recommend_uses_keyword_tag_from_review_as_positive_signal() -> None:
+    # cierra el loop de los tags que vienen de las keywords de TMDb: sin la
+    # entrada en POSITIVE_HINTS el tag se mostraría en la UI pero nunca podría
+    # ganar score desde la reseña del usuario.
+    response = recommend(
+        ratings=[RatedItem(title="Ocean's Eleven", rating=5, review="great heist movie")],
+        mood="",
+        catalog=[{"title": "Heist Pick", "year": 2020, "kind": "movie", "tags": ["heist"]}],
+    )
+
+    assert response.recommendations[0].match_score > 50
+
+
+def test_recommend_why_names_keyword_tag_in_spanish() -> None:
+    # el "why" no puede filtrar el tag crudo en inglés a una frase en español
+    response = recommend(
+        ratings=[RatedItem(title="Oldboy", rating=5, review="brutal revenge story")],
+        mood="",
+        catalog=[{"title": "Revenge Pick", "year": 2020, "kind": "movie", "tags": ["revenge"]}],
+    )
+
+    assert "la venganza" in response.recommendations[0].why
+
+
+def test_every_keyword_tag_has_a_spanish_phrase() -> None:
+    # guard estructural: evita para siempre el "sumé una entrada al map y me
+    # olvidé la frase", que no falla pero mete inglés crudo en prosa española.
+    from backend.app.tmdb_client import KEYWORD_TAG_MAP
+
+    for tags in KEYWORD_TAG_MAP.values():
+        for tag in tags:
+            assert tag in TAG_PHRASES, f"falta la frase en español para el tag {tag!r}"
 
 
 def test_recommend_ignores_user_tags_outside_internal_vocabulary() -> None:

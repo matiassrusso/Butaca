@@ -11,6 +11,15 @@ POSITIVE_HINTS = {
     "action": ["action", "kinetic", "blockbuster"],
     "romance": ["romantic", "intimate"],
     "funny": ["funny", "light", "sharp"],
+    # keys de los tags que vienen de las keywords de TMDb
+    # (tmdb_client.KEYWORD_TAG_MAP), acotadas a las que alguien realmente
+    # escribiría en una reseña. Sin entrada acá un tag se muestra en la UI pero
+    # nunca puede ganar score: este es el único camino por el que un tag del
+    # catálogo cobra bonus desde la reseña del usuario.
+    "heist": ["heist"],
+    "revenge": ["revenge"],
+    "road trip": ["road-trip"],
+    "coming of age": ["coming-of-age"],
 }
 
 NEGATIVE_HINTS = {
@@ -64,6 +73,18 @@ TAG_PHRASES: dict[str, str] = {
     "prestige": "la calidad prestige",
     "mystery": "el misterio",
     "messy": "el desorden emocional",
+    # tags que salen de las keywords de TMDb (tmdb_client.KEYWORD_TAG_MAP), no
+    # de géneros ni del escaneo del overview
+    "heist": "el golpe planificado",
+    "true-story": "el hecho real detrás",
+    "time-travel": "los viajes en el tiempo",
+    "coming-of-age": "el coming of age",
+    "revenge": "la venganza",
+    "single-location": "la acción en un solo lugar",
+    "road-trip": "el viaje en ruta",
+    "hitman": "el asesino a sueldo",
+    "dystopian": "el futuro distópico",
+    "found-footage": "el found footage",
 }
 
 
