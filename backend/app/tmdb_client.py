@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import time
 import urllib.parse
@@ -8,6 +9,8 @@ from pathlib import Path
 from urllib.error import URLError
 
 from .recommender import positive_tags_from_text
+
+logger = logging.getLogger(__name__)
 
 ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
 DISCOVER_URL = "https://api.themoviedb.org/3/discover/movie"
@@ -722,7 +725,11 @@ def _enrich_with_keyword_tags(item: dict, kind: str) -> None:
     cada request servido desde esa entrada mientras viva (5 min)."""
     try:
         keywords = fetch_keywords(item["tmdb_id"], kind=kind)
-    except TmdbError:
+    except TmdbError as exc:
+        # a diferencia de credits, esto se loguea: sin el log un fallo sistémico
+        # del endpoint (o una key sin permisos) es indistinguible de "el título
+        # no tiene keywords mapeados", y la feature muere en silencio.
+        logger.warning("Keywords de %s (%s) fallaron: %s", item.get("tmdb_id"), kind, exc)
         return
     # Tope de 2 tags por título, y no es cosmético: el scoring de recommend()
     # divide el término de match positivo por len(tags), así que un tag que el
@@ -733,6 +740,16 @@ def _enrich_with_keyword_tags(item: dict, kind: str) -> None:
     extra = set(sorted(_tags_from_keywords(keywords))[:2])
     if extra:
         item["tags"] = sorted(set(item["tags"]) | extra)
+    # log del hit rate: KEYWORD_TAG_MAP es una allowlist chica contra el
+    # vocabulario enorme de TMDb, así que "0 tags nuevos" es el caso normal y no
+    # se distingue de un bug sin ver los keywords crudos que llegaron.
+    logger.info(
+        "Keywords %s (%s): %d crudos -> %s",
+        item.get("title"),
+        kind,
+        len(keywords),
+        sorted(extra) or "sin match",
+    )
 
 
 def _resolve_person_id(name: str, expected_department: str | None = None) -> int | None:
