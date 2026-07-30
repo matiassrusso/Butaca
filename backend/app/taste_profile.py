@@ -26,6 +26,14 @@ MATCH_WORKERS = 10
 
 def _match_title(item: dict) -> tuple[dict, dict | None]:
     try:
+        # el tmdb_id ya resuelto (RSS de username, ver RatedItem.tmdb_id)
+        # evita una búsqueda por texto — más rápido y sin riesgo de
+        # matchear un remake homónimo
+        tmdb_id = item.get("tmdb_id")
+        if tmdb_id is not None:
+            match = tmdb_client.fetch_title_by_id(tmdb_id, "movie")
+            if match:
+                return item, match
         return item, tmdb_client.search_title(item["title"])
     except tmdb_client.TmdbError:
         return item, None

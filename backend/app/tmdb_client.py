@@ -205,6 +205,7 @@ _PERSON_CACHE: OrderedDict[str, tuple[float, int | None]] = OrderedDict()
 _PERSONALIZED_CACHE: OrderedDict[tuple, tuple[float, list[dict]]] = OrderedDict()
 _WATCH_PROVIDERS_CACHE: OrderedDict[tuple[str, int, str], tuple[float, dict]] = OrderedDict()
 _KEYWORDS_CACHE: OrderedDict[tuple[str, int], tuple[float, list[str]]] = OrderedDict()
+_TITLE_BY_ID_CACHE: OrderedDict[tuple[str, int], tuple[float, dict | None]] = OrderedDict()
 # single entry, not keyed — there's only one "the catalog" to count
 _CATALOG_STATS_CACHE_TTL_SECONDS = 24 * 60 * 60
 _catalog_stats_cache: tuple[float, dict] | None = None
@@ -639,6 +640,72 @@ def search_titles(query: str, limit: int = 8) -> list[dict]:
         if len(out) >= limit:
             break
     return out
+
+
+def fetch_title_by_id(tmdb_id: int, kind: str = "movie") -> dict | None:
+    """Resuelve un título directo por su TMDb id, sin buscar por texto — para
+    cuando ya lo tenemos (el `tmdb:movieId` que trae el feed RSS de username
+    de Letterboxd, ver RatedItem.tmdb_id). Mismo shape de retorno que
+    search_title/_search_one (tmdb_id/title/year/kind/genres/tags/...),
+    mismo cache de 24h — evita una búsqueda por texto que puede matchear mal
+    (ej. un remake con el mismo nombre) y ahorra el request de búsqueda
+    entero."""
+    api_key = os.environ.get("TMDB_API_KEY")
+    if not api_key:
+        raise TmdbError("TMDB_API_KEY no configurada.")
+
+    cache_key = (kind, tmdb_id)
+    cached = _TITLE_BY_ID_CACHE.get(cache_key)
+    if cached is not None:
+        expires_at, result = cached
+        if expires_at > _now_monotonic():
+            _TITLE_BY_ID_CACHE.move_to_end(cache_key)
+            return result.copy() if result else None
+        _TITLE_BY_ID_CACHE.pop(cache_key, None)
+
+    genre_name_map = GENRE_ID_NAME_MAP if kind == "movie" else TV_GENRE_ID_NAME_MAP
+    genre_tag_map = GENRE_ID_TAG_MAP if kind == "movie" else TV_GENRE_ID_TAG_MAP
+    endpoint = _tmdb_endpoint_kind(kind)
+    result: dict | None
+    try:
+        raw = _get_json(f"https://api.themoviedb.org/3/{endpoint}/{tmdb_id}?api_key={api_key}&language=en-US")
+    except TmdbError:
+        result = None
+    else:
+        title_field = "title" if kind == "movie" else "name"
+        date_field = "release_date" if kind == "movie" else "first_air_date"
+        date_value = raw.get(date_field) or ""
+        try:
+            year = int(date_value[:4])
+        except ValueError:
+            year = None
+        if not raw.get(title_field) or year is None:
+            result = None
+        else:
+            # /movie/{id} y /tv/{id} devuelven "genres" como objetos
+            # {id, name}, no "genre_ids" (lista de ints) como el resto de
+            # los endpoints usados en este módulo
+            genre_ids = [g["id"] for g in raw.get("genres", [])]
+            genres = sorted({genre_name_map[gid] for gid in genre_ids if gid in genre_name_map})
+            tags = sorted({tag for gid in genre_ids for tag in genre_tag_map.get(gid, [])})
+            result = {
+                "tmdb_id": raw.get("id"),
+                "title": raw[title_field].strip(),
+                "year": year,
+                "kind": kind,
+                "genres": genres,
+                "tags": tags,
+                "poster_path": _image_url(raw.get("poster_path"), "w500"),
+                "backdrop_path": _image_url(raw.get("backdrop_path"), "w780"),
+                "overview": raw.get("overview") or "",
+                "vote_average": raw.get("vote_average"),
+            }
+
+    _TITLE_BY_ID_CACHE[cache_key] = (_now_monotonic() + TITLE_CACHE_TTL_SECONDS, result)
+    _TITLE_BY_ID_CACHE.move_to_end(cache_key)
+    while len(_TITLE_BY_ID_CACHE) > TITLE_CACHE_MAX_ENTRIES:
+        _TITLE_BY_ID_CACHE.popitem(last=False)
+    return result.copy() if result else None
 
 
 def fetch_taste_credits(tmdb_id: int, kind: str = "movie") -> dict:

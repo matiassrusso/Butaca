@@ -126,6 +126,35 @@ def test_recommend_letterboxd_returns_picks_for_valid_username(monkeypatch) -> N
     assert response.json()["recommendations"]
 
 
+def test_recommend_letterboxd_persists_tmdb_id_from_rss(monkeypatch) -> None:
+    # el tmdb:movieId del RSS de username tiene que sobrevivir el round-trip
+    # completo: RSS -> RatedItem -> rated_items (DB) -> get_watched_items
+    monkeypatch.setattr(
+        letterboxd_scrape,
+        "fetch_letterboxd_diary",
+        lambda username: (
+            [
+                RatedItem(
+                    title="GoodFellas", rating=5, review="", watched_date="2024-01-01", tmdb_id=769
+                )
+            ],
+            set(),
+        ),
+    )
+    headers = _auth_headers("lbtmdbid")
+
+    response = client.post(
+        "/recommend/letterboxd", headers=headers, data={"username": "someuser", "mood": ""}
+    )
+
+    assert response.status_code == 200
+    user_id = db.get_user_by_username("lbtmdbid")["id"]
+    watched = db.get_watched_items(user_id)
+    goodfellas = next(item for item in watched if item["title"] == "GoodFellas")
+    assert goodfellas["tmdb_id"] == 769
+    assert goodfellas["source"] == "import"
+
+
 def test_recommend_letterboxd_surfaces_scrape_errors_as_400(monkeypatch) -> None:
     def raise_scrape_error(username: str):
         raise letterboxd_scrape.ScrapeError(f"No encontré un usuario de Letterboxd llamado «{username}».")
@@ -247,6 +276,41 @@ def test_enrich_loved_ratings_respects_lookup_cap(monkeypatch) -> None:
     _enrich_loved_ratings_with_genre_tags(ratings)
 
     assert len(calls) == TASTE_TAG_LOOKUP_CAP
+
+
+def test_enrich_loved_ratings_uses_tmdb_id_when_present_no_search(monkeypatch) -> None:
+    # el tmdb:movieId del RSS de username evita la búsqueda por texto —
+    # ahorra el request y el riesgo de matchear un remake homónimo
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+
+    def fail_if_called(title):
+        raise AssertionError("no debería buscar por texto si ya tiene tmdb_id")
+
+    monkeypatch.setattr("backend.app.main.tmdb_client.search_title", fail_if_called)
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.fetch_title_by_id",
+        lambda tmdb_id, kind: {"tags": ["dark", "psychological"]} if tmdb_id == 769 else None,
+    )
+
+    ratings = [RatedItem(title="GoodFellas", rating=5, review="", tmdb_id=769)]
+    _enrich_loved_ratings_with_genre_tags(ratings)
+
+    assert set(ratings[0].tags) == {"dark", "psychological"}
+
+
+def test_enrich_loved_ratings_falls_back_to_search_when_id_lookup_misses(monkeypatch) -> None:
+    # si el id no resuelve (título borrado de TMDb, id viejo, etc.) cae al
+    # camino de siempre en vez de perder la señal
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setattr("backend.app.main.tmdb_client.fetch_title_by_id", lambda tmdb_id, kind: None)
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.search_title", lambda title: {"tags": ["dark"]}
+    )
+
+    ratings = [RatedItem(title="GoodFellas", rating=5, review="", tmdb_id=999999)]
+    _enrich_loved_ratings_with_genre_tags(ratings)
+
+    assert ratings[0].tags == ["dark"]
 
 
 def test_feedback_accepts_own_recommendation() -> None:

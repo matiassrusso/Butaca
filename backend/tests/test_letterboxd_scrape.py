@@ -10,8 +10,10 @@ def _item(
     watched: str = "2026-01-15",
     rewatch: str = "No",
     like: str = "No",
+    tmdb_id: str | None = None,
 ) -> str:
     rating_tag = f"<letterboxd:memberRating>{rating}</letterboxd:memberRating>" if rating else ""
+    tmdb_tag = f"<tmdb:movieId>{tmdb_id}</tmdb:movieId>" if tmdb_id else ""
     return (
         "<item>"
         f"<title>{title}</title>"
@@ -20,6 +22,7 @@ def _item(
         f"<letterboxd:rewatch>{rewatch}</letterboxd:rewatch>"
         f"<letterboxd:memberLike>{like}</letterboxd:memberLike>"
         f"{rating_tag}"
+        f"{tmdb_tag}"
         "</item>"
     )
 
@@ -27,7 +30,7 @@ def _item(
 def _feed(*items: str) -> str:
     return (
         "<?xml version='1.0' encoding='utf-8'?>"
-        '<rss version="2.0" xmlns:letterboxd="https://letterboxd.com">'
+        '<rss version="2.0" xmlns:letterboxd="https://letterboxd.com" xmlns:tmdb="https://themoviedb.org">'
         "<channel>" + "".join(items) + "</channel></rss>"
     )
 
@@ -36,8 +39,31 @@ def test_parse_feed_extracts_rating_and_watched_date() -> None:
     entries = ls._parse_feed(_feed(_item("GoodFellas", rating="5.0", watched="2024-09-28")))
 
     assert entries == [
-        {"title": "GoodFellas", "rating": 5.0, "watched_date": "2024-09-28", "liked": False}
+        {
+            "title": "GoodFellas",
+            "rating": 5.0,
+            "watched_date": "2024-09-28",
+            "liked": False,
+            "tmdb_id": None,
+        }
     ]
+
+
+def test_parse_feed_extracts_tmdb_id() -> None:
+    entries = ls._parse_feed(_feed(_item("GoodFellas", rating="5.0", tmdb_id="769")))
+
+    assert entries[0]["tmdb_id"] == 769
+
+
+def test_fetch_diary_propagates_tmdb_id_onto_rated_item(monkeypatch) -> None:
+    monkeypatch.setattr(
+        ls, "_fetch_feed", lambda username: _feed(_item("GoodFellas", rating="5.0", tmdb_id="769"))
+    )
+
+    ratings, _ = ls.fetch_letterboxd_diary("someone")
+
+    assert ratings[0].tmdb_id == 769
+    assert ratings[0].source == "import"
 
 
 def test_parse_feed_skips_non_film_items() -> None:

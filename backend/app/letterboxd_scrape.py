@@ -35,7 +35,7 @@ USER_AGENT = "Butaca/1.0"
 REWATCH_BONUS = 0.5  # igual que el rewatch del diary.csv del zip
 LIKE_RATING = 4.5  # mismo rating sintético que letterboxd_zip.LIKE_RATING
 
-NS = {"letterboxd": "https://letterboxd.com"}
+NS = {"letterboxd": "https://letterboxd.com", "tmdb": "https://themoviedb.org"}
 
 
 class ScrapeError(Exception):
@@ -57,8 +57,8 @@ def _fetch_feed(username: str) -> str:
         raise ScrapeError(f"No pude conectarme a Letterboxd: {exc}") from exc
 
 
-def _text(item: ET.Element, tag: str) -> str | None:
-    node = item.find(f"letterboxd:{tag}", NS)
+def _text(item: ET.Element, tag: str, ns: str = "letterboxd") -> str | None:
+    node = item.find(f"{ns}:{tag}", NS)
     return node.text.strip() if node is not None and node.text else None
 
 
@@ -82,12 +82,19 @@ def _parse_feed(xml_text: str) -> list[dict]:
         except ValueError:
             rating = None
 
+        raw_tmdb_id = _text(item, "movieId", ns="tmdb")
+        try:
+            tmdb_id = int(raw_tmdb_id) if raw_tmdb_id else None
+        except ValueError:
+            tmdb_id = None
+
         entries.append(
             {
                 "title": title,
                 "rating": rating,
                 "watched_date": _text(item, "watchedDate"),
                 "liked": _text(item, "memberLike") == "Yes",
+                "tmdb_id": tmdb_id,
             }
         )
     return entries
@@ -131,6 +138,7 @@ def fetch_letterboxd_diary(username: str) -> tuple[list[RatedItem], set[str]]:
             rating=rating,
             review="",
             watched_date=entry["watched_date"],
+            tmdb_id=entry["tmdb_id"],
         )
 
     if not ratings_by_title and not watched_only:

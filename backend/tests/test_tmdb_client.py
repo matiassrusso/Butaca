@@ -12,6 +12,7 @@ def clear_tmdb_cache() -> None:
     tmdb_client._PERSONALIZED_CACHE.clear()
     tmdb_client._WATCH_PROVIDERS_CACHE.clear()
     tmdb_client._KEYWORDS_CACHE.clear()
+    tmdb_client._TITLE_BY_ID_CACHE.clear()
 
 
 def test_fetch_candidates_requires_api_key(monkeypatch) -> None:
@@ -397,6 +398,74 @@ def test_search_title_with_year_pins_the_release_year(monkeypatch) -> None:
     # pisar ni reusar la entrada con año
     tmdb_client.search_title("Toy Story", 1995)
     assert len(urls) == 1
+
+
+def test_fetch_title_by_id_requires_api_key(monkeypatch) -> None:
+    monkeypatch.delenv("TMDB_API_KEY", raising=False)
+
+    with pytest.raises(tmdb_client.TmdbError):
+        tmdb_client.fetch_title_by_id(769)
+
+
+def test_fetch_title_by_id_resolves_by_id_no_search(monkeypatch) -> None:
+    # tmdb:movieId del RSS de username: se resuelve por id directo, nunca
+    # golpea /search — mismo shape de retorno que search_title
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+
+    def fake_get_json(url: str) -> dict:
+        assert "/movie/769" in url
+        assert "search" not in url
+        return {
+            "id": 769,
+            "title": "GoodFellas",
+            "release_date": "1990-09-19",
+            "genres": [{"id": 18, "name": "Drama"}, {"id": 80, "name": "Crime"}],
+            "poster_path": None,
+        }
+
+    monkeypatch.setattr(tmdb_client, "_get_json", fake_get_json)
+
+    match = tmdb_client.fetch_title_by_id(769)
+
+    assert match == {
+        "tmdb_id": 769,
+        "title": "GoodFellas",
+        "year": 1990,
+        "kind": "movie",
+        "genres": ["Crimen", "Drama"],
+        "tags": ["character", "dark", "psychological"],
+        "poster_path": None,
+        "backdrop_path": None,
+        "overview": "",
+        "vote_average": None,
+    }
+
+
+def test_fetch_title_by_id_caches_result(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    calls: list[str] = []
+
+    def fake_get_json(url: str) -> dict:
+        calls.append(url)
+        return {"id": 1, "title": "X", "release_date": "2000-01-01", "genres": []}
+
+    monkeypatch.setattr(tmdb_client, "_get_json", fake_get_json)
+
+    tmdb_client.fetch_title_by_id(1)
+    tmdb_client.fetch_title_by_id(1)
+
+    assert len(calls) == 1
+
+
+def test_fetch_title_by_id_returns_none_on_tmdb_error(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+
+    def boom(url: str) -> dict:
+        raise tmdb_client.TmdbError("404")
+
+    monkeypatch.setattr(tmdb_client, "_get_json", boom)
+
+    assert tmdb_client.fetch_title_by_id(999999) is None
 
 
 def test_resolve_person_id_defaults_to_first_result_sorted_by_popularity(monkeypatch) -> None:

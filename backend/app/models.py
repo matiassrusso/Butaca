@@ -14,6 +14,11 @@ class RatedItem(BaseModel):
     # gustó), mapeado a un rating sintetico — el llm_client usa esto para no
     # citarlo con una precisión de "(4.5/5)" que el usuario nunca dio.
     source: Literal["import", "manual"] = "import"
+    # id de TMDb ya resuelto, cuando la fuente lo trae (tmdb:movieId del feed
+    # RSS de username) — evita una búsqueda por texto (más rápido, sin
+    # riesgo de matchear un remake con el mismo nombre) en
+    # _enrich_loved_ratings_with_genre_tags y taste_profile.build_taste_profile
+    tmdb_id: int | None = None
 
 
 class RecommendRequest(BaseModel):

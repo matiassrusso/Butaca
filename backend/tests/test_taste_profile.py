@@ -66,6 +66,37 @@ def test_build_taste_profile_skips_titles_that_error_on_search(monkeypatch) -> N
     assert profile["genre_breakdown"] == []
 
 
+def test_match_title_uses_tmdb_id_when_present_no_search(monkeypatch) -> None:
+    # el tmdb:movieId del RSS de username evita la búsqueda por texto —
+    # ahorra el request y el riesgo de matchear un remake homónimo
+    def fail_if_called(title):
+        raise AssertionError("no debería buscar por texto si ya tiene tmdb_id")
+
+    monkeypatch.setattr(tmdb_client, "search_title", fail_if_called)
+    monkeypatch.setattr(
+        tmdb_client,
+        "fetch_title_by_id",
+        lambda tmdb_id, kind: {"tmdb_id": 769, "genres": ["Drama"], "year": 1990}
+        if tmdb_id == 769
+        else None,
+    )
+
+    item, match = taste_profile._match_title({"title": "GoodFellas", "tmdb_id": 769})
+
+    assert match == {"tmdb_id": 769, "genres": ["Drama"], "year": 1990}
+
+
+def test_match_title_falls_back_to_search_when_id_lookup_misses(monkeypatch) -> None:
+    monkeypatch.setattr(tmdb_client, "fetch_title_by_id", lambda tmdb_id, kind: None)
+    monkeypatch.setattr(
+        tmdb_client, "search_title", lambda title: {"tmdb_id": 1, "genres": ["Drama"], "year": 1990}
+    )
+
+    item, match = taste_profile._match_title({"title": "GoodFellas", "tmdb_id": 999999})
+
+    assert match == {"tmdb_id": 1, "genres": ["Drama"], "year": 1990}
+
+
 def test_build_taste_profile_handles_empty_history() -> None:
     profile = taste_profile.build_taste_profile([])
 

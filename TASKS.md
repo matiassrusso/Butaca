@@ -326,11 +326,33 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
 - [x] **Cuentas de prueba en producción** (`test-resend-qa`,
       `claude-verify-qa`) — descartado 2026-07-29: a Matías no le importa
       que queden, no vale la pena la acción.
-- [ ] **Aprovechar el `tmdb:movieId` del RSS** (mejora, no bug) — el feed trae
-      el id de TMDb ya resuelto por entrada, pero el flujo sigue matcheando
-      por título como con el zip. Usarlo ahorraría requests a TMDb y evitaría
-      errores de matcheo, pero pedía tocar el pipeline compartido con el zip,
-      así que quedó afuera. Detalle en `docs/letterboxd-username-import.md`.
+- [x] **Aprovechar el `tmdb:movieId` del RSS (2026-07-30)** — verificado
+      contra el feed real de Letterboxd (`scorsese`, vía curl directo):
+      namespace `xmlns:tmdb="https://themoviedb.org"`, tag
+      `<tmdb:movieId>769</tmdb:movieId>` por item, siempre movie-space (el
+      nombre del tag lo confirma). Cadena completa:
+      - `letterboxd_scrape.py`: `_text()` ahora acepta el namespace (`ns=`),
+        parsea `tmdb:movieId` por entrada y lo mete en el `RatedItem`.
+      - `models.RatedItem`: campo nuevo `tmdb_id: int | None = None`.
+      - `tmdb_client.fetch_title_by_id(tmdb_id, kind)`: nueva función que
+        resuelve `/movie/{id}` (o `/tv/{id}`) directo — mismo shape de
+        retorno que `search_title` (tmdb_id/title/year/kind/genres/tags/...),
+        mismo cache de 24h. `/movie/{id}` devuelve `genres` como objetos
+        `{id,name}`, no `genre_ids` (lista de ints) como el resto de los
+        endpoints — se adapta antes de reusar la lógica de tags.
+      - `main._enrich_loved_ratings_with_genre_tags` y
+        `taste_profile._match_title`: si el `RatedItem`/dict trae `tmdb_id`,
+        lo resuelven directo (sin buscar por texto); si no matchea, caen al
+        `search_title` de siempre — nunca se pierde señal.
+      - `rated_items.tmdb_id INTEGER` (migración + persistencia +
+        `get_watched_items`/`_rebuild_ratings`), mismo patrón que la
+        migración de `source` de esta misma sesión.
+      Beneficio real: menos requests a TMDb (se salta la búsqueda por texto)
+      y sin riesgo de matchear un remake homónimo — pero solo afecta al
+      import por username (el zip y el modo manual no traen id de TMDb, no
+      tenían nada que aprovechar). Tests nuevos en los 4 módulos tocados
+      (`fetch_title_by_id`, RSS namespace, preferencia de id sobre búsqueda
+      en ambos call sites, round-trip completo RSS→DB). 246 tests.
 - [x] **Avisar en el frontend que el import por username trae solo historial
       reciente** (~50 entradas del RSS, contra el historial completo del zip).
       **Resuelto 2026-07-29:** el tab "Username" del wizard ahora separa la

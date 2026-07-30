@@ -101,6 +101,7 @@ def _rebuild_ratings(user_id: int) -> list[RatedItem]:
             review=item.get("review", ""),
             watched_date=item.get("watched_date", ""),
             source=item.get("source", "import"),
+            tmdb_id=item.get("tmdb_id"),
         )
         for item in db.get_watched_items(user_id)
     ]
@@ -423,6 +424,12 @@ def _enrich_loved_ratings_with_genre_tags(ratings: list[RatedItem]) -> None:
 
     def _match(item: RatedItem) -> tuple[RatedItem, dict | None]:
         try:
+            # el tmdb_id ya resuelto (RSS de username) evita una búsqueda por
+            # texto — más rápido y sin riesgo de matchear un remake homónimo
+            if item.tmdb_id is not None:
+                match = tmdb_client.fetch_title_by_id(item.tmdb_id, "movie")
+                if match:
+                    return item, match
             return item, tmdb_client.search_title(item.title)
         except tmdb_client.TmdbError:
             return item, None
@@ -492,7 +499,10 @@ def _finish_recommend(
         # see docs/(C) plan-de-trabajo.md §4 for why this used to run too late.
         db.save_rated_items(
             user["id"],
-            [(item.title, item.rating, item.review, item.watched_date, item.source) for item in ratings],
+            [
+                (item.title, item.rating, item.review, item.watched_date, item.source, item.tmdb_id)
+                for item in ratings
+            ],
         )
 
     # el historial completo del usuario, sin importar la fuente (zip,
