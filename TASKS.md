@@ -74,7 +74,17 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
       exploration ya traen `kind` desde `_map_result`, sirve para movie y
       series por igual). Test nuevo
       (`test_fetch_personalized_candidates_enriches_exploration_keyword_tags`).
-      229 tests.
+      **Verificado en producción con logs de Render**: títulos que antes
+      nunca aparecían en el log de keywords (Sinners, The Killer, Weapons)
+      ahora sí, con tags reales (`time-travel`, `hitman`+`revenge`). La
+      verificación encontró un 2do bug real el mismo día: `fetch_candidates`
+      devuelve "movies + series" (movies siempre primero), así que cortar el
+      cap sobre la lista combinada dejaba a las series de exploration sin
+      enriquecer siempre que hubiera ≥ 20 movies (el caso normal, confirmado
+      en los logs — cero líneas "(series)"). Fix: cap aplicado por separado a
+      movies y series de exploration, igual que profile/series. Test de
+      regresión (`..._enriches_exploration_series_past_the_movie_cap`, falla
+      con el código viejo, validado reintroduciéndolo a propósito). 230 tests.
 - [ ] **Otra palanca pendiente: subir `CREDITS_ENRICH_CAP`** (hoy 20) — la
       exploration ya se enriquece, pero sigue acotada al mismo cap que
       profile/series. Falta ver en producción si con esto solo ya sube la

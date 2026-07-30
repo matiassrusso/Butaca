@@ -936,9 +936,17 @@ def fetch_personalized_candidates(profile: dict, mood: str, kind_filter: str = "
     for item in exploration:
         item["_source"] = "exploration"
     # antes solo profile/series recibían keyword tags, así que la exploration
-    # nunca competía en igualdad de condiciones en el scoring de recommend()
-    for item in exploration[:CREDITS_ENRICH_CAP]:
-        _enrich_with_keyword_tags(item, item["kind"])
+    # nunca competía en igualdad de condiciones en el scoring de recommend().
+    # fetch_candidates devuelve "movies + series" (movies siempre primero), así
+    # que cortar por CREDITS_ENRICH_CAP sobre la lista combinada dejaba a las
+    # series de exploration sin enriquecer siempre que hubiera >= cap movies
+    # (el caso normal) — se aplica el cap por separado, igual que profile/series.
+    exploration_movies = [item for item in exploration if item["kind"] == "movie"]
+    exploration_series = [item for item in exploration if item["kind"] == "series"]
+    for item in exploration_movies[:CREDITS_ENRICH_CAP]:
+        _enrich_with_keyword_tags(item, "movie")
+    for item in exploration_series[:CREDITS_ENRICH_CAP]:
+        _enrich_with_keyword_tags(item, "series")
     candidates.extend(exploration)
 
     seen: set[tuple[str, str]] = set()

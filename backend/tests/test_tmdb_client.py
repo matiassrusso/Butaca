@@ -670,6 +670,52 @@ def test_fetch_personalized_candidates_enriches_exploration_keyword_tags(monkeyp
     assert "heist" in movie["tags"]
 
 
+def test_fetch_personalized_candidates_enriches_exploration_series_past_the_movie_cap(monkeypatch) -> None:
+    # fetch_candidates devuelve "movies + series" (movies siempre primero): si
+    # el cap se aplicaba sobre la lista combinada, >= CREDITS_ENRICH_CAP movies
+    # de exploration dejaban a las series de exploration siempre sin
+    # enriquecer. Regresión de eso.
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+
+    def fake_get_json(url: str) -> dict:
+        if "discover/movie" in url:
+            return {
+                "results": [
+                    {
+                        "id": i,
+                        "title": f"Explore Movie {i}",
+                        "release_date": "2020-01-01",
+                        "genre_ids": [28],
+                        "overview": "",
+                    }
+                    for i in range(tmdb_client.CREDITS_ENRICH_CAP)
+                ]
+            }
+        if "discover/tv" in url:
+            return {
+                "results": [
+                    {
+                        "id": 999,
+                        "name": "Explore Series",
+                        "first_air_date": "2015-01-01",
+                        "genre_ids": [18],
+                        "overview": "",
+                    }
+                ]
+            }
+        return {"results": []}
+
+    monkeypatch.setattr(tmdb_client, "_get_json", fake_get_json)
+    monkeypatch.setattr(tmdb_client, "fetch_keywords", lambda tmdb_id, kind="movie": ["dystopia"])
+
+    profile = {"genre_breakdown": [], "decade_breakdown": [], "top_directors": [], "top_actors": []}
+    candidates = tmdb_client.fetch_personalized_candidates(profile, mood="", kind_filter="both")
+
+    series = next(c for c in candidates if c["title"] == "Explore Series")
+    assert series["_source"] == "exploration"
+    assert "dystopian" in series["tags"]
+
+
 def test_fetch_personalized_candidates_falls_back_to_exploration_only_when_profile_has_no_signal(
     monkeypatch,
 ) -> None:
