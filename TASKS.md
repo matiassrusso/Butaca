@@ -40,18 +40,8 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
       3. Onboarding manual estilo swipe (ya anotado, punto 7 del feedback).
       4. Bugs de amigos: 19/20 + ronda 2 ya resueltos; queda el "Load failed"
          de Bauti (despriorizado, sin logs).
-      5. **Banner "Usar mi perfil" en modo manual (Sin cuenta) — rediseño,
-         no bug.** Problema real: es todo-o-nada. Si lo usás, no podés sumar
-         películas nuevas ni cambiar el rating de las que ya tenías. Diseño
-         propuesto (no arrancado): en vez de la bifurcación banner/formulario,
-         que `GET /onboarding/titles` devuelva también los títulos que el
-         usuario ya puntuó (de cualquier fuente, no solo manual — via
-         `db.get_watched_items`, resueltos contra TMDb igual que los seeds)
-         con su `rating`, y que el frontend precargue `manualRatings` con eso
-         directo. Se elimina el fork `useSavedProfile`/banner/`useEffect` de
-         `savedProfileCount` y el llamado a `POST /recommend/profile` desde
-         el frontend (el endpoint backend puede quedar, solo deja de tener
-         caller). Siempre editable, nunca calle-jón sin salida.
+      5. [x] Banner "Usar mi perfil" en modo manual — hecho, ver entrada de
+         Done más abajo (2026-07-30).
       6. Idea nueva sin desarrollar: pensar qué análisis (sobre `rated_items`
          u otra data ya existente) podría sacar a la luz resultados
          "escondidos" que hoy no se ven a simple vista — distinto de ampliar
@@ -129,6 +119,24 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
       (`test_tags_from_keywords_maps_ronda_2_entries`); el guard existente
       (`test_recommender.py`, cada tag de `KEYWORD_TAG_MAP` tiene frase en
       `TAG_PHRASES`) valida los agregados sin cambios. 231 tests.
+- [x] **Rediseño del banner "Usar mi perfil" en modo manual (2026-07-30)** —
+      el banner era todo-o-nada: una vez usado, no dejaba sumar películas
+      nuevas ni cambiar el rating de las ya puntuadas. `GET
+      /onboarding/titles` (`main.py`) ahora mezcla la lista semilla con
+      cualquier título que el usuario ya haya puntuado antes (de cualquier
+      fuente, vía `db.get_watched_items`; resueltos contra TMDb best-effort
+      sin año curado para los que no son semilla) y devuelve el `rating` de
+      cada uno (`OnboardingTitle.rating`, nuevo campo opcional). El frontend
+      (`Recommend.tsx`) precarga `manualRatings` con eso al abrir "Sin
+      cuenta" — se eliminó el fork `useSavedProfile`/banner/`savedProfileCount`
+      y el llamado a `POST /recommend/profile` (el endpoint backend queda,
+      solo sin caller en el frontend). Verificado en el preview local
+      end-to-end: puntuar 10 semillas → generar picks (persiste el rating) →
+      reabrir "Sin cuenta" muestra las 10 precargadas con su rating real, sin
+      banner — y son editables: se cambió una existente (Me encantó → Bien)
+      y se sumó una no-semilla (Pulp Fiction) en la misma sesión, contador a
+      "11 / 10". Test nuevo
+      (`test_onboarding_titles_merges_previously_rated_titles`). 232 tests.
 - [ ] **Ideas descartadas de la línea Flick, por si se retoman:** embeddings +
       Leiden clustering real, o embeddings + k-means/coseno. Ambas resuelven
       *descubrir* una taxonomía desconocida y necesitan corpus de reviews en

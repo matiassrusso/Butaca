@@ -1007,6 +1007,48 @@ def test_onboarding_titles_requires_auth() -> None:
     assert client.get("/onboarding/titles").status_code == 401
 
 
+def test_onboarding_titles_merges_previously_rated_titles(monkeypatch) -> None:
+    # feedback: el banner "Usar mi perfil" era todo o nada (no dejaba sumar
+    # títulos ni cambiar ratings); ahora la grilla de onboarding precarga lo
+    # que el usuario ya puntuó antes, de cualquier fuente, y sigue editable.
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.search_title",
+        lambda title, year=None: {
+            "tmdb_id": 999,
+            "year": 2015,
+            "kind": "movie",
+            "poster_path": "https://img/extra.jpg",
+            "tags": [],
+        },
+    )
+    headers = _auth_headers("onbmerge")
+    client.post(
+        "/recommend/manual",
+        headers=headers,
+        json={"ratings": _MANUAL_RATINGS + [{"title": "Nunca Sabrás Que Vi Esto", "rating": 4.0}]},
+    )
+
+    response = client.get("/onboarding/titles", headers=headers)
+
+    assert response.status_code == 200
+    titles = {item["title"]: item for item in response.json()["titles"]}
+
+    # seed que el usuario también puntuó: aparece con su rating
+    assert titles["The Godfather"]["rating"] == 4.5
+    # título puntuado que NO está en la lista semilla: también aparece,
+    # resuelto contra TMDb best-effort (sin año curado)
+    extra = titles["Nunca Sabrás Que Vi Esto"]
+    assert extra["rating"] == 4.0
+    assert extra["tmdb_id"] == 999
+    assert extra["poster_path"] == "https://img/extra.jpg"
+    # seed que el usuario NO puntuó: sin rating
+    unrated_seed_titles = {s["title"] for s in onboarding_titles.ONBOARDING_TITLES} - {
+        r["title"] for r in _MANUAL_RATINGS
+    }
+    assert titles[next(iter(unrated_seed_titles))]["rating"] is None
+
+
 def test_onboarding_search_returns_matches(monkeypatch) -> None:
     monkeypatch.setenv("TMDB_API_KEY", "fake-key")
     monkeypatch.setattr(

@@ -48,6 +48,10 @@ class OnboardingTitle(BaseModel):
     kind: str = "movie"
     tmdb_id: int | None = None
     poster_path: str | None = None
+    # solo se llena en /onboarding/titles para un título que el usuario ya
+    # puntuó antes (de cualquier fuente) — precarga la grilla manual en vez
+    # de forzar a re-puntuar lo mismo cada sesión
+    rating: float | None = None
 
 
 class OnboardingTitlesResponse(BaseModel):

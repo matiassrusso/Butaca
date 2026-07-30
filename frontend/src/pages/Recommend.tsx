@@ -83,6 +83,9 @@ type OnboardingTitle = {
   kind: string;
   tmdb_id: number | null;
   poster_path: string | null;
+  // solo viene seteado si el usuario ya puntuó este título antes — precarga
+  // la grilla en vez de forzar a re-puntuar lo mismo cada sesión
+  rating?: number | null;
 };
 
 const MIN_MANUAL_RATINGS = 10; // keep in sync with backend/app/main.py::MIN_MANUAL_RATINGS
@@ -237,7 +240,7 @@ function ManualRatingCard({
         </div>
       </div>
       <div className="font-black uppercase text-xs tracking-tighter leading-none mb-0.5">{item.title}</div>
-      <div className="font-mono text-[10px] text-muted-foreground mb-2">{item.year}</div>
+      <div className="font-mono text-[10px] text-muted-foreground mb-2">{item.year || ""}</div>
       <div className="mt-auto grid grid-cols-2 gap-1">
         {manualRatingOptions.map((option) => (
           <button
@@ -334,12 +337,6 @@ export default function Recommend() {
     return merged;
   })();
 
-  // feedback: los usuarios de modo manual tenían que re-puntuar las mismas
-  // pelis cada vez que volvían, aunque el perfil ya quedaba guardado — este
-  // shortcut deja regenerar picks directo con lo que ya sabemos del usuario
-  const [savedProfileCount, setSavedProfileCount] = useState<number | null>(null);
-  const [useSavedProfile, setUseSavedProfile] = useState(false);
-
   const [result, setResult] = useState<RecommendResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [refining, setRefining] = useState(false);
@@ -365,25 +362,24 @@ export default function Recommend() {
     }
   }, [importMethod, mode]);
 
-  // check once if the user already has a saved profile worth reusing
-  useEffect(() => {
-    if (!token) return;
-    fetch(`${API_BASE_URL}/history/watched`, { headers: { Authorization: `Bearer ${token}` } })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((body: { items: unknown[] } | null) => {
-        if (body) setSavedProfileCount(body.items.length);
-      })
-      .catch(() => {});
-  }, [token]);
-
-  // fetch the seed titles the first time onboarding is opened
+  // fetch the seed titles the first time onboarding is opened — the backend
+  // merges in anything the user already rated before (any source), so a
+  // returning user sees those pre-filled and can still edit or add more
+  // (reemplaza el banner "Usar mi perfil" todo-o-nada)
   useEffect(() => {
     if (importMethod !== "manual" || onboardingTitles.length || loadingTitles || !token) return;
     setLoadingTitles(true);
     fetch(`${API_BASE_URL}/onboarding/titles`, { headers: { Authorization: `Bearer ${token}` } })
       .then((r) => (r.ok ? r.json() : null))
       .then((body: { titles: OnboardingTitle[] } | null) => {
-        if (body) setOnboardingTitles(body.titles);
+        if (!body) return;
+        setOnboardingTitles(body.titles);
+        const prefilled = Object.fromEntries(
+          body.titles.filter((t) => t.rating != null).map((t) => [t.title, t.rating as number])
+        );
+        if (Object.keys(prefilled).length) {
+          setManualRatings((prev) => ({ ...prefilled, ...prev }));
+        }
       })
       .catch(() => {})
       .finally(() => setLoadingTitles(false));
@@ -458,9 +454,8 @@ export default function Recommend() {
     setSelectedGenres((prev) => (prev.includes(key) ? prev.filter((g) => g !== key) : [...prev, key]));
   }
 
-  const hasSource = useSavedProfile
-    ? true
-    : importMethod === "zip"
+  const hasSource =
+    importMethod === "zip"
       ? Boolean(zipFile)
       : importMethod === "username"
         ? letterboxdUsername.trim().length > 0
@@ -486,19 +481,7 @@ export default function Recommend() {
     // user isn't waiting on the ~5-15s model call to see anything
     try {
       let response: Response;
-      if (useSavedProfile) {
-        response = await fetch(`${API_BASE_URL}/recommend/profile`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify({
-            mood: "",
-            mode,
-            kind_filter: kindFilter,
-            genres: mode === "genres" ? selectedGenres.join(",") : "",
-            refine: false,
-          }),
-        });
-      } else if (importMethod === "manual") {
+      if (importMethod === "manual") {
         response = await fetch(`${API_BASE_URL}/recommend/manual`, {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
@@ -682,51 +665,19 @@ export default function Recommend() {
                   contás qué viste y qué te gustó.
                 </p>
 
-                {savedProfileCount !== null && savedProfileCount >= MIN_MANUAL_RATINGS && !useSavedProfile && (
-                  <div className="mb-6 max-w-xl border-2 border-accent p-4 flex items-center justify-between gap-4 flex-wrap">
-                    <p className="font-mono text-[10px] uppercase leading-relaxed">
-                      Ya tenés un perfil guardado ({savedProfileCount} pelis puntuadas). No hace
-                      falta que cargues nada de nuevo.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => setUseSavedProfile(true)}
-                      className="shrink-0 font-mono text-[10px] uppercase tracking-widest bg-accent text-accent-foreground px-4 py-2 hover:opacity-90"
-                    >
-                      Usar mi perfil
-                    </button>
-                  </div>
-                )}
+                <div className="flex gap-0 mb-6 max-w-xl">
+                  <button onClick={() => setImportMethod("zip")} className={tabCls(importMethod === "zip")}>
+                    Subir .zip
+                  </button>
+                  <button onClick={() => setImportMethod("username")} className={tabCls(importMethod === "username")}>
+                    Username
+                  </button>
+                  <button onClick={() => setImportMethod("manual")} className={tabCls(importMethod === "manual")}>
+                    Sin cuenta
+                  </button>
+                </div>
 
-                {useSavedProfile ? (
-                  <div className="max-w-xl">
-                    <p className="font-mono text-[10px] uppercase leading-relaxed text-muted-foreground mb-3">
-                      Vamos a generar picks con tu perfil guardado ({savedProfileCount} pelis
-                      puntuadas) — no hace falta ninguna fuente nueva.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => setUseSavedProfile(false)}
-                      className="font-mono text-[10px] uppercase underline text-muted-foreground hover:text-foreground"
-                    >
-                      Elegir otra fuente
-                    </button>
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex gap-0 mb-6 max-w-xl">
-                      <button onClick={() => setImportMethod("zip")} className={tabCls(importMethod === "zip")}>
-                        Subir .zip
-                      </button>
-                      <button onClick={() => setImportMethod("username")} className={tabCls(importMethod === "username")}>
-                        Username
-                      </button>
-                      <button onClick={() => setImportMethod("manual")} className={tabCls(importMethod === "manual")}>
-                        Sin cuenta
-                      </button>
-                    </div>
-
-                    {importMethod === "zip" ? (
+                {importMethod === "zip" ? (
                   <div className="max-w-xl">
                     <p className="font-mono text-[10px] uppercase leading-relaxed text-muted-foreground mb-3">
                       La mejor opción: trae tu historial completo (ratings, reviews, likes,
@@ -840,8 +791,6 @@ export default function Recommend() {
                       onRate={rateManual}
                     />
                   </div>
-                )}
-                  </>
                 )}
               </section>
             )}

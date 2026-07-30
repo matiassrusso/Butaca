@@ -703,33 +703,53 @@ def recommend_titles_from_letterboxd(
 def onboarding_titles_endpoint(
     user: sqlite3.Row = Depends(auth.get_current_user),
 ) -> OnboardingTitlesResponse:
-    """Seed titles for a user without Letterboxd to rate. Posters/ids are
-    resolved against TMDb in parallel (same pattern as _watchlist_candidates);
-    without a TMDb key they degrade to title/year only (poster_path=None)."""
+    """Títulos semilla para un usuario sin Letterboxd, mezclados con
+    cualquier título que ya haya puntuado antes (de cualquier fuente, no solo
+    modo manual) para que vuelva y vea sus propias puntuaciones precargadas y
+    editables — reemplaza el banner "Usar mi perfil", que era todo o nada:
+    una vez usado no dejaba sumar títulos nuevos ni cambiar los ya puntuados.
+    Posters/ids se resuelven contra TMDb en paralelo (mismo patrón que
+    _watchlist_candidates); sin TMDb key degradan a title/year solo
+    (poster_path=None)."""
     seeds = onboarding_titles.ONBOARDING_TITLES
+    watched = db.get_watched_items(user["id"])
+    rating_by_title = {item["title"].strip().lower(): item["rating"] for item in watched}
+
+    seed_keys = {seed["title"].strip().lower() for seed in seeds}
+    # títulos puntuados que no están en la lista semilla (sumados a mano en
+    # una sesión anterior vía /onboarding/search, o traídos de un zip/username
+    # previo): sin año curado, se resuelven contra TMDb por título solo, mismo
+    # best-effort que search_title ya usa en el resto del proyecto
+    extra = [
+        {"title": item["title"], "year": None}
+        for item in watched
+        if item["title"].strip().lower() not in seed_keys
+    ]
+    entries = seeds + extra
 
     matches: dict[str, dict | None] = {}
     if tmdb_client.is_configured():
-        def _match(seed: dict) -> tuple[str, dict | None]:
+        def _match(entry: dict) -> tuple[str, dict | None]:
             try:
                 # el año curado fija la película exacta — sin él, "Toy Story"
                 # resolvía al Toy Story 5 en cartelera, no al de 1995
-                return seed["title"], tmdb_client.search_title(seed["title"], seed["year"])
+                return entry["title"], tmdb_client.search_title(entry["title"], entry.get("year"))
             except tmdb_client.TmdbError:
-                return seed["title"], None
+                return entry["title"], None
 
         with ThreadPoolExecutor(max_workers=taste_profile.MATCH_WORKERS) as pool:
-            matches = dict(pool.map(_match, seeds))
+            matches = dict(pool.map(_match, entries))
 
     titles = [
         OnboardingTitle(
-            title=seed["title"],
-            year=seed["year"],
-            kind="movie",
-            tmdb_id=(matches.get(seed["title"]) or {}).get("tmdb_id"),
-            poster_path=(matches.get(seed["title"]) or {}).get("poster_path"),
+            title=entry["title"],
+            year=entry["year"] or (matches.get(entry["title"]) or {}).get("year") or 0,
+            kind=(matches.get(entry["title"]) or {}).get("kind") or "movie",
+            tmdb_id=(matches.get(entry["title"]) or {}).get("tmdb_id"),
+            poster_path=(matches.get(entry["title"]) or {}).get("poster_path"),
+            rating=rating_by_title.get(entry["title"].strip().lower()),
         )
-        for seed in seeds
+        for entry in entries
     ]
     return OnboardingTitlesResponse(titles=titles)
 
