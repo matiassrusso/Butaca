@@ -1130,6 +1130,53 @@ def test_recommend_manual_excludes_rated_titles_from_picks() -> None:
     assert not (rated & returned)
 
 
+def test_recommend_manual_excludes_titles_rated_in_a_different_session() -> None:
+    # bug reportado por Matias (2026-07-30): puntuar "Before Sunrise" en una
+    # sesion (ej. "Sin cuenta") y despues generar recomendaciones desde OTRA
+    # sesion/fuente (ej. Letterboxd, acá simulado con un 2do /recommend/manual
+    # con ratings distintos) la recomendaba de vuelta -- la exclusion de
+    # "ya vistas" solo miraba lo puntuado EN ESE request puntual, nunca el
+    # historial completo persistido (db.get_watched_items).
+    headers = _auth_headers("manualcross")
+
+    first_session = [{"title": "Before Sunrise", "rating": 4.5}] + [
+        {"title": t, "rating": 4.5}
+        for t in [
+            "The Godfather", "Jaws", "Alien", "The Shining", "Blade Runner",
+            "Die Hard", "Pulp Fiction", "The Matrix", "Inception",
+        ]
+    ]
+    first = client.post("/recommend/manual", headers=headers, json={"ratings": first_session})
+    assert first.status_code == 200
+
+    second_session = [
+        {"title": t, "rating": 4.5}
+        for t in [
+            "Parasite", "Whiplash", "Get Out", "La La Land", "Joker",
+            "Oppenheimer", "Interstellar", "Django Unchained", "Titanic", "Gladiator",
+        ]
+    ]
+    second = client.post("/recommend/manual", headers=headers, json={"ratings": second_session})
+
+    assert second.status_code == 200
+    titles = {item["title"] for item in second.json()["recommendations"]}
+    assert "Before Sunrise" not in titles
+
+
+def test_recommend_manual_persists_source_as_manual() -> None:
+    # el "source" es lo que despues usa llm_client para NO citar un puntaje
+    # numerico preciso ("4.5/5") en el why de algo que fue un click de boton,
+    # no un rating real que el usuario haya dado
+    headers = _auth_headers("manualsource")
+    client.post("/recommend/manual", headers=headers, json={"ratings": _MANUAL_RATINGS})
+
+    user_id = db.get_user_by_username("manualsource")["id"]
+    watched = db.get_watched_items(user_id)
+
+    assert watched
+    assert all(item["source"] == "manual" for item in watched)
+
+
 def test_recommend_profile_reuses_saved_ratings_without_duplicating() -> None:
     headers = _auth_headers("profileshortcut")
     client.post("/recommend/manual", headers=headers, json={"ratings": _MANUAL_RATINGS})

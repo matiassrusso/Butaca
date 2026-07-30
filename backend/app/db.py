@@ -65,6 +65,11 @@ CREATE TABLE IF NOT EXISTS rated_items (
     rating REAL NOT NULL,
     review TEXT NOT NULL DEFAULT '',
     watched_date TEXT NOT NULL DEFAULT '',
+    -- 'import' (Letterboxd, rating numerico real 0.5-5.0) vs 'manual' (click
+    -- de boton en el modo "Sin cuenta", mapeado a un rating sintetico) — la
+    -- distincion importa solo para como se CITA el rating en el "why" del
+    -- LLM, no para el scoring (que trata ambos igual)
+    source TEXT NOT NULL DEFAULT 'import',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -167,6 +172,7 @@ CREATE TABLE IF NOT EXISTS rated_items (
     rating REAL NOT NULL,
     review TEXT NOT NULL DEFAULT '',
     watched_date TEXT NOT NULL DEFAULT '',
+    source TEXT NOT NULL DEFAULT 'import',
     created_at TEXT NOT NULL DEFAULT ({_PG_NOW})
 );
 
@@ -285,6 +291,8 @@ def _run_migrations(conn) -> None:
         conn.execute("ALTER TABLE recommendations_served ADD COLUMN tmdb_id INTEGER")
     if not _has_column(conn, "rated_items", "watched_date"):
         conn.execute("ALTER TABLE rated_items ADD COLUMN watched_date TEXT NOT NULL DEFAULT ''")
+    if not _has_column(conn, "rated_items", "source"):
+        conn.execute("ALTER TABLE rated_items ADD COLUMN source TEXT NOT NULL DEFAULT 'import'")
     if not _has_column(conn, "users", "email"):
         conn.execute("ALTER TABLE users ADD COLUMN email TEXT")
     if not _has_column(conn, "users", "email_verified"):
@@ -533,15 +541,15 @@ def delete_user_completely(user_id: int, username: str) -> None:
         conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
 
 
-def save_rated_items(user_id: int, items: list[tuple[str, float, str, str]]) -> None:
+def save_rated_items(user_id: int, items: list[tuple[str, float, str, str, str]]) -> None:
     if not items:
         return
     with get_connection() as conn:
         conn.executemany(
-            "INSERT INTO rated_items (user_id, title, rating, review, watched_date) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO rated_items (user_id, title, rating, review, watched_date, source) VALUES (?, ?, ?, ?, ?, ?)",
             [
-                (user_id, title, rating, review, watched_date)
-                for title, rating, review, watched_date in items
+                (user_id, title, rating, review, watched_date, source)
+                for title, rating, review, watched_date, source in items
             ],
         )
 
@@ -550,7 +558,7 @@ def get_watched_items(user_id: int) -> list[dict]:
     with get_connection() as conn:
         rows = conn.execute(
             """
-            SELECT title, rating, review, watched_date, created_at
+            SELECT title, rating, review, watched_date, source, created_at
             FROM rated_items
             WHERE user_id = ?
             ORDER BY created_at DESC, id DESC

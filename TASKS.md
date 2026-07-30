@@ -33,6 +33,51 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
 
 ## Pending
 
+- [x] **Bug real de Matías (2026-07-30): recomendaba pelis ya vistas, y citaba
+      un puntaje falso en el why de las puntuadas en "Sin cuenta"** — dos
+      bugs de fondo distintos, reportados juntos con capturas.
+      1. **Exclusión no unificada entre fuentes.** `_finish_recommend`
+         (`main.py`) excluía candidatos con `extra_seen` (solo lo puntuado
+         EN ESE request) + feedback explícito + "ya recomendado antes" —
+         nunca consultaba `db.get_watched_items` (el historial completo,
+         ya unificado a nivel DB porque `save_rated_items` solo hace
+         INSERT). Puntuar en "Sin cuenta" y después generar con Letterboxd
+         (u otra sesión) no sabía nada de lo puntuado por la otra fuente, y
+         encima el perfil de gusto (sí construido desde el historial
+         completo) sesgaba el descubrimiento de TMDb hacia esas mismas
+         películas — autorreforzante. Fix: `also_seen` ahora suma
+         `{item["title"] for item in watched}` (hard exclusion, igual en el
+         retry que relaja solo `already_recommended`). Test de regresión
+         (`test_recommend_manual_excludes_titles_rated_in_a_different_session`,
+         falla con el código viejo, validado reintroduciéndolo a propósito).
+      2. **El why citaba un puntaje que el usuario nunca dio.** El prompt del
+         LLM (`llm_client._build_prompt`) formateaba TODO rating igual —
+         `"{title} ({rating}/5): {review}"` — sin importar si venía de un
+         puntaje real de Letterboxd o de un click de botón en "Sin cuenta"
+         (`manualRatingOptions`: Me encantó→4.5, Bien→3.5, No me gustó→1.5,
+         un rating sintético solo para el scoring interno). El LLM
+         simplemente repetía ese "(4.5/5)" tal cual en el why. Fix: nueva
+         columna `rated_items.source` ('import' | 'manual', migración +
+         default 'import' para filas viejas), campo `RatedItem.source`
+         propagado desde la persistencia real hasta el prompt; los items
+         `source="manual"` se citan como `"(le encantó, sin puntaje
+         numérico)"` en vez de `"(X/5)"`. Sumada una instrucción explícita
+         en el prompt para no inventar puntajes. Test de regresión
+         (`test_build_prompt_does_not_cite_a_numeric_score_for_manual_ratings`,
+         mismo criterio de validar reintroduciendo el bug) + test de
+         persistencia (`test_recommend_manual_persists_source_as_manual`).
+      235 tests.
+- [ ] **Hallazgo relacionado, no arreglado esta sesión:** el mismo problema
+      de "puntaje sintético citado como preciso" existe también DENTRO de
+      un import real de Letterboxd — `letterboxd_zip.py` usa
+      `LIKE_RATING = 4.5` para títulos que el usuario marcó "like" sin
+      puntuarlos con estrellas, y `FAVORITE_RATING` para "favoritos" — ambos
+      quedan con `source="import"` (correcto a nivel de fuente) pero
+      también son ratings inventados, no un puntaje real que el usuario
+      haya dado. Si esto molesta igual que el caso de "Sin cuenta", hace
+      falta otro eje además de `source` (algo como "rating preciso sí/no")
+      para distinguirlo del caso de un rating real de Letterboxd que
+      justo también sea 4.5.
 - [ ] **Backlog de Matías repasado el 2026-07-30:**
       1. [x] Ampliar `KEYWORD_TAG_MAP` — hecho, ver entrada de Done más abajo.
       2. Typewriter para los "why" de la IA al abrir el poster (ya anotado

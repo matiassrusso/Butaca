@@ -100,6 +100,7 @@ def _rebuild_ratings(user_id: int) -> list[RatedItem]:
             rating=item["rating"],
             review=item.get("review", ""),
             watched_date=item.get("watched_date", ""),
+            source=item.get("source", "import"),
         )
         for item in db.get_watched_items(user_id)
     ]
@@ -491,8 +492,13 @@ def _finish_recommend(
         # see docs/(C) plan-de-trabajo.md §4 for why this used to run too late.
         db.save_rated_items(
             user["id"],
-            [(item.title, item.rating, item.review, item.watched_date) for item in ratings],
+            [(item.title, item.rating, item.review, item.watched_date, item.source) for item in ratings],
         )
+
+    # el historial completo del usuario, sin importar la fuente (zip,
+    # username, manual) — hoisted acá arriba porque tanto el perfil como la
+    # exclusión de "ya vistas" más abajo tienen que leer del mismo lugar
+    watched = db.get_watched_items(user["id"])
 
     # Guarded broadly: this is a personalization/caching side effect, not the
     # point of the request — a TMDb hiccup (or a mocked search_title missing
@@ -501,7 +507,6 @@ def _finish_recommend(
     profile: dict | None = None
     if tmdb_client.is_configured():
         try:
-            watched = db.get_watched_items(user["id"])
             profile = taste_profile.build_taste_profile(watched)
             db.save_taste_profile(user["id"], profile)
         except Exception:
@@ -552,11 +557,24 @@ def _finish_recommend(
     # "nuevos picks" and regenerating with the same source+mood surfaces
     # different movies instead of the same deterministic top 5
     already_recommended = db.get_recently_recommended_titles(user["id"])
-    also_seen = frozenset(extra_seen) | frozenset(already_recommended)
+    # bug real (reportado por Matías, 2026-07-30): puntuar en "Sin cuenta" y
+    # después generar con el .zip/username de Letterboxd (u otra sesión
+    # manual) recomendaba de vuelta esas mismas películas — `extra_seen`
+    # solo trae lo puntuado EN ESTE request puntual, `ratings` acá abajo
+    # también, así que una fuente nueva no sabía nada de lo puntuado por
+    # otra. `watched` (arriba) es el historial completo y unificado sin
+    # importar la fuente — se suma acá para que la exclusión sea real
+    # "todo lo que alguna vez viste", no solo "lo que trajo este import".
+    also_seen = (
+        frozenset(extra_seen)
+        | frozenset(already_recommended)
+        | frozenset(item["title"] for item in watched)
+    )
 
     # "según lo último que vi" narrows the taste signal to the user's most
     # recently watched titles instead of their whole history — exclusion
-    # (also_seen/ratings above) still covers everything they've ever watched
+    # (also_seen) now genuinely covers everything they've ever watched,
+    # regardless of source
     preference_ratings = None
     if mode == "recent":
         preference_ratings = sorted(
@@ -591,11 +609,14 @@ def _finish_recommend(
     # nothing new left to show.
     if not response.recommendations and already_recommended:
         logger.info("Candidate pool exhausted by already-recommended exclusion, retrying without it")
+        # solo se relaja already_recommended (soft, "no lo repitas de vuelta
+        # tan rápido") — extra_seen/watched siguen siendo hard exclusions,
+        # nunca hay que recomendar algo que el usuario ya vio de verdad
         response = recommend(
             ratings,
             mood,
             catalog=candidates,
-            also_seen=frozenset(extra_seen),
+            also_seen=frozenset(extra_seen) | frozenset(item["title"] for item in watched),
             kind_filter=kind_filter,
             required_any_tags=required_any_tags or None,
             preference_ratings=preference_ratings,
@@ -787,7 +808,9 @@ def recommend_titles_manual(
             detail=f"Puntuá al menos {MIN_MANUAL_RATINGS} títulos para armar tu perfil.",
         )
 
-    ratings = [RatedItem(title=item.title, rating=item.rating) for item in payload.ratings]
+    ratings = [
+        RatedItem(title=item.title, rating=item.rating, source="manual") for item in payload.ratings
+    ]
     # every rated title is one the user has seen — never recommend it back
     extra_seen = {item.title for item in ratings}
 

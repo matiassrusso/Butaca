@@ -238,6 +238,23 @@ def test_build_prompt_includes_digest_and_grounding_instructions() -> None:
     assert "Fake Thriller" in prompt and "Fake Comedy" in prompt
 
 
+def test_build_prompt_does_not_cite_a_numeric_score_for_manual_ratings() -> None:
+    # bug reportado por Matías (2026-07-30): un click de "Me encantó" en el
+    # modo "Sin cuenta" es un rating sintético (4.5 interno para el scoring),
+    # no un puntaje que el usuario haya dado — el prompt no puede citarlo
+    # como "(4.5/5)", el LLM lo repetiría tal cual en el "why".
+    ratings = [
+        RatedItem(title="Import Movie", rating=4.5, review="", source="import"),
+        RatedItem(title="Manual Movie", rating=4.5, review="", source="manual"),
+    ]
+
+    prompt = llm_client._build_prompt(ratings, "", HEURISTIC)
+
+    assert "Import Movie (4.5/5)" in prompt
+    assert "Manual Movie (4.5/5)" not in prompt
+    assert "Manual Movie (le encantó, sin puntaje numérico)" in prompt
+
+
 def _fake_nvidia(call_count: list[int]):
     def fake_call_nvidia(prompt: str, api_key: str) -> dict:
         call_count.append(1)

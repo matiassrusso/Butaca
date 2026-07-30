@@ -9,6 +9,11 @@ class RatedItem(BaseModel):
     review: str = ""
     watched_date: str = ""
     tags: list[str] = Field(default_factory=list)
+    # 'import' = rating numerico real de Letterboxd (zip/username). 'manual'
+    # = click de boton en el modo "Sin cuenta" (Me encantó/Bien/No me
+    # gustó), mapeado a un rating sintetico — el llm_client usa esto para no
+    # citarlo con una precisión de "(4.5/5)" que el usuario nunca dio.
+    source: Literal["import", "manual"] = "import"
 
 
 class RecommendRequest(BaseModel):

@@ -101,11 +101,27 @@ def _build_taste_digest(ratings: list[RatedItem]) -> str:
     return " ".join(lines)
 
 
+def _rating_label(rating: float) -> str:
+    if rating >= 4:
+        return "le encantó"
+    if rating <= 2:
+        return "no le gustó"
+    return "le gustó"
+
+
 def _build_prompt(ratings: list[RatedItem], mood: str, heuristic: RecommendResponse) -> str:
     digest = _build_taste_digest(ratings)
+    # los items "manual" (botón Me encantó/Bien/No me gustó del modo "Sin
+    # cuenta") tienen un rating sintético internamente (para el scoring),
+    # pero el usuario nunca dio un puntaje preciso — citarlo como "(4.5/5)"
+    # en el why sería un dato inventado (reportado por Matías, 2026-07-30).
     ratings_lines = (
         "\n".join(
-            f"- {item.title} ({item.rating}/5): {item.review or 'sin reseña'}"
+            (
+                f"- {item.title} ({item.rating}/5): {item.review or 'sin reseña'}"
+                if item.source != "manual"
+                else f"- {item.title} ({_rating_label(item.rating)}, sin puntaje numérico): {item.review or 'sin reseña'}"
+            )
             for item in ratings[:40]
         )
         or "sin historial"
@@ -126,7 +142,9 @@ def _build_prompt(ratings: list[RatedItem], mood: str, heuristic: RecommendRespo
         "frase genérica. Para cada pick elegido, una razón personalizada de 1-2 frases que "
         "nombre un patrón concreto del perfil o del historial (un tema recurrente, un tono, o "
         "una comparación explícita con un título que ya puntuó) — nada de elogios genéricos "
-        "que podrían aplicar a cualquier usuario.\n\n"
+        "que podrían aplicar a cualquier usuario. Si citás el puntaje de un título de "
+        "'Reseñas completas' de arriba, usá EXACTAMENTE el que aparece ahí (no inventes un "
+        "número si el título dice 'sin puntaje numérico').\n\n"
         "Respondé ÚNICAMENTE con un JSON válido, sin texto ni markdown alrededor, con esta forma "
         'exacta: {"taste_summary": "...", "picks": [{"title": "...", "why": "..."}, ...]}'
     )
