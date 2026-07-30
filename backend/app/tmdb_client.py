@@ -116,6 +116,22 @@ KEYWORD_TAG_MAP: dict[str, list[str]] = {
     "faux documentary": ["found-footage"],
     # TMDb usa el término teatral francés para "todo pasa en un solo ambiente"
     "huis clos": ["single-location"],
+    # ronda 2 (2026-07-30): strings vistos en logs de producción sin mapear.
+    # Verificados esta vez contra el buscador público de keywords de TMDb
+    # (themoviedb.org/search/keyword?query=...) en vez de un título puntual —
+    # confirma que el string exacto existe en el vocabulario de TMDb, mismo
+    # criterio de "no adivinar" que el resto de la tabla. "historical" quedó
+    # afuera a propósito: existe, pero es tan genérico como el género History
+    # y no se lee como una razón específica de un pick.
+    "hold-up robbery": ["heist"],  # asalto a mano armada, variante de heist
+    "psychological thriller": ["psychological"],
+    "character study": ["character"],
+    "dark comedy": ["dark-comedy"],
+    "neo-noir": ["neo-noir"],
+    "folk horror": ["folk-horror"],
+    "survival": ["survival"],
+    "on the run": ["on-the-run"],
+    "revisionist western": ["revisionist-western"],
 }
 
 # Only "funny" and "action" have a clean TV genre match; the rest fall back

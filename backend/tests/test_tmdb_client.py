@@ -907,6 +907,37 @@ def test_tags_from_keywords_maps_only_curated_keywords() -> None:
     assert tags == {"heist", "revenge"}
 
 
+def test_tags_from_keywords_maps_ronda_2_entries() -> None:
+    # "hold-up robbery" y "character study" reusan tags ya existentes; los
+    # demás son tags nuevos sumados en la ronda 2 de KEYWORD_TAG_MAP.
+    tags = tmdb_client._tags_from_keywords(
+        [
+            "hold-up robbery",
+            "psychological thriller",
+            "character study",
+            "dark comedy",
+            "neo-noir",
+            "folk horror",
+            "survival",
+            "on the run",
+            "revisionist western",
+            "historical",  # a propósito no mapeado, ver comentario en KEYWORD_TAG_MAP
+        ]
+    )
+
+    assert tags == {
+        "heist",
+        "psychological",
+        "character",
+        "dark-comedy",
+        "neo-noir",
+        "folk-horror",
+        "survival",
+        "on-the-run",
+        "revisionist-western",
+    }
+
+
 def test_fetch_watch_providers_maps_region_offers(monkeypatch) -> None:
     monkeypatch.setenv("TMDB_API_KEY", "fake-key")
     monkeypatch.setenv("BUTACA_WATCH_REGION", "AR")

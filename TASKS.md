@@ -33,6 +33,31 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
 
 ## Pending
 
+- [ ] **Backlog de Matías repasado el 2026-07-30:**
+      1. [x] Ampliar `KEYWORD_TAG_MAP` — hecho, ver entrada de Done más abajo.
+      2. Typewriter para los "why" de la IA al abrir el poster (ya anotado
+         más abajo, "a diseñar bien antes de implementar").
+      3. Onboarding manual estilo swipe (ya anotado, punto 7 del feedback).
+      4. Bugs de amigos: 19/20 + ronda 2 ya resueltos; queda el "Load failed"
+         de Bauti (despriorizado, sin logs).
+      5. **Banner "Usar mi perfil" en modo manual (Sin cuenta) — rediseño,
+         no bug.** Problema real: es todo-o-nada. Si lo usás, no podés sumar
+         películas nuevas ni cambiar el rating de las que ya tenías. Diseño
+         propuesto (no arrancado): en vez de la bifurcación banner/formulario,
+         que `GET /onboarding/titles` devuelva también los títulos que el
+         usuario ya puntuó (de cualquier fuente, no solo manual — via
+         `db.get_watched_items`, resueltos contra TMDb igual que los seeds)
+         con su `rating`, y que el frontend precargue `manualRatings` con eso
+         directo. Se elimina el fork `useSavedProfile`/banner/`useEffect` de
+         `savedProfileCount` y el llamado a `POST /recommend/profile` desde
+         el frontend (el endpoint backend puede quedar, solo deja de tener
+         caller). Siempre editable, nunca calle-jón sin salida.
+      6. Idea nueva sin desarrollar: pensar qué análisis (sobre `rated_items`
+         u otra data ya existente) podría sacar a la luz resultados
+         "escondidos" que hoy no se ven a simple vista — distinto de ampliar
+         KEYWORD_TAG_MAP (punto 1), que es vocabulario ya visible. Sin scope
+         concreto todavía, pensarlo antes de picar código.
+
 > Estado al 2026-07-21: dominio propio comprado y en producción. Frontend en
 > [butaca.xyz](https://butaca.xyz) (Vercel), backend en
 > [api.butaca.xyz](https://api.butaca.xyz) (Render). `pelipick.vercel.app` /
@@ -89,14 +114,21 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
       exploration ya se enriquece, pero sigue acotada al mismo cap que
       profile/series. Falta ver en producción si con esto solo ya sube la
       visibilidad o si además hace falta subir el cap.
-- [ ] **Ampliar `KEYWORD_TAG_MAP`** (opcional, es una edición de dict) — con 19
-      strings el hit rate es ~30%. De los logs y las páginas verificadas
-      quedaron strings reales sin mapear que valdrían: `hold-up robbery`
-      (Jesse James, un asalto que `heist`/`caper` no captan), `revisionist
-      western`, `historical`, `dark comedy`, `neo-noir`, `psychological
-      thriller`, `character study`, `folk horror`, `survival`, `on the run`.
-      Ojo: sumar tags que el perfil del usuario no puede matchear diluye el
-      score (ver el tope de 2 en `_enrich_with_keyword_tags`).
+- [x] **Ampliar `KEYWORD_TAG_MAP` (2026-07-30)** — 9 strings nuevos, todos
+      re-verificados contra el buscador público de keywords de TMDb
+      (`themoviedb.org/search/keyword?query=...`) antes de sumarlos. Reusan
+      tag existente donde el concepto ya calzaba 1:1 (`hold-up robbery`→
+      `heist`, `psychological thriller`→`psychological`, `character study`→
+      `character`); tag nuevo donde forzarlo a uno existente perdía el matiz
+      (`dark comedy`, `neo-noir`, `folk horror`, `survival`, `on the run`,
+      `revisionist western` — cada uno con su entrada en `TAG_PHRASES` y en
+      `POSITIVE_HINTS`). `historical` quedó afuera a propósito: existe en
+      TMDb pero es tan genérico como el género History y no se lee como una
+      razón específica de un pick — sumarlo solo diluiría el tope de 2 tags
+      por título. Tests nuevos
+      (`test_tags_from_keywords_maps_ronda_2_entries`); el guard existente
+      (`test_recommender.py`, cada tag de `KEYWORD_TAG_MAP` tiene frase en
+      `TAG_PHRASES`) valida los agregados sin cambios. 231 tests.
 - [ ] **Ideas descartadas de la línea Flick, por si se retoman:** embeddings +
       Leiden clustering real, o embeddings + k-means/coseno. Ambas resuelven
       *descubrir* una taxonomía desconocida y necesitan corpus de reviews en

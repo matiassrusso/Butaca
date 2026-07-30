@@ -20,6 +20,16 @@ POSITIVE_HINTS = {
     "revenge": ["revenge"],
     "road trip": ["road-trip"],
     "coming of age": ["coming-of-age"],
+    # ronda 2 (2026-07-30) de KEYWORD_TAG_MAP — "psychological thriller",
+    # "character study" y "hold-up robbery" reusan tags ya existentes
+    # (psychological/character/heist), así que ya tienen su camino de score
+    # sin agregar nada acá.
+    "dark comedy": ["dark-comedy"],
+    "neo-noir": ["neo-noir"],
+    "folk horror": ["folk-horror"],
+    "survival": ["survival"],
+    "on the run": ["on-the-run"],
+    "revisionist western": ["revisionist-western"],
 }
 
 NEGATIVE_HINTS = {
@@ -85,6 +95,12 @@ TAG_PHRASES: dict[str, str] = {
     "hitman": "el asesino a sueldo",
     "dystopian": "el futuro distópico",
     "found-footage": "el found footage",
+    "dark-comedy": "el humor negro",
+    "neo-noir": "el neo-noir",
+    "folk-horror": "el terror de raíz folk",
+    "survival": "la supervivencia",
+    "on-the-run": "la fuga constante",
+    "revisionist-western": "el western revisionista",
 }
 
 
