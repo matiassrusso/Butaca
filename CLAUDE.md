@@ -43,7 +43,8 @@ Solo yo (Matías), con posible coordinación multi-agente (Claude, Codex) docume
 
 ## Current Status
 
-> **Last updated:** 2026-07-23, sesión 3 (bugs post-feedback + fix del refine del LLM)
+> <!-- SESSION_STATE:START -->
+> **Last updated:** 2026-07-29 (keyword tags de TMDb + feedback ronda 2)
 >
 > ### ⚠️ Leer primero al retomar
 >
@@ -53,30 +54,106 @@ Solo yo (Matías), con posible coordinación multi-agente (Claude, Codex) docume
 > siguen funcionando en paralelo pero ya no son la identidad real. Todo lo
 > operativo grande ya está cerrado: dominio, Resend activo, UptimeRobot
 > activo, `NVIDIA_API_KEY` en producción, Ola 4 completa, y el **feedback de
-> amigos pre-lanzamiento trabajado 19/20**. **213 tests de backend en verde.**
+> amigos pre-lanzamiento trabajado 19/20**. **228 tests de backend en verde**,
+> todo pusheado a `main` y deployado.
 >
-> **Primero al retomar:** confirmar en butaca.xyz que los picks salen con
-> razón real del LLM (no la plantilla "tira para el foco..."). El fix del
-> refine (ver sesión 3 abajo) está deployado y live, pero falta la
-> confirmación en vivo pidiendo una tanda de picks.
+> **Qué se hizo el 2026-07-29** (11 commits, `e49a81a`..`8d82ce2`):
+> - **Feedback ronda 2:** el modo manual no reusaba el perfil guardado (había
+>   que re-tildar las mismas pelis cada sesión) → endpoint
+>   `POST /recommend/profile` + botón "Usar mi perfil" en el wizard.
+> - **Aviso más claro** de que el import por username trae solo lo reciente.
+> - **Keyword tags de TMDb** (la línea grande, ver abajo): `/movie/{id}/keywords`
+>   ahora alimenta un eje narrativo de tags que antes no existía.
+> - Confirmado en producción el "why" real del LLM (pendiente viejo de sesión 3).
+>
+> **Primero al retomar:** nada urgente ni roto. La decisión abierta más
+> concreta es si subir la **visibilidad** de los keyword tags: funcionan
+> (hit rate ~30%, verificado en logs de Render) pero casi no llegan a los 6
+> picks finales, porque los títulos que más se enriquecen son los que mejor
+> matchean el gusto → muchos ya están puntuados y se excluyen por "ya vista".
+> Dos palancas: subir `CREDITS_ENRICH_CAP` (hoy 20) o enriquecer también el
+> slice de exploration (hoy nunca se enriquece). La latencia **no** es
+> obstáculo: 20 enriquecimientos con cache frío tardaron 1,44s medidos.
 >
 > **Pendientes reales** (detalle en `Pending` de `TASKS.md`):
-> - Confirmar picks con razón real del LLM en producción (arriba).
-> - Decidir el fallback del LLM: quedarnos con `llama-3.1-70b` (anda) o
->   investigar cómo invocar `kimi-k2.6` (aparece en el catálogo con la misma
->   key pero da 404 por el endpoint estándar).
+> - Visibilidad de los keyword tags en los picks (arriba).
+> - Ampliar `KEYWORD_TAG_MAP` (es una edición de dict): quedaron strings
+>   reales sin mapear que salieron de los logs — `hold-up robbery`,
+>   `neo-noir`, `psychological thriller`, `folk horror`, `dark comedy`,
+>   `character study`, `survival`, `on the run`. **Ojo:** verificar cada
+>   string contra un título real antes de sumarlo, y recordar que sumar tags
+>   que el perfil no matchea diluye el score (de ahí el tope de 2).
 > - Punto 7 del feedback (onboarding manual estilo swipe) — decidir recién
 >   cuando los amigos prueben el wizard nuevo.
-> - Borrar el usuario de prueba `test-resend-qa` en producción.
-> - Activar auto-renew de `butaca.xyz` antes del 21-07-2027.
+> - Bauti reportó "Load failed" importando por username; **despriorizado por
+>   Matías**, sin logs no se pudo confirmar la causa (sospecha: cold start de
+>   Render + latencia del RSS).
+> - Mejora chica pendiente del import por username: aprovechar el
+>   `tmdb:movieId` que ya trae el RSS en vez de matchear por título.
 > - Borrar el proyecto viejo de Neon (São Paulo) cuando el nuevo lleve unos
 >   días estable.
 > - Renombrar la carpeta local del proyecto y la lista del `CLAUDE.md` raíz
 >   del vault (fuera de este repo, requiere permiso).
-> - Mejoras chicas del import por username: aprovechar `tmdb:movieId` del
->   RSS y avisar en el frontend que esa vía trae solo historial reciente.
-> - La TMDb key del `backend/.env` **local** está vieja (401): corriendo
->   local las recs degradan al catálogo mock. Producción tiene la key buena.
+>
+> **Descartado a propósito** (no volver a proponerlo sin que Matías lo pida):
+> el fallback del LLM queda en `llama-3.1-70b` (kimi-k2.6 da 404 por el
+> endpoint estándar y no resuelve nada real, porque comparte key/host); las
+> cuentas de prueba en producción (`test-resend-qa`, `claude-verify-qa`)
+> quedan; el auto-renew de `butaca.xyz` queda apagado (vence 21-07-2027).
+>
+> **Contexto que no se ve leyendo el código:**
+> - La TMDb key del `backend/.env` **local** está vieja (401). Consecuencia
+>   fuerte: corriendo local, `fetch_personalized_candidates` **nunca corre**
+>   (degrada al catálogo mock, sin `tmdb_id`), así que **los keyword tags son
+>   inverificables en el preview local** — hay que verificar en producción.
+> - Para diagnosticar en producción: hay una `RENDER_API_KEY` en una env var
+>   de usuario de Windows, y el service id del backend es
+>   `srv-d9cnhqu1a83c739eono0`. Con eso se leen los logs vía la API REST de
+>   Render (así se verificó el hit rate de los keywords).
+> - Los strings de keywords de TMDb **no se pueden adivinar**: uno equivocado
+>   no falla, simplemente nunca matchea. Verificados contra las páginas
+>   públicas de TMDb, lo que descartó candidatos "obvios" que no existen
+>   (`one location` es en realidad `huis clos`, `robbery` es `caper`,
+>   `assassin` es `hitman`) y obligó a tirar los tags `twist` y `anthology`
+>   por no encontrarles keyword real (Se7en confirmó: 22 keywords, ninguno es
+>   `twist ending`).
+> - Se descartó replicar el pipeline de Flick (embeddings + Leiden
+>   clustering, del video que disparó todo esto): existe para *descubrir* una
+>   taxonomía desconocida y necesita un corpus enorme de reviews que Butaca
+>   no tiene. El activo propio de largo plazo es otro: cuando haya cientos de
+>   usuarios, `rated_items` guarda qué pelis puntúan juntas *nuestros*
+>   usuarios — data que ni TMDb ni Letterboxd tienen.
+> - `backend/requirements.txt` y `docs/architecture.md` figuran como
+>   modificados en `git status` desde antes de esta sesión, pero es **solo
+>   ruido de line endings** (CRLF/LF), sin cambio real de contenido.
+> <!-- SESSION_STATE:END -->
+>
+> **2026-07-29 — keyword tags de TMDb + feedback ronda 2, 11 commits
+> (`e49a81a`..`8d82ce2`), 215 → 228 tests:** dos frentes. (1) **Feedback ronda
+> 2 de amigos:** el modo manual guardaba el perfil pero no había forma de
+> reusarlo, así que había que re-tildar las mismas ~10 pelis en cada sesión —
+> resuelto con `POST /recommend/profile` (regenera con `_rebuild_ratings`,
+> `persist=False` para no duplicar `rated_items`) + banner "Usar mi perfil" en
+> el paso 1 del wizard; también se separó el aviso de que el import por
+> username trae solo lo reciente. (2) **Keyword tags de TMDb**, salido de un
+> video sobre Flick: en vez de replicar su pipeline de embeddings + Leiden
+> (necesita un corpus de reviews que no tenemos), se explotó data que ya
+> estaba a la vista — `/movie/{id}/keywords`, que el proyecto nunca consumía
+> usando solo los 19 `genre_ids` gruesos. `KEYWORD_TAG_MAP` (19 strings
+> verificados → 10 tags), `fetch_keywords` calcado de `fetch_taste_credits`,
+> entradas de `TAG_PHRASES`/`POSITIVE_HINTS`, y enganche en el loop de
+> enriquecimiento (movies **y series**, que antes no recibían ninguno). Tres
+> detalles no obvios: tope de 2 tags por título porque el scoring divide el
+> match positivo por `len(tags)` y un tag sin match **diluye** el score; el
+> `except TmdbError: continue` de credits pasó a `pass`/`else` porque son
+> enriquecimientos independientes; y nunca mutar `item["tags"]` in place
+> (`_clone_items` es copia shallow → contaminaría `_PERSONALIZED_CACHE`). Los
+> dos tests críticos se validaron reintroduciendo los bugs a propósito. Hizo
+> falta un commit extra (`8445e9d`) porque el enriquecimiento **moría en
+> silencio**: 18 candidatos sin un solo tag y sin logs no se distinguía "map
+> angosto" de "roto" — con el log agregado, veredicto en producción: funciona,
+> 0 fallos en 20 candidatos, hit rate ~30%. Detalle largo en
+> `docs/build-log.md` (entrada 2026-07-29).
 >
 > **2026-07-23 (sesión 3) — bugs post-feedback + refine del LLM, 4 commits
 > (`0feed46`..`eb393be`), 213 tests:** Matías siguió probando en producción y
