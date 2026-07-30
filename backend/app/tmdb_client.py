@@ -212,7 +212,7 @@ _catalog_stats_cache: tuple[float, dict] | None = None
 
 # ponytail: matches a single discover page's worth of movie candidates; raise
 # if latency allows enriching more per personalized recommend request.
-CREDITS_ENRICH_CAP = 20
+CREDITS_ENRICH_CAP = 30
 
 
 class TmdbError(Exception):

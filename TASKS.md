@@ -242,10 +242,25 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
       Detalle punto por punto (tachados con fecha) en
       [`03 Iteration Logs/(C) 2026-07-23 feedback-amigos-pre-lanzamiento.md`](<03 Iteration Logs/(C) 2026-07-23 feedback-amigos-pre-lanzamiento.md>)
       y en `docs/build-log.md` (entrada 2026-07-23 sesión 2).
-- [ ] **Único punto de feedback abierto: 7 (onboarding manual estilo
-      swipe/Tinder)** — a propósito: validar primero si el wizard nuevo ya
-      resolvió la confusión antes de invertir en un rediseño de
-      interacción. Decidir cuando los amigos vuelvan a probar.
+- [x] **Punto 7 del feedback: onboarding manual estilo swipe/Tinder
+      (2026-07-30)** — Matías decidió no esperar más al feedback de los
+      amigos: se sumó como una preferencia del usuario, no un reemplazo.
+      Toggle "Grilla"/"Swipe" en el modo "Sin cuenta" (arranca en Grilla,
+      el comportamiento de siempre). El modo Swipe muestra una peli a la
+      vez (`SwipeRating` en `Recommend.tsx`): arrastrar el poster
+      (`useSwipeCard.ts`, mismo patrón imperativo por ref que
+      `useTiltCard`) — derecha = Me encantó, izquierda = No me gustó — o
+      los 4 botones de siempre debajo (cubren Bien/No la vi, que un swipe
+      de 2 direcciones no puede expresar). Detalle no obvio: "No la vi" no
+      llama a `onRate` (mismo significado que nunca tocar esa peli), así
+      que necesita un `Set` local de "salteadas" separado de
+      `manualRatings` para poder sacarla de la pila igual. Grilla y Swipe
+      comparten el mismo estado (`manualRatings`) — cambiar de vista no
+      pierde nada. Verificado en el preview local: toggle visible, drag
+      real vía `PointerEvent` sintéticos (derecha puntúa y avanza, "No la
+      vi" avanza sin sumar al contador), y volver a Grilla muestra la
+      peli recién puntuada por swipe ya marcada. `tsc --noEmit` y
+      `npm run build` limpios.
 
 - [x] **Bugs post-feedback + refine del LLM (2026-07-23, sesión 3)** — 4
       commits (`0feed46`..`eb393be`), 213 tests, todo deployado. Detalle en
@@ -304,16 +319,27 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
       `tsc --noEmit` y `npm run build` limpios, sin errores nuevos de
       consola ni de logs del backend.
 
-- [ ] **Decidir el fallback del LLM: ¿sumar kimi-k2.6 o quedarnos con
-      llama-3.1-70b?** — hoy el fallback es `meta/llama-3.1-70b-instruct`
-      (drop-in probado 5/5). Kimi-k2.6 lo pidió Matías: aparece en el catálogo
-      con la misma `NVIDIA_API_KEY` (119 modelos accesibles con una key vía
-      `integrate.api.nvidia.com`), PERO al invocarlo por el endpoint estándar
-      da `404 "Function not found"` — necesita otro endpoint/deployment. Queda
-      decidir: dejarlo con llama (recomendado, anda) o investigar cómo se
-      invoca kimi de verdad. Recordar: cualquier modelo del mismo NVIDIA
-      comparte key/host → no cubre caída total ni rate limit de cuenta; para
-      eso haría falta otro proveedor.
+- [x] **Investigado el fallback de kimi-k2.6 (2026-07-30) — se queda en
+      llama-3.1-70b, decisión cerrada.** El 404 no era un nombre de modelo
+      mal escrito: probé en vivo contra la key real de producción con el
+      string completo correcto (`moonshotai/kimi-k2.6`, confirmado contra
+      `build.nvidia.com/moonshotai/kimi-k2.6`) y da el mismo `404 "Function
+      not found for account"`. Coincide exacto con un
+      [thread abierto sin resolver en el foro de NVIDIA](https://forums.developer.nvidia.com/t/newer-nim-models-kimi-k2-6-deepseek-v4-pro-hang-indefinitely-or-404-possible-missing-public-api-endpoints-permission/377777)
+      sobre kimi-k2.6/deepseek-v4-pro: falta el entitlement "Public API
+      Endpoints" a nivel cuenta del lado de NVIDIA, sin fix confirmado
+      públicamente — algunos usuarios reportan que les anda, otros no,
+      mismo modelo. No es nada arreglable en este repo. `llama-3.1-70b-instruct`
+      confirmado con la misma key (200 OK, respuesta real). Si en algún
+      momento se quiere kimi de verdad, el único camino es abrir un ticket
+      de soporte con NVIDIA pidiendo ese entitlement — no es algo que se
+      resuelva con código.
+- [x] **Subir `CREDITS_ENRICH_CAP` (2026-07-30)** — 20 → 30. La exploration
+      ya se enriquece (sesión anterior); esto le da más margen a las 4
+      pasadas (profile movies/series, exploration movies/series) sin
+      arriesgar demasiada latencia (la medición previa de 1,44s para 20
+      enriquecimientos con cache frío deja margen). A monitorear en
+      producción si hace falta ajustar de nuevo.
 
 - [x] **Setear `NVIDIA_API_KEY` en Render** — hecho por Matías. Verificado
       en vivo el 2026-07-23: cuenta de prueba descartable en butaca.xyz,

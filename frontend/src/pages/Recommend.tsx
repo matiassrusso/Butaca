@@ -14,6 +14,7 @@ import { useLocation } from "wouter";
 import { MovieModal, type FeedbackStatus, type Recommendation } from "@/components/MovieModal";
 import { PageTransition } from "@/components/PageTransition";
 import { API_BASE_URL, useAuth } from "@/hooks/useAuth";
+import { useSwipeCard } from "@/hooks/useSwipeCard";
 import { useTiltCard } from "@/hooks/useTiltCard";
 
 type RecommendResponse = {
@@ -295,6 +296,107 @@ function ManualRatingGrid({
   );
 }
 
+const swipeActionBtn =
+  "flex-1 py-3 font-mono text-[10px] uppercase tracking-widest border transition-colors border-foreground/20 hover:border-foreground";
+
+// pedido de Matías: alternativa "estilo swipe/Tinder" al modo manual, una
+// peli a la vez en vez de la grilla completa — arrastrar el poster (derecha
+// = me encantó, izquierda = no me gustó) o los botones de abajo (que además
+// cubren Bien/No la vi, que un swipe de solo 2 direcciones no puede
+// expresar). "No la vi" no llama a onRate (mismo significado que nunca
+// tocarla) — un Set local de "salteadas" es lo único que la saca de la pila,
+// porque manualRatings no cambia para ese caso
+function SwipeRating({
+  titles,
+  ratings,
+  onRate,
+}: {
+  titles: OnboardingTitle[];
+  ratings: Record<string, number>;
+  onRate: (title: string, rating: number | null) => void;
+}) {
+  const [skipped, setSkipped] = useState<Set<string>>(new Set());
+  const remaining = titles.filter((t) => ratings[t.title] === undefined && !skipped.has(t.title));
+  const current = remaining[0] as OnboardingTitle | undefined;
+  const doneCount = titles.length - remaining.length;
+
+  function rate(rating: number | null) {
+    if (!current) return;
+    if (rating === null) {
+      setSkipped((prev) => new Set(prev).add(current.title));
+    } else {
+      onRate(current.title, rating);
+    }
+  }
+
+  const { cardRef, onPointerDown, onPointerMove, onPointerUp } = useSwipeCard(
+    () => rate(4.5),
+    () => rate(1.5)
+  );
+
+  if (!current) {
+    return (
+      <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground text-center py-16">
+        {doneCount > 0 ? "Puntuaste todas las de la lista." : "No hay pelis para puntuar."}
+      </p>
+    );
+  }
+
+  return (
+    <div>
+      <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground text-center mb-4">
+        {doneCount} / {titles.length}
+      </div>
+      <div className="max-w-xs mx-auto" style={{ touchAction: "pan-y" }}>
+        <div
+          key={current.title}
+          ref={cardRef}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerUp}
+          className="select-none cursor-grab active:cursor-grabbing border-2 border-foreground bg-secondary"
+        >
+          {current.poster_path ? (
+            <img
+              src={current.poster_path}
+              alt={current.title}
+              draggable={false}
+              className="w-full aspect-[2/3] object-cover pointer-events-none"
+            />
+          ) : (
+            <div className="w-full aspect-[2/3] flex items-center justify-center pointer-events-none">
+              <Film className="w-10 h-10 text-muted-foreground/40" />
+            </div>
+          )}
+          <div className="p-4 border-t-2 border-foreground bg-background pointer-events-none">
+            <div className="font-black uppercase text-lg tracking-tighter leading-none">{current.title}</div>
+            <div className="font-mono text-[10px] text-muted-foreground mt-1">{current.year || ""}</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex gap-2 max-w-xs mx-auto mt-6">
+        <button onClick={() => rate(1.5)} className={swipeActionBtn}>
+          No me gustó
+        </button>
+        <button onClick={() => rate(3.5)} className={swipeActionBtn}>
+          Bien
+        </button>
+        <button onClick={() => rate(null)} className={swipeActionBtn}>
+          No la vi
+        </button>
+        <button onClick={() => rate(4.5)} className={`${swipeActionBtn} hover:border-accent hover:text-accent`}>
+          Me encantó
+        </button>
+      </div>
+      <p className="text-center font-mono text-[9px] text-muted-foreground/60 mt-3">
+        Deslizá el poster — derecha: me encantó, izquierda: no me gustó
+      </p>
+    </div>
+  );
+}
+
 // ─── Main Page ───────────────────────────────────────────────────────────────
 
 export default function Recommend() {
@@ -324,6 +426,9 @@ export default function Recommend() {
   // de la lista semilla
   const isSearching = searchQuery.trim().length >= 2;
   const manualCount = Object.keys(manualRatings).length;
+  // pedido de Matías: el modo swipe es una preferencia del usuario, no un
+  // reemplazo — arranca en grilla (comportamiento de siempre)
+  const [ratingView, setRatingView] = useState<"grid" | "swipe">("grid");
 
   // added titles first (on top), then the seed list, deduped by title
   const manualTitles = (() => {
@@ -763,6 +868,28 @@ export default function Recommend() {
                         </span>{" "}
                         / {MIN_MANUAL_RATINGS} puntuadas
                       </div>
+                      <div className="flex gap-0">
+                        <button
+                          onClick={() => setRatingView("grid")}
+                          className={`px-4 py-2 font-mono text-[10px] uppercase tracking-widest border transition-colors ${
+                            ratingView === "grid"
+                              ? "bg-foreground text-background border-foreground"
+                              : "border-foreground/20 hover:border-foreground"
+                          }`}
+                        >
+                          Grilla
+                        </button>
+                        <button
+                          onClick={() => setRatingView("swipe")}
+                          className={`px-4 py-2 font-mono text-[10px] uppercase tracking-widest border border-l-0 transition-colors ${
+                            ratingView === "swipe"
+                              ? "bg-foreground text-background border-foreground"
+                              : "border-foreground/20 hover:border-foreground"
+                          }`}
+                        >
+                          Swipe
+                        </button>
+                      </div>
                     </div>
 
                     {/* buscar una peli vista que no esté en la lista curada */}
@@ -795,11 +922,17 @@ export default function Recommend() {
                           Sin resultados para "{searchQuery.trim()}".
                         </p>
                       )
+                    ) : loadingTitles ? (
+                      <div className="p-12 text-center">
+                        <Loader2 className="w-6 h-6 text-accent animate-spin mx-auto" />
+                      </div>
+                    ) : ratingView === "swipe" ? (
+                      <SwipeRating titles={manualTitles} ratings={manualRatings} onRate={rateManual} />
                     ) : (
                       <ManualRatingGrid
                         titles={manualTitles}
                         ratings={manualRatings}
-                        loading={loadingTitles}
+                        loading={false}
                         onRate={rateManual}
                       />
                     )}
