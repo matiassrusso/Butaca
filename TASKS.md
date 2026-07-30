@@ -33,6 +33,24 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
 
 ## Pending
 
+- [x] **Pedido de Matías (2026-07-30): buscar una peli en "Sin cuenta"
+      mostraba los resultados en un dropdown angosto, no como posters** —
+      `Recommend.tsx`. El dropdown flotante (fila chica con thumbnail 8x12 +
+      texto, click para "agregar") se reemplazó: mientras hay una búsqueda
+      activa (`isSearching`, mismo umbral de 2 caracteres que el debounce
+      existente), la grilla de posters de abajo muestra directo
+      `searchResults` en vez de la lista semilla, reusando el mismo
+      `ManualRatingGrid`/`ManualRatingCard` de siempre — mismo tamaño, mismo
+      estilo, se puntúa igual. `addSearchedTitle` (agregar sin puntuar) pasó
+      a `rateSearchResult` (agrega a `addedTitles` Y puntúa en el mismo
+      click, ya no hace falta un paso intermedio); al puntuar se limpia la
+      búsqueda y vuelve a la grilla normal con el título ya arriba de todo.
+      Sin resultados → mensaje en vez de grilla vacía. Verificado en el
+      preview local mockeando `/onboarding/search` (la key de TMDb local
+      está vencida): tipear "spiderman" muestra los posters reales de
+      Spider-Man en la grilla, puntuar uno lo agrega (10→11 puntuadas),
+      limpia la búsqueda y lo deja arriba de la lista normal; sin resultados
+      muestra el mensaje. `tsc --noEmit` y `npm run build` limpios.
 - [x] **Bug real de Matías (2026-07-30): recomendaba pelis ya vistas, y citaba
       un puntaje falso en el why de las puntuadas en "Sin cuenta"** — dos
       bugs de fondo distintos, reportados juntos con capturas.

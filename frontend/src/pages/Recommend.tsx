@@ -319,6 +319,10 @@ export default function Recommend() {
   const [addedTitles, setAddedTitles] = useState<OnboardingTitle[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<OnboardingTitle[]>([]);
+  // mismo umbral que el debounce de más abajo (2 caracteres) — mientras hay
+  // una búsqueda activa, la grilla de posters muestra los resultados en vez
+  // de la lista semilla
+  const isSearching = searchQuery.trim().length >= 2;
   const manualCount = Object.keys(manualRatings).length;
 
   // added titles first (on top), then the seed list, deduped by title
@@ -421,13 +425,13 @@ export default function Recommend() {
     };
   }, [searchQuery, importMethod, token]);
 
-  function addSearchedTitle(item: OnboardingTitle) {
+  // feedback: los resultados de la búsqueda solo aparecían en un dropdown
+  // angosto arriba del input — ahora se puntúan directo como posters en la
+  // misma grilla de abajo, sin un paso intermedio de "agregar" separado
+  function rateSearchResult(item: OnboardingTitle, rating: number | null) {
     const exists = manualTitles.some((t) => t.title.toLowerCase() === item.title.toLowerCase());
-    if (exists) {
-      toast.info("Esa peli ya está en la lista.");
-    } else {
-      setAddedTitles((prev) => [item, ...prev]);
-    }
+    if (!exists) setAddedTitles((prev) => [item, ...prev]);
+    rateManual(item.title, rating);
     setSearchQuery("");
     setSearchResults([]);
   }
@@ -769,36 +773,36 @@ export default function Recommend() {
                         placeholder="¿Viste otra? Buscala por nombre…"
                         className="w-full bg-transparent border-b-2 border-foreground py-3 font-mono text-sm placeholder:text-muted-foreground focus:outline-none focus:border-accent"
                       />
-                      {searchResults.length > 0 && (
-                        <div className="absolute z-20 left-0 right-0 mt-1 max-h-80 overflow-y-auto border-2 border-foreground bg-background shadow-lg">
-                          {searchResults.map((item) => (
-                            <button
-                              key={`${item.tmdb_id}-${item.title}`}
-                              onClick={() => addSearchedTitle(item)}
-                              className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-accent/10 transition-colors border-b border-foreground/10 last:border-b-0"
-                            >
-                              {item.poster_path ? (
-                                <img src={item.poster_path} alt="" className="w-8 h-12 object-cover shrink-0" />
-                              ) : (
-                                <div className="w-8 h-12 bg-secondary flex items-center justify-center shrink-0">
-                                  <Film className="w-3 h-3 text-muted-foreground/40" />
-                                </div>
-                              )}
-                              <span className="font-mono text-xs">
-                                {item.title} <span className="text-muted-foreground">({item.year})</span>
-                              </span>
-                            </button>
-                          ))}
-                        </div>
-                      )}
                     </div>
 
-                    <ManualRatingGrid
-                      titles={manualTitles}
-                      ratings={manualRatings}
-                      loading={loadingTitles}
-                      onRate={rateManual}
-                    />
+                    {/* feedback: los resultados de la búsqueda aparecían solo
+                        en un dropdown angosto — ahora reemplazan la grilla de
+                        posters de abajo mientras hay una búsqueda activa, y
+                        se puntúan ahí directo */}
+                    {isSearching ? (
+                      searchResults.length > 0 ? (
+                        <ManualRatingGrid
+                          titles={searchResults}
+                          ratings={manualRatings}
+                          loading={false}
+                          onRate={(title, rating) => {
+                            const item = searchResults.find((r) => r.title === title);
+                            if (item) rateSearchResult(item, rating);
+                          }}
+                        />
+                      ) : (
+                        <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground py-6">
+                          Sin resultados para "{searchQuery.trim()}".
+                        </p>
+                      )
+                    ) : (
+                      <ManualRatingGrid
+                        titles={manualTitles}
+                        ratings={manualRatings}
+                        loading={loadingTitles}
+                        onRate={rateManual}
+                      />
+                    )}
                   </div>
                 )}
               </section>
