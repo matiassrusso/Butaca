@@ -874,7 +874,9 @@ def fetch_personalized_candidates(profile: dict, mood: str, kind_filter: str = "
     Always mixes in a small unpersonalized "exploration" slice (reusing
     fetch_candidates as-is) so the pool doesn't fully collapse into the user's
     existing taste bubble; recommender.py reserves a pick slot for it via the
-    "_source" tag."""
+    "_source" tag. That slice also gets keyword tags now (same cap as
+    profile/series), otherwise it never had a shot at matching on equal
+    footing in recommend()'s scoring."""
     api_key = os.environ.get("TMDB_API_KEY")
     if not api_key:
         raise TmdbError("TMDB_API_KEY no configurada.")
@@ -933,6 +935,10 @@ def fetch_personalized_candidates(profile: dict, mood: str, kind_filter: str = "
     exploration = fetch_candidates(mood, pages=1)
     for item in exploration:
         item["_source"] = "exploration"
+    # antes solo profile/series recibían keyword tags, así que la exploration
+    # nunca competía en igualdad de condiciones en el scoring de recommend()
+    for item in exploration[:CREDITS_ENRICH_CAP]:
+        _enrich_with_keyword_tags(item, item["kind"])
     candidates.extend(exploration)
 
     seen: set[tuple[str, str]] = set()

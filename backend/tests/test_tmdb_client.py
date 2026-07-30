@@ -639,6 +639,37 @@ def test_fetch_personalized_candidates_skips_with_people_for_series(monkeypatch)
     assert "with_people" not in tv_call
 
 
+def test_fetch_personalized_candidates_enriches_exploration_keyword_tags(monkeypatch) -> None:
+    # la exploration antes no recibía ningún enriquecimiento por keywords, así
+    # que nunca competía en igualdad de condiciones con profile/series.
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+
+    def fake_get_json(url: str) -> dict:
+        if "discover/movie" in url:
+            return {
+                "results": [
+                    {
+                        "id": 1,
+                        "title": "Explore Movie",
+                        "release_date": "2020-01-01",
+                        "genre_ids": [28],
+                        "overview": "",
+                    }
+                ]
+            }
+        return {"results": []}
+
+    monkeypatch.setattr(tmdb_client, "_get_json", fake_get_json)
+    monkeypatch.setattr(tmdb_client, "fetch_keywords", lambda tmdb_id, kind="movie": ["heist"])
+
+    profile = {"genre_breakdown": [], "decade_breakdown": [], "top_directors": [], "top_actors": []}
+    candidates = tmdb_client.fetch_personalized_candidates(profile, mood="", kind_filter="both")
+
+    movie = next(c for c in candidates if c["title"] == "Explore Movie")
+    assert movie["_source"] == "exploration"
+    assert "heist" in movie["tags"]
+
+
 def test_fetch_personalized_candidates_falls_back_to_exploration_only_when_profile_has_no_signal(
     monkeypatch,
 ) -> None:

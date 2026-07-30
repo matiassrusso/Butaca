@@ -63,12 +63,22 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
       Latencia real de los 20 enriquecimientos con cache frío: **1,44s**
       (~72ms cada uno), mucho menos de lo estimado — no hace falta tocar
       ningún cap.
-- [ ] **Los keyword tags casi no se ven en los picks finales** — hallazgo de la
-      verificación, no bug. Los títulos que más se enriquecen son los que mejor
-      matchean el gusto, y por eso muchos ya están puntuados → se excluyen por
-      "ya vista"; sumado a que solo los primeros `CREDITS_ENRICH_CAP` (20)
-      candidatos se enriquecen y el slice de exploration nunca. Dos palancas si
-      se quiere subir la visibilidad: subir el cap, o enriquecer la exploration.
+- [x] **Enriquecer también el slice de exploration con keyword tags
+      (2026-07-30)** — una de las dos palancas para subir la visibilidad de
+      los tags. `fetch_personalized_candidates` (`tmdb_client.py`) llamaba
+      `_enrich_with_keyword_tags` solo para profile/series; la exploration
+      (`fetch_candidates(mood, pages=1)`) nunca pasaba por ahí, así que jamás
+      competía en igualdad de condiciones en el scoring de `recommend()`.
+      Mismo patrón que movies/series: loop sobre `exploration[:CREDITS_ENRICH_CAP]`
+      llamando `_enrich_with_keyword_tags(item, item["kind"])` (los items de
+      exploration ya traen `kind` desde `_map_result`, sirve para movie y
+      series por igual). Test nuevo
+      (`test_fetch_personalized_candidates_enriches_exploration_keyword_tags`).
+      229 tests.
+- [ ] **Otra palanca pendiente: subir `CREDITS_ENRICH_CAP`** (hoy 20) — la
+      exploration ya se enriquece, pero sigue acotada al mismo cap que
+      profile/series. Falta ver en producción si con esto solo ya sube la
+      visibilidad o si además hace falta subir el cap.
 - [ ] **Ampliar `KEYWORD_TAG_MAP`** (opcional, es una edición de dict) — con 19
       strings el hit rate es ~30%. De los logs y las páginas verificadas
       quedaron strings reales sin mapear que valdrían: `hold-up robbery`
