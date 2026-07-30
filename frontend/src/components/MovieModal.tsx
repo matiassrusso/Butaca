@@ -1,5 +1,5 @@
 import { ExternalLink, Film, Loader2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type MutableRefObject } from "react";
 import { createPortal } from "react-dom";
 
 import { API_BASE_URL } from "@/hooks/useAuth";
@@ -36,21 +36,73 @@ export type MovieDetails = {
   } | null;
 };
 
+// pedido de Matías: revelar el "why" con efecto máquina de escribir, pero
+// solo la primera vez que se abre CADA poster en la sesión — reabrir el
+// mismo (o que el "why" no haya cambiado) muestra el texto completo directo.
+// El deps array es [recId, why] a propósito: el propio setDisplayed dispara
+// re-renders en cada tick, y si el effect dependiera de algo que cambia en
+// esos re-renders (ej. un booleano derivado del ref en cada render) el
+// typewriter se cortaría al primer caracter.
+function useTypewriterWhy(
+  recId: number,
+  why: string,
+  seenWhys?: MutableRefObject<Map<number, string>>
+): string {
+  const [displayed, setDisplayed] = useState(why);
+
+  useEffect(() => {
+    const alreadySeen = seenWhys?.current.get(recId) === why;
+    const reducedMotion =
+      typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+
+    if (alreadySeen || reducedMotion || !seenWhys) {
+      setDisplayed(why);
+      return;
+    }
+
+    setDisplayed("");
+    let shown = 0;
+    const id = setInterval(() => {
+      shown += 1;
+      setDisplayed(why.slice(0, shown));
+      if (shown >= why.length) {
+        clearInterval(id);
+        // se marca "visto" al terminar, no al empezar: StrictMode corre este
+        // effect 2 veces en dev (monta → cleanup → monta de nuevo) — si se
+        // marcara al empezar, la 2da pasada ya lo encontraría "visto" y
+        // saltearía la animación real entera (interrumpirlo cerrando el
+        // modal a mitad de camino sí puede hacer que se re-anime al
+        // reabrir — aceptable, mejor que perder la animación siempre)
+        seenWhys.current.set(recId, why);
+      }
+    }, 18);
+    return () => clearInterval(id);
+  }, [recId, why, seenWhys]);
+
+  return displayed;
+}
+
 export function MovieModal({
   rec,
   token,
   feedback,
+  seenWhys,
   onClose,
   onFeedback,
 }: {
   rec: Recommendation;
   token: string | null;
   feedback?: FeedbackStatus;
+  // ref compartida entre pósters (vive en la página que abre el modal) con
+  // el último "why" ya mostrado por rec.id — sin esto (ej. Home.tsx) el
+  // modal muestra el texto completo directo, sin animación, como antes
+  seenWhys?: MutableRefObject<Map<number, string>>;
   onClose: () => void;
   onFeedback: (status: FeedbackStatus) => void;
 }) {
   const [details, setDetails] = useState<MovieDetails | null>(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
+  const displayedWhy = useTypewriterWhy(rec.id, rec.why, seenWhys);
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -135,7 +187,11 @@ export function MovieModal({
               {rec.match_score}% match
             </div>
             <p className="font-serif text-2xl italic leading-snug text-balance mb-6">
-              &ldquo;{rec.why}&rdquo;
+              &ldquo;{displayedWhy}
+              {displayedWhy.length < rec.why.length && (
+                <span className="inline-block w-2 h-5 -mb-0.5 ml-0.5 bg-accent animate-pulse" />
+              )}
+              &rdquo;
             </p>
 
             {rec.tags.length > 0 && (

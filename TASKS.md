@@ -201,24 +201,45 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
       — confirmado 2026-07-29 (ver entrada duplicada más arriba en este
       mismo `Pending`, cerca del feedback ronda 2).
 
-- [ ] **Idea (a diseñar bien antes de implementar): esconder los "why" del
-      menú y revelarlos con efecto máquina de escribir al entrar al poster.**
-      Pedido de Matías. Dos partes:
-      1. Los "why" ya NO se muestran de entrada en la grilla de resultados de
-         `/recommend` — la card muestra solo poster + título + año. La razón
-         aparece recién al abrir el detalle del poster (el `MovieModal`).
-      2. La primera vez que abrís cada poster, el texto del "why" se anima
-         como escrito por una máquina de escribir (typewriter). Solo la
-         primera vez por poster en la sesión — reabrir el mismo no re-anima.
-      A pensar al implementar: dónde vive el "ya lo vi" (state en el
-      componente de resultados, keyed por rec.id); respetar
-      `prefers-reduced-motion` (sin animación → texto completo directo);
-      velocidad del efecto; que no pelee con el render progresivo del refine
-      (si el "why" del LLM llega mientras el modal está abierto). Archivos
-      probables: `frontend/src/pages/Recommend.tsx` (sacar el "why" de
-      `RecommendationCard`) y `frontend/src/components/MovieModal.tsx`
-      (typewriter + flag de primera-vez). "Después lo pensamos bien" (Matías)
-      — no arrancar sin cerrar el diseño.
+- [x] **Esconder los "why" del menú y revelarlos con efecto máquina de
+      escribir al entrar al poster (2026-07-30)** — pedido de Matías, hecho.
+      `RecommendationCard` (`Recommend.tsx`) ya no muestra la frase del
+      "why" — solo poster, score, título/año y la línea de director/tags.
+      `MovieModal.tsx` suma `useTypewriterWhy`: anima el texto letra por
+      letra (18ms/char, cursor parpadeante) solo la primera vez que se abre
+      cada poster en la sesión — el estado de "ya lo vi" vive en
+      `Recommend.tsx` (`seenWhysRef`, un `Map<recId, why>` en un `useRef`,
+      no `useState`, porque nada en la página necesita re-renderizar cuando
+      cambia) y se pasa a `MovieModal` porque el modal se desmonta al cerrar
+      (`{selectedRec && <MovieModal key={selectedRec.id} .../>}`) así que un
+      estado local ahí no sobrevive a cerrar/reabrir. Respeta
+      `prefers-reduced-motion` (salta directo a texto completo) y es
+      opcional (`seenWhys?:`) — `Home.tsx` no lo pasa, así que su modal de
+      "current picks" queda exactamente como antes, sin animación.
+      **Dos bugs reales encontrados y arreglados en el camino:**
+      1. El "why" que ve el modal es una copia (`selectedRec`, un state
+         aparte que no deriva de `result`) tomada al abrirlo — si el refine
+         del LLM llegaba con el modal ya abierto, `result` se actualizaba
+         pero el modal se quedaba con el "why" heurístico viejo para
+         siempre. Fix: `refineSession` ahora también sincroniza
+         `selectedRec` cuando corresponde.
+      2. El typewriter marcaba "visto" al EMPEZAR a animar, no al terminar
+         — con `StrictMode` (dev monta → corre el effect → cleanup → monta
+         nuevo) la 2da pasada ya encontraba "visto" (marcado por la 1ra) y
+         mataba la animación real por completo antes de que corriera un
+         solo tick, mostrando el texto completo instantáneo siempre.
+         Reproducido y confirmado con snapshots de texto en el tiempo en el
+         preview local (longitud del texto constante en 0/30/80/150/400ms:
+         nunca crecía). Fix: se marca "visto" recién cuando el intervalo
+         termina de tipear, no al arrancar (mismo patrón de guard contra
+         double-invoke que ya usa `VerifyEmail.tsx`, adaptado porque acá el
+         effect sí necesita poder re-correr de verdad cuando cambia el
+         `why`, no solo una vez por vida del componente).
+      Verificado end-to-end en el preview local: texto creciendo
+      progresivamente (4→21→66→178→284 caracteres en el tiempo), reabrir el
+      mismo poster muestra el texto completo al instante sin re-animar,
+      `tsc --noEmit` y `npm run build` limpios, sin errores nuevos de
+      consola ni de logs del backend.
 
 - [ ] **Decidir el fallback del LLM: ¿sumar kimi-k2.6 o quedarnos con
       llama-3.1-70b?** — hoy el fallback es `meta/llama-3.1-70b-instruct`

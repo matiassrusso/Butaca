@@ -181,9 +181,6 @@ function RecommendationCard({
         </h3>
         <span className="font-mono text-xs text-muted-foreground shrink-0">{rec.year}</span>
       </div>
-      <p className="font-serif text-xl leading-snug mb-4 italic text-balance">
-        &ldquo;{rec.why}&rdquo;
-      </p>
       <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground border-t border-foreground/10 pt-4">
         {rec.director
           ? `Dir. ${rec.director} • ${rec.tags.slice(0, 2).join(" / ") || "—"}`
@@ -338,6 +335,11 @@ export default function Recommend() {
   })();
 
   const [result, setResult] = useState<RecommendResponse | null>(null);
+  // qué "why" ya se mostró (typewriter o texto directo) por rec.id en esta
+  // sesión — vive acá, no en MovieModal, porque el modal se desmonta al
+  // cerrar (rec.id) => <MovieModal key={rec.id} ... />; un ref porque nada
+  // en esta página necesita re-renderizar cuando cambia
+  const seenWhysRef = useRef<Map<number, string>>(new Map());
   const [loading, setLoading] = useState(false);
   const [refining, setRefining] = useState(false);
   const [error, setError] = useState("");
@@ -571,6 +573,13 @@ export default function Recommend() {
           })),
         };
       });
+      // si el modal está abierto en este pick cuando llega el refine, el "why"
+      // que tiene (copiado de result al abrirse) se quedaba viejo para
+      // siempre — result se actualiza arriba pero selectedRec es un state
+      // aparte que no deriva de result
+      setSelectedRec((prev) =>
+        prev && whyById.has(prev.id) ? { ...prev, why: whyById.get(prev.id) ?? prev.why } : prev
+      );
     } catch {
       // refine is best-effort; on any failure the heuristic picks just stay
     } finally {
@@ -1036,6 +1045,7 @@ export default function Recommend() {
             rec={selectedRec}
             token={token}
             feedback={feedbackState[selectedRec.id]}
+            seenWhys={seenWhysRef}
             onClose={() => setSelectedRec(null)}
             onFeedback={(status) => submitFeedback(selectedRec.id, status)}
           />
