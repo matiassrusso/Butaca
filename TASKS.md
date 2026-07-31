@@ -33,6 +33,18 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
 
 ## Pending
 
+- [x] **3 bugs de `/weekly` + 3 features (2026-07-31, feedback de Matías
+      probando en producción)** — detalle completo en `CLAUDE.md`
+      (`SESSION_STATE`) y en el historial de sesiones ahí mismo. Resumen:
+      pelis incompletas y why con puntaje inventado en likes (bug de la
+      corrección anterior, `exclude_seen`/enrichment faltante en
+      `/weekly`), why en tercera persona al citar el rating (`_rating_label`),
+      y las 3 features pedidas: Unknown match, "Ya la vi" con rate directo
+      + botón de desacuerdo (vota similares de TMDb), variedad de épocas en
+      las semanales (3 trending + 2 de década rotativa). 4 commits
+      `c0d0931`..`3562bd5`, 263→278 tests. Pendiente: que Matías pruebe en
+      producción y confirme el diseño de variedad de épocas.
+
 - [x] **Recomendaciones de la semana (2026-07-30, pedido de Matías)** — 5
       pelis en la home, iguales para todo el mundo, con "probabilidad de que
       te guste" personalizada. Sin curación editorial:

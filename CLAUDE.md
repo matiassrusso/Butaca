@@ -15,7 +15,7 @@ If a session is drifting without moving hacia calidad de recomendación o clarid
 1. Definición corta del alcance (ver `docs/product-mvp.md`)
 2. Implementación en `backend` (FastAPI + SQLite) y/o `frontend` (React + Vite + Tailwind)
 3. Si hay varios agentes en paralelo: coordinación por `TASKS.md` (worktrees separados, marcar In Progress → Done, nunca mergear a `main` solo)
-4. Tests de backend en verde antes de cerrar (213 tests a la fecha)
+4. Tests de backend en verde antes de cerrar (278 tests a la fecha)
 5. Deployeado: frontend [butaca.xyz](https://butaca.xyz/) (Vercel), backend [api.butaca.xyz](https://api.butaca.xyz) (Render, free tier — cold start en la primera request)
 
 ## Key People
@@ -44,89 +44,156 @@ Solo yo (Matías), con posible coordinación multi-agente (Claude, Codex) docume
 ## Current Status
 
 > <!-- SESSION_STATE:START -->
-> **Last updated:** 2026-07-29 (keyword tags de TMDb + feedback ronda 2)
+> **Last updated:** 2026-07-31 (sesión: 3 bugs de `/weekly` post-feedback +
+> 3 features pedidas — Unknown match, rate directo, variedad de épocas)
 >
 > ### ⚠️ Leer primero al retomar
 >
-> **El proyecto se llama `Butaca`** (antes PeliPick), con dominio propio en
-> vivo: frontend en [butaca.xyz](https://butaca.xyz/) (Vercel), backend en
-> [api.butaca.xyz](https://api.butaca.xyz) (Render). Las URLs `pelipick.*`
-> siguen funcionando en paralelo pero ya no son la identidad real. Todo lo
-> operativo grande ya está cerrado: dominio, Resend activo, UptimeRobot
-> activo, `NVIDIA_API_KEY` en producción, Ola 4 completa, y el **feedback de
-> amigos pre-lanzamiento trabajado 19/20**. **228 tests de backend en verde**,
-> todo pusheado a `main` y deployado.
+> Todo lo del feedback fresco de la sesión anterior está resuelto y
+> deployado (push `bc52b2b`..`3562bd5`). Nada bloqueante pendiente — lo
+> único que falta es que Matías lo pruebe en producción una vez que Render
+> termine el redeploy, sobre todo:
+> - El botón **"¿No estás de acuerdo?"** del modal (vota similares de TMDb)
+>   — no se pudo probar en el browser local porque la TMDb key local está
+>   vieja (401), solo queda cubierto por los 6 tests de backend
+>   (`fetch_similar_titles` + `GET /movies/{id}/similar`).
+> - El mix de **variedad de épocas** en `/weekly` (3 trending + 2 de una
+>   década que rota por semana ISO) — es una decisión de diseño de esta
+>   sesión, no algo que Matías haya especificado en detalle; puede querer
+>   ajustar el ratio 3/2 o las décadas (`tmdb_client.WEEKLY_CLASSIC_DECADES`).
 >
-> **Qué se hizo el 2026-07-29** (11 commits, `e49a81a`..`8d82ce2`):
-> - **Feedback ronda 2:** el modo manual no reusaba el perfil guardado (había
->   que re-tildar las mismas pelis cada sesión) → endpoint
->   `POST /recommend/profile` + botón "Usar mi perfil" en el wizard.
-> - **Aviso más claro** de que el import por username trae solo lo reciente.
-> - **Keyword tags de TMDb** (la línea grande, ver abajo): `/movie/{id}/keywords`
->   ahora alimenta un eje narrativo de tags que antes no existía.
-> - Confirmado en producción el "why" real del LLM (pendiente viejo de sesión 3).
+> **Qué se hizo el 2026-07-31** (4 commits, `c0d0931`..`3562bd5`, 263→278 tests):
+> - **3 bugs de `/weekly` reportados con capturas** (feedback fresco de la
+>   sesión anterior, en `NOTAS_DEL_PROYECTO.md`): solo 3 de 5 pelis
+>   (`fetch_weekly_trending` solo pedía página 1 de TMDb, ahora pagina
+>   hasta 3), why citando puntaje inventado en likes/favoritos de
+>   Letterboxd (nuevo `source="like"`, el check de `llm_client` pasó a ser
+>   positivo: solo `"import"` cita puntaje exacto).
+> - Al probar en producción, Matías encontró que **el fix anterior no
+>   alcanzaba**: seguían apareciendo 2/5 en vez de 5 (bug distinto:
+>   `recommend()` excluye del catálogo cualquier título ya puntuado por el
+>   usuario — correcto para `/recommend`, pero rompía la promesa de
+>   `/weekly` de "las mismas 5 para todos"; nuevo `exclude_seen=False` solo
+>   ahí), 50% match inconsistente con un why entusiasta (`/weekly` nunca
+>   corría `_enrich_loved_ratings_with_genre_tags` antes de puntuar, a
+>   diferencia de `/recommend` — ahora sí), y el why seguía en tercera
+>   persona al citar el rating ("que ya puntuaste como 'le encantó'" —
+>   `_rating_label` pasó a "te encantó"/"no te gustó"/"te gustó").
+> - **3 features pedidas, en orden de prioridad:**
+>   1. **Unknown match**: `match_score=50` es "sin evidencia" por diseño
+>      del propio backend — el frontend ahora lo etiqueta "Match
+>      desconocido"/"S/D" en vez de un número que parece preciso y no lo es
+>      (Home, Recommend, History, MovieModal; helper en `frontend/src/lib/match.ts`).
+>   2. **"Ya la vi" con mini-menú de rating** (me encantó/bien/no me
+>      gustó) que persiste a `rated_items` vía nuevo `POST /profile/rate`
+>      — sin depender de un `recommendation_id` real, así anda también
+>      desde `/weekly` (id=-1). Compone con el nuevo botón **"¿No estás de
+>      acuerdo?"**: pide similares de TMDb (`GET /movies/{id}/similar`,
+>      nuevo `tmdb_client.fetch_similar_titles`) y reusa el mismo mini-menú
+>      para votarlos.
+>   3. **Variedad de épocas en `/weekly`**: 3 de las 5 siguen siendo
+>      trending real, 2 se reservan para lo mejor puntuado de una década
+>      que rota por semana ISO (TMDb discover, 100% real, sin curación a
+>      mano) — best-effort, si discover falla se rellena con más trending.
 >
-> **Primero al retomar:** nada urgente ni roto. La decisión abierta más
-> concreta es si subir la **visibilidad** de los keyword tags: funcionan
-> (hit rate ~30%, verificado en logs de Render) pero casi no llegan a los 6
-> picks finales, porque los títulos que más se enriquecen son los que mejor
-> matchean el gusto → muchos ya están puntuados y se excluyen por "ya vista".
-> Dos palancas: subir `CREDITS_ENRICH_CAP` (hoy 20) o enriquecer también el
-> slice de exploration (hoy nunca se enriquece). La latencia **no** es
-> obstáculo: 20 enriquecimientos con cache frío tardaron 1,44s medidos.
+> **Qué se hizo el 2026-07-30** (10 commits, `f7ef842`..`a889137`, 230→263 tests):
+> - Exploration slice enriquecida con keyword tags (+ fix de un bug propio:
+>   el cap se aplicaba mal y las series de exploration nunca se enriquecían).
+> - `KEYWORD_TAG_MAP` ampliado con 9 keywords nuevos verificados a mano
+>   contra TMDb.
+> - **Rediseño del banner "Usar mi perfil"** (modo manual "Sin cuenta"): era
+>   todo-o-nada, ahora `GET /onboarding/titles` precarga lo ya puntuado
+>   (de cualquier fuente) y queda editable en el mismo lugar.
+> - **Typewriter para el "why"** al abrir el poster (pedido de Matías) — de
+>   paso, dos bugs reales encontrados y arreglados: el modal se quedaba con
+>   el why viejo si el refine del LLM llegaba con el modal abierto, y
+>   `StrictMode` mataba la animación real en dev.
+> - **Dos bugs de fondo reportados por Matías con capturas, arreglados:**
+>   (1) puntuar en "Sin cuenta" y después generar con Letterboxd recomendaba
+>   de vuelta esas mismas películas — la exclusión solo miraba el request
+>   puntual, nunca el historial completo persistido; (2) el why citaba
+>   `(4.5/5)` para ratings sintéticos del modo manual — nueva columna
+>   `rated_items.source` ('import'/'manual') que el prompt del LLM usa para
+>   no inventar precisión.
+> - Búsqueda en "Sin cuenta" pasó de un dropdown angosto a posters directo
+>   en la grilla de abajo.
+> - `tmdb:movieId` del RSS de username: se usa directo (`fetch_title_by_id`)
+>   en vez de buscar por título — menos requests, sin riesgo de matchear un
+>   remake homónimo.
+> - `CREDITS_ENRICH_CAP` 20→30; investigado kimi-k2.6 (404 confirmado en
+>   vivo, problema de cuenta del lado de NVIDIA — se queda en llama);
+>   **onboarding swipe/Tinder como preferencia del usuario** (toggle
+>   Grilla/Swipe, no reemplazo).
+> - **Recomendaciones semanales en la home** (`GET /weekly`, público): 5
+>   pelis de `/trending/movie/week` de TMDb, iguales para todos (cacheado
+>   por semana ISO), personalizadas con match_score + predicción del LLM
+>   para quien tiene sesión. Ver bugs 1-2 de arriba, encontrados apenas
+>   deployado.
 >
 > **Pendientes reales** (detalle en `Pending` de `TASKS.md`):
-> - Visibilidad de los keyword tags en los picks (arriba).
-> - Ampliar `KEYWORD_TAG_MAP` (es una edición de dict): quedaron strings
->   reales sin mapear que salieron de los logs — `hold-up robbery`,
->   `neo-noir`, `psychological thriller`, `folk horror`, `dark comedy`,
->   `character study`, `survival`, `on the run`. **Ojo:** verificar cada
->   string contra un título real antes de sumarlo, y recordar que sumar tags
->   que el perfil no matchea diluye el score (de ahí el tope de 2).
-> - Punto 7 del feedback (onboarding manual estilo swipe) — decidir recién
->   cuando los amigos prueben el wizard nuevo.
+> - Que Matías pruebe en producción las 3 features nuevas del 2026-07-31
+>   (Unknown match, rate directo + botón de desacuerdo, variedad de épocas)
+>   y confirme si el diseño elegido le sirve tal cual.
 > - Bauti reportó "Load failed" importando por username; **despriorizado por
->   Matías**, sin logs no se pudo confirmar la causa (sospecha: cold start de
->   Render + latencia del RSS).
-> - Mejora chica pendiente del import por username: aprovechar el
->   `tmdb:movieId` que ya trae el RSS en vez de matchear por título.
-> - Borrar el proyecto viejo de Neon (São Paulo) cuando el nuevo lleve unos
->   días estable.
+>   Matías**, sin logs no se pudo confirmar la causa.
+> - Borrar el proyecto viejo de Neon (São Paulo) — Matías lo tiene que
+>   hacer él, es borrado permanente de datos.
 > - Renombrar la carpeta local del proyecto y la lista del `CLAUDE.md` raíz
 >   del vault (fuera de este repo, requiere permiso).
 >
 > **Descartado a propósito** (no volver a proponerlo sin que Matías lo pida):
-> el fallback del LLM queda en `llama-3.1-70b` (kimi-k2.6 da 404 por el
-> endpoint estándar y no resuelve nada real, porque comparte key/host); las
-> cuentas de prueba en producción (`test-resend-qa`, `claude-verify-qa`)
-> quedan; el auto-renew de `butaca.xyz` queda apagado (vence 21-07-2027).
+> el fallback del LLM queda en `llama-3.1-70b` (kimi-k2.6 confirmado 404 en
+> vivo contra la key real, problema de entitlement de cuenta del lado de
+> NVIDIA — hay un thread sin resolver en su foro); las cuentas de prueba en
+> producción quedan; el auto-renew de `butaca.xyz` queda apagado.
 >
 > **Contexto que no se ve leyendo el código:**
-> - La TMDb key del `backend/.env` **local** está vieja (401). Consecuencia
->   fuerte: corriendo local, `fetch_personalized_candidates` **nunca corre**
->   (degrada al catálogo mock, sin `tmdb_id`), así que **los keyword tags son
->   inverificables en el preview local** — hay que verificar en producción.
-> - Para diagnosticar en producción: hay una `RENDER_API_KEY` en una env var
->   de usuario de Windows, y el service id del backend es
->   `srv-d9cnhqu1a83c739eono0`. Con eso se leen los logs vía la API REST de
->   Render (así se verificó el hit rate de los keywords).
-> - Los strings de keywords de TMDb **no se pueden adivinar**: uno equivocado
->   no falla, simplemente nunca matchea. Verificados contra las páginas
->   públicas de TMDb, lo que descartó candidatos "obvios" que no existen
->   (`one location` es en realidad `huis clos`, `robbery` es `caper`,
->   `assassin` es `hitman`) y obligó a tirar los tags `twist` y `anthology`
->   por no encontrarles keyword real (Se7en confirmó: 22 keywords, ninguno es
->   `twist ending`).
-> - Se descartó replicar el pipeline de Flick (embeddings + Leiden
->   clustering, del video que disparó todo esto): existe para *descubrir* una
->   taxonomía desconocida y necesita un corpus enorme de reviews que Butaca
->   no tiene. El activo propio de largo plazo es otro: cuando haya cientos de
->   usuarios, `rated_items` guarda qué pelis puntúan juntas *nuestros*
->   usuarios — data que ni TMDb ni Letterboxd tienen.
-> - `backend/requirements.txt` y `docs/architecture.md` figuran como
->   modificados en `git status` desde antes de esta sesión, pero es **solo
->   ruido de line endings** (CRLF/LF), sin cambio real de contenido.
+> - `NOTAS_DEL_PROYECTO.md` (raíz del repo) es donde Matías deja feedback
+>   libre con capturas — no es un archivo `(C)`, no editarlo sin permiso,
+>   pero SÍ leerlo siempre al retomar (ver arriba).
+> - La TMDb key del `backend/.env` **local** sigue vieja (401) — mismo
+>   hallazgo que sesiones anteriores, sin cambios. Todo lo de esta sesión
+>   que necesitaba TMDb real se verificó con mocks de `fetch` en el browser
+>   local o contra producción/la API real vía curl directo.
+> - `RENDER_API_KEY` sigue en una env var de usuario de Windows para leer
+>   logs de prod (service id: `srv-d9cnhqu1a83c739eono0`).
+> - El feed RSS de Letterboxd trae `<tmdb:movieId>` bajo el namespace
+>   `xmlns:tmdb="https://themoviedb.org"` — confirmado contra el feed real
+>   de un perfil público (`scorsese`) vía curl directo antes de escribir
+>   código, no adivinado.
+> - `backend/requirements.txt` y `docs/architecture.md` siguen figurando
+>   como modificados en `git status` — sigue siendo solo ruido de line
+>   endings (CRLF/LF) de sesiones viejas, sin cambio real de contenido.
+> - Verificación de esta sesión (2026-07-31): 278 tests de backend +
+>   typecheck de frontend limpio + probado a mano en el dev server local
+>   (funciona porque `NVIDIA_API_KEY` sí anda local, aunque `TMDB_API_KEY`
+>   siga vieja — el modo manual "Sin cuenta" degrada a catálogo mock y
+>   generó recomendaciones reales con el LLM). Confirmado con captura de
+>   red: `POST /profile/rate` → 201, badge "S/D" y "Match desconocido"
+>   visibles en la grilla y el modal. El botón "¿No estás de acuerdo?" no
+>   se vio en local porque el catálogo mock no trae `tmdb_id` — cubierto
+>   solo por tests de backend, sin verificación visual.
 > <!-- SESSION_STATE:END -->
+>
+> **2026-07-31 — 4 commits (`c0d0931`..`3562bd5`), 263→278 tests:** retomé
+> el feedback fresco de la sesión anterior. Arreglé los 3 bugs de
+> `/weekly` reportados con capturas (pelis incompletas, why con puntaje
+> inventado en likes); Matías probó en producción y encontró que la
+> corrección no alcanzaba del todo — 2 bugs más de fondo (`exclude_seen`
+> silencioso, falta de enrichment en `/weekly`) y el why seguía en
+> tercera persona en un caso puntual. Arreglados los 3, confirmado con
+> curl contra producción. Después implementé las 3 features pedidas en
+> orden: Unknown match, "Ya la vi" con rate directo + botón de
+> desacuerdo (vota similares de TMDb), variedad de épocas en las
+> semanales. Ver "Qué se hizo" arriba para el detalle completo.
+>
+> **2026-07-30 — sesión larga, 10 commits (`f7ef842`..`a889137`), 230→263
+> tests:** ver "Qué se hizo" arriba para el resumen; detalle completo
+> commit por commit en `TASKS.md` (sección `Pending`, cada ítem tiene su
+> propia entrada con lo que se probó y cómo). Apenas deployadas las
+> recomendaciones semanales, Matías encontró 2 bugs reales probando en
+> producción (ver "Leer primero al retomar") — quedan para la próxima
+> sesión, no se investigaron todavía.
 >
 > **2026-07-29 — keyword tags de TMDb + feedback ronda 2, 11 commits
 > (`e49a81a`..`8d82ce2`), 215 → 228 tests:** dos frentes. (1) **Feedback ronda
