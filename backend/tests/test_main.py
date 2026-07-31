@@ -1477,6 +1477,51 @@ def test_weekly_scores_against_the_users_real_taste(monkeypatch) -> None:
     assert all(r["match_score"] > 50 for r in recs)
 
 
+def test_weekly_differentiates_identical_match_scores_by_vote_average(monkeypatch) -> None:
+    # bug reportado por Matías (2026-07-31): 4 de las 5 semanales daban
+    # exactamente el mismo match_score (81%) — confirmado contra logs de
+    # producción que KEYWORD_TAG_MAP no diferenciaba esos títulos. Con el
+    # mismo tag-match para todos (mismo vote_average de _WEEKLY_TRENDING no
+    # sirve acá), se arma un catálogo a mano con vote_average distinto por
+    # título para probar el desempate.
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    catalog = [
+        {**item, "vote_average": 8.5 if i == 0 else 6.5} for i, item in enumerate(_WEEKLY_TRENDING)
+    ]
+    monkeypatch.setattr("backend.app.main.tmdb_client.fetch_weekly_trending", lambda: catalog)
+    monkeypatch.setattr(
+        "backend.app.main._rebuild_ratings",
+        lambda user_id: [
+            RatedItem(title="Loved Movie", rating=4.5, tags=["dark", "psychological"])
+        ],
+    )
+    headers = _auth_headers("weeklydifferentiate")
+
+    response = client.get("/weekly", headers=headers)
+
+    assert response.status_code == 200
+    recs = response.json()["recommendations"]
+    scores = {r["tmdb_id"]: r["match_score"] for r in recs}
+    # todos tenían el mismo tag-match (mismo score de recommend()) pero
+    # distinto vote_average -> el desempate los separa
+    assert scores[0] > scores[1]
+
+
+def test_weekly_never_nudges_a_score_below_the_no_evidence_floor(monkeypatch) -> None:
+    # match_score=50 es "sin evidencia" a propósito (isUnknownMatch en el
+    # frontend) — el desempate por vote_average no debe tocarlo, si no un
+    # 50% real (sin evidencia) se mostraría como si tuviera evidencia
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.fetch_weekly_trending", lambda: _WEEKLY_TRENDING
+    )
+
+    response = client.get("/weekly")  # sin sesión -> sin evidencia, match_score=50
+
+    assert response.status_code == 200
+    assert all(r["match_score"] == 50 for r in response.json()["recommendations"])
+
+
 def test_weekly_enriches_loved_ratings_with_tmdb_tags_before_scoring(monkeypatch) -> None:
     # bug reportado por Matías (2026-07-31): un título amado sin reseña (like
     # o favorito de Letterboxd, botón manual) llega de la DB sin tags

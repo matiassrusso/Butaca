@@ -174,6 +174,28 @@ def catalog_stats() -> CatalogStatsResponse:
     return CatalogStatsResponse(**stats)
 
 
+def _differentiate_weekly_match_scores(heuristic: RecommendResponse) -> RecommendResponse:
+    """El vocabulario de tags que usa recommend() para puntuar es chico
+    (genero + KEYWORD_TAG_MAP, una allowlist angosta) y para un perfil de
+    gusto activo/diverso satura rápido: varios candidatos terminan con el
+    mismo match_score exacto (reportado por Matías, 2026-07-31 — 4 de 5
+    semanales en 81%; confirmado contra logs de producción que
+    KEYWORD_TAG_MAP no matcheaba nada para esos 4 títulos puntuales, así
+    que el enrichment de la ronda anterior no alcanzaba a diferenciarlos).
+    vote_average de TMDb es dato real que sí varía por título — se usa acá
+    como desempate suave, SOLO en /weekly (recommend() no se toca, lo usa
+    también /recommend) y solo cuando ya hay evidencia real: nunca sobre
+    el piso de 50, que es "sin evidencia" a propósito (ver
+    frontend/src/lib/match.ts, isUnknownMatch)."""
+    nudged = []
+    for rec in heuristic.recommendations:
+        if rec.match_score != 50 and rec.vote_average is not None:
+            nudge = round((rec.vote_average - 7.0) * 3)
+            rec = rec.model_copy(update={"match_score": max(1, min(99, rec.match_score + nudge))})
+        nudged.append(rec)
+    return heuristic.model_copy(update={"recommendations": nudged})
+
+
 @app.get("/weekly", response_model=RecommendResponse)
 def weekly_picks(user: sqlite3.Row | None = Depends(auth.get_optional_user)) -> RecommendResponse:
     """Pedido de Matías (2026-07-30): 5 recomendaciones semanales, iguales
@@ -212,6 +234,7 @@ def weekly_picks(user: sqlite3.Row | None = Depends(auth.get_optional_user)) -> 
     heuristic = recommend(
         ratings, mood="", catalog=trending, also_seen=frozenset(), profile=profile, exclude_seen=False
     )
+    heuristic = _differentiate_weekly_match_scores(heuristic)
 
     if user and ratings and llm_client.is_configured():
         try:
