@@ -340,18 +340,23 @@ def refine_recommendations(
 
 
 def _build_weekly_prompt(ratings: list[RatedItem], heuristic: RecommendResponse) -> str:
+    # heuristic acá ya viene filtrado de títulos que el usuario puntuó antes
+    # (predict_weekly_fit los saca del pool que se le manda al LLM) — así que
+    # "las 5" no siempre es literal, de ahí el count dinámico en vez de
+    # hardcodeado (antes decía "las 5" aunque quedaran 4 o 3 candidatos).
     digest = _build_taste_digest(ratings)
     ratings_lines = _ratings_lines(ratings)
     candidate_lines = _candidate_lines(heuristic)
+    count = len(heuristic.recommendations)
     return (
         "Sos un crítico de cine que le predice a un usuario, hablándole directo a él, si le va a "
         "gustar una película en particular, en español.\n\n"
         f"Perfil de gusto detectado: {digest}\n\n"
         f"Reseñas completas del usuario (hasta 40):\n{ratings_lines}\n\n"
-        "Estas son las 5 películas más populares de esta semana en TMDb — no elegís cuáles "
+        f"Estas son {count} películas populares de esta semana en TMDb — no elegís cuáles "
         "mostrar (eso ya está decidido y es igual para todos los usuarios), tu trabajo es "
-        "predecir, para CADA UNA de las 5, si le va a gustar o no a ESTE usuario en particular. "
-        f"Escribí sobre las 5, ninguna de menos:\n{candidate_lines}\n\n"
+        f"predecir, para CADA UNA de las {count}, si le va a gustar o no a ESTE usuario en "
+        f"particular. Escribí sobre las {count}, ninguna de menos:\n{candidate_lines}\n\n"
         "Para cada película, 1-2 frases en tono de predicción, hablándole DIRECTO en segunda "
         "persona (vos) — \"te va a encantar porque...\", \"es probable que no te enganche "
         "porque...\", \"tenés chances, aunque...\" — nunca en tercera persona (\"le va a "
@@ -362,7 +367,7 @@ def _build_weekly_prompt(ratings: list[RatedItem], heuristic: RecommendResponse)
         "inventes un número si el título dice 'sin puntaje numérico').\n\n"
         "Respondé ÚNICAMENTE con un JSON válido, sin texto ni markdown alrededor, con esta forma "
         'exacta: {"picks": [{"title": "...", "why": "..."}, ...]} — un elemento por cada una de '
-        "las 5, nunca menos."
+        f"las {count}, nunca menos."
     )
 
 
@@ -388,25 +393,48 @@ def predict_weekly_fit(
         for rec in heuristic.recommendations
     )
     cache_key = (user_id, candidates)
-    cached = _WEEKLY_PREDICTION_CACHE.get(cache_key)
-    cache_hit = False
-    if cached is not None:
-        expires_at, cached_result = cached
-        if expires_at > _now_monotonic():
+
+    # /weekly no excluye del catálogo lo que el usuario ya puntuó (el set de
+    # 5 es fijo para todos) — así que un candidato puede ser algo que ya
+    # vio. Pedirle al LLM que lo "prediga" igual lo confundía: el prompt le
+    # manda el título como candidato Y como parte de su historial, y
+    # terminaba comparando el título consigo mismo como si fueran dos cosas
+    # distintas (reportado por Matías, 2026-07-31 — caso "The Odyssey"). A
+    # esos se les pone directo un why honesto con el rating real, sin
+    # pasar por el LLM.
+    seen_by_key = {_title_key(item.title): item for item in ratings}
+    predictable = [
+        rec for rec in heuristic.recommendations if _title_key(rec.title) not in seen_by_key
+    ]
+
+    result: dict | None = None
+    if predictable:
+        predictable_heuristic = RecommendResponse(
+            taste_summary=heuristic.taste_summary, recommendations=predictable
+        )
+        cached = _WEEKLY_PREDICTION_CACHE.get(cache_key)
+        cache_hit = False
+        if cached is not None:
+            expires_at, cached_result = cached
+            if expires_at > _now_monotonic():
+                _WEEKLY_PREDICTION_CACHE.move_to_end(cache_key)
+                cache_hit = True
+                result = cached_result
+            else:
+                del _WEEKLY_PREDICTION_CACHE[cache_key]
+        if result is None:
+            result = _call_nvidia_with_fallback(
+                _build_weekly_prompt(ratings, predictable_heuristic), api_key
+            )
+        if not cache_hit:
+            _WEEKLY_PREDICTION_CACHE[cache_key] = (_now_monotonic() + REFINE_CACHE_TTL_SECONDS, result)
             _WEEKLY_PREDICTION_CACHE.move_to_end(cache_key)
-            cache_hit = True
-            result = cached_result
-        else:
-            del _WEEKLY_PREDICTION_CACHE[cache_key]
-            result = None
-    else:
-        result = None
-    if result is None:
-        result = _call_nvidia_with_fallback(_build_weekly_prompt(ratings, heuristic), api_key)
+            while len(_WEEKLY_PREDICTION_CACHE) > REFINE_CACHE_MAX_ENTRIES:
+                _WEEKLY_PREDICTION_CACHE.popitem(last=False)
 
     by_title = {_title_key(rec.title): rec for rec in heuristic.recommendations}
     why_by_key: dict[str, str] = {}
-    for pick in result.get("picks", []):
+    for pick in (result or {}).get("picks", []):
         key = _title_key(str(pick.get("title", "")))
         if key not in by_title:
             continue
@@ -414,14 +442,10 @@ def predict_weekly_fit(
         if why:
             why_by_key[key] = why
 
-    if not cache_hit:
-        _WEEKLY_PREDICTION_CACHE[cache_key] = (_now_monotonic() + REFINE_CACHE_TTL_SECONDS, result)
-        _WEEKLY_PREDICTION_CACHE.move_to_end(cache_key)
-        while len(_WEEKLY_PREDICTION_CACHE) > REFINE_CACHE_MAX_ENTRIES:
-            _WEEKLY_PREDICTION_CACHE.popitem(last=False)
-
-    recommendations = [
-        rec.model_copy(update={"why": why_by_key.get(_title_key(rec.title), rec.why)})
-        for rec in heuristic.recommendations
-    ]
+    recommendations = []
+    for rec in heuristic.recommendations:
+        key = _title_key(rec.title)
+        seen_item = seen_by_key.get(key)
+        why = f"Ya la viste — {_rating_label(seen_item.rating)}." if seen_item else why_by_key.get(key, rec.why)
+        recommendations.append(rec.model_copy(update={"why": why}))
     return RecommendResponse(taste_summary=heuristic.taste_summary, recommendations=recommendations)

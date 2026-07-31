@@ -119,6 +119,11 @@ class WatchedItem(BaseModel):
     review: str
     created_at: str
     watched_date: str = ""
+    # pedido de Matías (2026-07-31): la bitácora (/history) mostraba estrellas
+    # 1-5 para todo, aunque los ratings de "manual"/"like" son sintéticos (ver
+    # RatedItem.source) — el frontend usa esto para mostrar "te encantó"/
+    # "te gustó"/"no te gustó" en vez de estrellas cuando no vino de Letterboxd
+    source: Literal["import", "manual", "like"] = "import"
 
 
 class WatchedHistoryResponse(BaseModel):

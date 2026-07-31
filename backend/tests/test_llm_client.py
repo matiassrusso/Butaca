@@ -437,6 +437,54 @@ def test_predict_weekly_fit_never_drops_a_candidate_the_llm_missed(monkeypatch) 
     assert result.recommendations[1].why == "heurística"  # el why original de HEURISTIC, sin tocar
 
 
+def test_predict_weekly_fit_skips_the_llm_for_a_title_the_user_already_rated(monkeypatch) -> None:
+    # bug reportado por Matías (2026-07-31, caso "The Odyssey"): /weekly no
+    # excluye del catálogo lo que el usuario ya puntuó (el set de 5 es fijo
+    # para todos), así que un candidato puede coincidir con un título de su
+    # historial. Pedirle al LLM que lo prediga igual lo mandaba como
+    # candidato Y como historial, y terminaba comparando el título consigo
+    # mismo. Estos casos no deben ni llegar al prompt del LLM.
+    monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
+    captured_prompts: list[str] = []
+
+    def fake_call(prompt: str, api_key: str) -> dict:
+        captured_prompts.append(prompt)
+        return {"picks": [{"title": "Fake Comedy", "why": "le va a encantar"}]}
+
+    monkeypatch.setattr(llm_client, "_call_nvidia_with_fallback", fake_call)
+
+    ratings = [RatedItem(title="Fake Thriller", rating=4.5, review="", source="import")]
+    result = llm_client.predict_weekly_fit(1, ratings, HEURISTIC)
+
+    by_title = {r.title: r.why for r in result.recommendations}
+    assert by_title["Fake Thriller"] == "Ya la viste — te encantó."
+    assert by_title["Fake Comedy"] == "Le va a encantar"
+    # "Fake Thriller" sigue apareciendo en "Reseñas completas" (es historial
+    # real), pero no como candidato a predecir — esa línea tiene su propio
+    # formato ("- título (año, tags: ...)") que no debe estar
+    assert "- Fake Thriller (2020" not in captured_prompts[0]
+    assert "- Fake Comedy (2019" in captured_prompts[0]
+
+
+def test_predict_weekly_fit_skips_the_llm_entirely_when_all_candidates_already_seen(monkeypatch) -> None:
+    monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
+
+    def fail_if_called(prompt: str, api_key: str) -> dict:
+        raise AssertionError("no debería llamar al LLM si ya vio las 5")
+
+    monkeypatch.setattr(llm_client, "_call_nvidia_with_fallback", fail_if_called)
+
+    ratings = [
+        RatedItem(title="Fake Thriller", rating=4.5, review="", source="import"),
+        RatedItem(title="Fake Comedy", rating=1.5, review="", source="import"),
+    ]
+    result = llm_client.predict_weekly_fit(1, ratings, HEURISTIC)
+
+    by_title = {r.title: r.why for r in result.recommendations}
+    assert by_title["Fake Thriller"] == "Ya la viste — te encantó."
+    assert by_title["Fake Comedy"] == "Ya la viste — no te gustó."
+
+
 def test_predict_weekly_fit_cache_is_isolated_per_user(monkeypatch) -> None:
     # bug evitado a propósito: las 5 películas semanales son las MISMAS para
     # todos, así que sin el user_id en la clave de cache el usuario 2

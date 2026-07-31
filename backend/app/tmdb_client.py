@@ -496,6 +496,15 @@ def fetch_weekly_trending() -> list[dict]:
 
     mapped = mapped[:WEEKLY_PICKS_COUNT]
 
+    # sin esto, todos los candidatos comparten el mismo vocabulario chico de
+    # ~12 tags de género — con un perfil de gusto diverso, positive_tags
+    # termina cubriéndolos todos y cualquier candidato matchea "completo",
+    # dando el mismo match_score a los 5 (reportado por Matías, 2026-07-31:
+    # "todas dan 81%"). Mismo enriquecimiento que ya reciben los candidatos
+    # de /recommend (fetch_personalized_candidates) — acá nunca se aplicaba.
+    for item in mapped:
+        _enrich_with_keyword_tags(item, "movie")
+
     # una sola semana vigente a la vez — no hace falta un LRU con TTL, la
     # semana vieja simplemente no se vuelve a pedir nunca más
     _WEEKLY_TRENDING_CACHE.clear()

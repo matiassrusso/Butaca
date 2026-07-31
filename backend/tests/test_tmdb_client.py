@@ -1108,6 +1108,8 @@ def test_fetch_weekly_trending_hits_the_real_trending_endpoint(monkeypatch) -> N
     tmdb_client._WEEKLY_TRENDING_CACHE.clear()
 
     def fake_get_json(url: str) -> dict:
+        if "/keywords" in url:
+            return {"keywords": []}
         if "/discover/movie" in url:
             return {
                 "results": [
@@ -1182,6 +1184,40 @@ def test_fetch_weekly_trending_paginates_when_page_one_lacks_enough_tagged_resul
     assert len(trending) == tmdb_client.WEEKLY_PICKS_COUNT
     tagged = [t for t in trending if t["title"].startswith("Tagged")]
     assert len(tagged) == tmdb_client.WEEKLY_PICKS_COUNT - tmdb_client.WEEKLY_CLASSIC_SLOTS
+
+
+def test_fetch_weekly_trending_enriches_candidates_with_keyword_tags(monkeypatch) -> None:
+    # bug reportado por Matías (2026-07-31): las 5 semanales daban el mismo
+    # match_score (81%) porque los candidatos solo tenían el vocabulario
+    # chico de tags de género (~12), que un perfil de gusto diverso satura
+    # completo — sin diferenciación real entre títulos. fetch_candidates
+    # (usado por /recommend) ya suma keywords de TMDb a sus candidatos;
+    # /weekly nunca lo hacía.
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    tmdb_client._WEEKLY_TRENDING_CACHE.clear()
+
+    def fake_get_json(url: str) -> dict:
+        if "/keywords" in url:
+            return {"keywords": [{"name": "heist"}]}
+        if "/discover/movie" in url:
+            return {
+                "results": [
+                    {"id": 900 + i, "title": f"Classic {i}", "release_date": "1985-01-01", "genre_ids": [28]}
+                    for i in range(tmdb_client.WEEKLY_CLASSIC_SLOTS)
+                ]
+            }
+        return {
+            "results": [
+                {"id": i, "title": f"Trending {i}", "release_date": "2020-01-01", "genre_ids": [28]}
+                for i in range(20)
+            ]
+        }
+
+    monkeypatch.setattr(tmdb_client, "_get_json", fake_get_json)
+
+    trending = tmdb_client.fetch_weekly_trending()
+
+    assert all("heist" in item["tags"] for item in trending)
 
 
 def test_fetch_weekly_trending_caches_within_the_same_iso_week(monkeypatch) -> None:

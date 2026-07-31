@@ -34,6 +34,7 @@ type WatchedItem = {
   review: string;
   created_at: string;
   watched_date: string;
+  source: "import" | "manual" | "like";
 };
 
 function formatSessionDate(value: string): string {
@@ -59,6 +60,20 @@ function stars(rating: number): string {
   return "★".repeat(Math.floor(rating)) + (rating % 1 ? "½" : "");
 }
 
+// los ratings "manual"/"like" son sintéticos (botón de Butaca, no estrellas
+// puestas en Letterboxd) — mostrarlos como estrellas 1-5 sería un dato
+// inventado, mismo criterio que ya se usa en el "why" del LLM (ver
+// llm_client._rating_label en el backend)
+function ratingLabel(rating: number): string {
+  if (rating >= 4) return "Te encantó";
+  if (rating <= 2) return "No te gustó";
+  return "Te gustó";
+}
+
+function sourceLabel(source: WatchedItem["source"]): string {
+  return source === "import" ? "Letterboxd" : "Butaca";
+}
+
 export default function History() {
   const { isAuthenticated, loading: authLoading, token } = useAuth();
   const [, navigate] = useLocation();
@@ -68,6 +83,7 @@ export default function History() {
   const [openSession, setOpenSession] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [openReview, setOpenReview] = useState<string | null>(null);
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
@@ -181,25 +197,45 @@ export default function History() {
                 <th className="text-left py-3 w-12">#</th>
                 <th className="text-left py-3">Título</th>
                 <th className="text-left py-3 hidden sm:table-cell">Vista</th>
+                <th className="text-left py-3 hidden md:table-cell">Dónde</th>
                 <th className="text-right py-3">Rating</th>
               </tr>
             </thead>
             <tbody>
-              {watchedItems.map((item, i) => (
-                <tr key={`${item.title}-${item.created_at}`} className="border-b border-foreground/5 hover:bg-foreground/[0.03]">
-                  <td className="py-4 font-mono text-xs text-muted-foreground">{String(i + 1).padStart(2, "0")}</td>
-                  <td className="py-4">
-                    <div className="font-medium">{item.title}</div>
-                    {item.review && (
-                      <div className="text-xs text-muted-foreground mt-1 line-clamp-1 max-w-md">{item.review}</div>
-                    )}
-                  </td>
-                  <td className="py-4 hidden sm:table-cell font-mono text-xs text-muted-foreground">
-                    {item.watched_date ? formatWatchedDate(item.watched_date) : formatSessionDate(item.created_at)}
-                  </td>
-                  <td className="py-4 text-right font-mono text-sm text-accent">{stars(item.rating)}</td>
-                </tr>
-              ))}
+              {watchedItems.map((item, i) => {
+                const rowKey = `${item.title}-${item.created_at}`;
+                const reviewOpen = openReview === rowKey;
+                return (
+                  <tr key={rowKey} className="border-b border-foreground/5 hover:bg-foreground/[0.03]">
+                    <td className="py-4 font-mono text-xs text-muted-foreground">{String(i + 1).padStart(2, "0")}</td>
+                    <td className="py-4">
+                      <div className="font-medium">{item.title}</div>
+                      {item.review && (
+                        <>
+                          <button
+                            onClick={() => setOpenReview(reviewOpen ? null : rowKey)}
+                            className="mt-1 font-mono text-[9px] uppercase tracking-widest text-accent underline decoration-dotted"
+                          >
+                            {reviewOpen ? "Ocultar reseña" : "Tu reseña"}
+                          </button>
+                          {reviewOpen && (
+                            <div className="text-xs text-muted-foreground mt-1 max-w-md">{item.review}</div>
+                          )}
+                        </>
+                      )}
+                    </td>
+                    <td className="py-4 hidden sm:table-cell font-mono text-xs text-muted-foreground">
+                      {item.watched_date ? formatWatchedDate(item.watched_date) : formatSessionDate(item.created_at)}
+                    </td>
+                    <td className="py-4 hidden md:table-cell font-mono text-xs text-muted-foreground">
+                      {sourceLabel(item.source)}
+                    </td>
+                    <td className="py-4 text-right font-mono text-sm text-accent">
+                      {item.source === "import" ? stars(item.rating) : ratingLabel(item.rating)}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}

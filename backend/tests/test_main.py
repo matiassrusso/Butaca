@@ -355,7 +355,10 @@ def test_rate_title_persists_to_watched_history() -> None:
     assert response.status_code == 201
     watched = client.get("/history/watched", headers=headers).json()["items"]
     assert any(
-        item["title"] == "Spider-Man: Brand New Day" and item["rating"] == 4.5 for item in watched
+        item["title"] == "Spider-Man: Brand New Day"
+        and item["rating"] == 4.5
+        and item["source"] == "manual"
+        for item in watched
     )
 
 
@@ -712,6 +715,24 @@ def test_watched_history_returns_items_from_uploaded_zip() -> None:
     assert items[0]["review"] == "psychological and intense"
     assert items[0]["created_at"]
     assert items[0]["watched_date"] == ""
+    assert items[0]["source"] == "import"
+
+
+def test_watched_history_distinguishes_import_from_manual_source() -> None:
+    # pedido de Matías (2026-07-31): la bitácora necesita saber si un rating
+    # vino de Letterboxd (estrellas reales) o de un botón de Butaca (rating
+    # sintético) para no mostrar ambos como si fueran el mismo tipo de dato
+    headers = _auth_headers("watchedsource")
+    _post_zip(headers, ratings_csv="Name,Rating,Review\nWhiplash,4.5,great")
+    client.post(
+        "/profile/rate", headers=headers, json={"title": "Manual Movie", "rating": 3.5}
+    )
+
+    items = client.get("/history/watched", headers=headers).json()["items"]
+
+    by_title = {item["title"]: item["source"] for item in items}
+    assert by_title["Whiplash"] == "import"
+    assert by_title["Manual Movie"] == "manual"
 
 
 def test_watched_history_returns_date_from_diary() -> None:
