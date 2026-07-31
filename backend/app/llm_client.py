@@ -46,7 +46,7 @@ _REFINE_CACHE: OrderedDict[tuple[str, tuple], tuple[float, dict]] = OrderedDict(
 # personalizados) pero rompería acá — las 5 películas semanales son
 # LITERALMENTE las mismas para todos, así que sin el user_id en la clave el
 # segundo usuario que pidiera /weekly recibiría la predicción del primero.
-_WEEKLY_PREDICTION_CACHE: OrderedDict[tuple[int, tuple], tuple[float, dict]] = OrderedDict()
+_VERDICT_CACHE: OrderedDict[tuple[int, tuple], tuple[float, dict]] = OrderedDict()
 
 
 class LlmError(Exception):
@@ -146,27 +146,71 @@ def _candidate_lines(heuristic: RecommendResponse) -> str:
     )
 
 
-def _build_prompt(ratings: list[RatedItem], mood: str, heuristic: RecommendResponse) -> str:
-    digest = _build_taste_digest(ratings)
-    ratings_lines = _ratings_lines(ratings)
-    candidate_lines = _candidate_lines(heuristic)
+# ─── Voz compartida del agente ──────────────────────────────────────────────
+# Pedido de Matías (2026-07-31): "TODA la página debería tener el mismo sistema
+# de LLM, con los mismos prompts y los mismos tonos, no importa si es en
+# /weekly o en /recommend o donde sea". Lo único que cambia entre pantallas es
+# la TAREA (elegir de un pool / opinar sobre títulos ya elegidos); quién habla,
+# cómo escribe y cómo trata los puntajes sale de acá, compartido por todos los
+# prompts. Si hay que ajustar el tono, se ajusta UNA vez, acá.
+
+AGENT_VOICE = (
+    "Sos el crítico de cine de Butaca: conocés a fondo el gusto de esta persona y le "
+    "hablás directo, en español argentino natural, como un amigo que sabe de cine y no "
+    "le va a mentir para quedar bien."
+)
+
+# Reglas de escritura. Nacieron de un bug concreto (2026-07-31): el prompt daba
+# frases de EJEMPLO ("te va a encantar porque...") como referencia de tono y el
+# modelo las copiaba literal — todos los textos arrancaban igual, "encantar" se
+# repetía en cada uno, y mezclar dos ejemplos produjo "tenés chances de
+# encantarte", que ni siquiera es español. Por eso son reglas, no ejemplos.
+WRITING_RULES = (
+    "CÓMO ESCRIBIR (reglas duras, valen para todo lo que devuelvas):\n"
+    "- Hablale SIEMPRE en segunda persona (vos). Nunca en tercera: nada de \"le va a "
+    "encantar\" ni \"su perfil\".\n"
+    "- Arrancá cada texto DISTINTO. Nada de que varios empiecen con la misma fórmula.\n"
+    "- Prohibido abrir con \"Te va a encantar porque\" en más de uno.\n"
+    "- Variá el verbo: enganchar, cerrar, funcionar, costar, aburrir, sorprender, "
+    "resonar, chocar. No uses \"encantar\" más de una vez en toda la respuesta.\n"
+    "- Si algo es tibio o no le va a gustar, decilo derecho y sin adornos: un \"no creo "
+    "que te cierre\" honesto vale más que un elogio inflado.\n"
+    "- Argentino natural, como se lo contarías a un amigo. Nada de construcciones raras: "
+    "\"tenés chances de encantarte\" está MAL, no es español.\n"
+    "- No repitas la misma estructura de comparación (\"al igual que con X o Y\") en "
+    "todos: a veces citá un solo título, a veces ninguno y describí el patrón.\n"
+    "- Citá siempre algo concreto de su perfil o su historial — nada de elogios genéricos "
+    "que podrían aplicar a cualquier usuario."
+)
+
+SCORE_RULE = (
+    "Si citás el puntaje de un título de 'Reseñas completas', usá EXACTAMENTE el que "
+    "aparece ahí (no inventes un número si el título dice 'sin puntaje numérico')."
+)
+
+
+def _profile_block(ratings: list[RatedItem]) -> str:
     return (
-        "Sos un crítico de cine que arma recomendaciones muy personalizadas en español.\n\n"
-        f"Perfil de gusto detectado: {digest}\n\n"
-        f"Reseñas completas del usuario (hasta 40):\n{ratings_lines}\n\n"
+        f"Perfil de gusto detectado: {_build_taste_digest(ratings)}\n\n"
+        f"Reseñas completas del usuario (hasta 40):\n{_ratings_lines(ratings)}"
+    )
+
+
+def _build_prompt(ratings: list[RatedItem], mood: str, heuristic: RecommendResponse) -> str:
+    """Tarea: elegir y ordenar picks de un pool de candidatos (/recommend).
+    La voz y las reglas de escritura son las mismas que en _build_verdict_prompt
+    — ver AGENT_VOICE arriba."""
+    return (
+        f"{AGENT_VOICE}\n\n"
+        f"{_profile_block(ratings)}\n\n"
         f"Mood de hoy: {mood or 'sin preferencia'}\n\n"
         "Candidatos ya filtrados por un motor heurístico. Elegí y ordená como mucho 6, "
         "usando SOLO títulos de esta lista (no inventes ni agregues otros):\n"
-        f"{candidate_lines}\n\n"
+        f"{_candidate_lines(heuristic)}\n\n"
         "Devolvé un resumen breve del gusto del usuario que use el perfil de arriba, no una "
-        "frase genérica. Para cada pick elegido, una razón personalizada de 1-2 frases que "
-        "nombre un patrón concreto del perfil o del historial (un tema recurrente, un tono, o "
-        "una comparación explícita con un título que ya puntuó) — nada de elogios genéricos "
-        "que podrían aplicar a cualquier usuario. Hablale DIRECTO en segunda persona (vos), "
-        "nunca en tercera: \"te gustó\", \"venís de puntuar\", nunca \"le gustó\" o \"su perfil\". "
-        "Si citás el puntaje de un título de "
-        "'Reseñas completas' de arriba, usá EXACTAMENTE el que aparece ahí (no inventes un "
-        "número si el título dice 'sin puntaje numérico').\n\n"
+        "frase genérica, y para cada pick elegido una razón de 1-2 frases.\n\n"
+        f"{WRITING_RULES}\n\n"
+        f"{SCORE_RULE}\n\n"
         "Respondé ÚNICAMENTE con un JSON válido, sin texto ni markdown alrededor, con esta forma "
         'exacta: {"taste_summary": "...", "picks": [{"title": "...", "why": "..."}, ...]}'
     )
@@ -339,65 +383,52 @@ def refine_recommendations(
     return RecommendResponse(taste_summary=taste_summary, recommendations=reordered[:6])
 
 
-def _build_weekly_prompt(ratings: list[RatedItem], heuristic: RecommendResponse) -> str:
-    # heuristic acá ya viene filtrado de títulos que el usuario puntuó antes
-    # (predict_weekly_fit los saca del pool que se le manda al LLM) — así que
-    # "las 5" no siempre es literal, de ahí el count dinámico en vez de
-    # hardcodeado (antes decía "las 5" aunque quedaran 4 o 3 candidatos).
-    digest = _build_taste_digest(ratings)
-    ratings_lines = _ratings_lines(ratings)
-    candidate_lines = _candidate_lines(heuristic)
+def _build_verdict_prompt(ratings: list[RatedItem], heuristic: RecommendResponse) -> str:
+    """Tarea: opinar sobre títulos YA elegidos (no elegirlos). La usan las
+    semanales de la home y el buscador — en los dos casos el set viene dado y
+    lo único que falta es el veredicto para esta persona.
+
+    `heuristic` acá ya viene filtrado de títulos que el usuario puntuó antes
+    (predict_fit los saca del pool), así que el count es dinámico en vez de
+    hardcodeado — antes decía "las 5" aunque quedaran 4 o 3."""
     count = len(heuristic.recommendations)
+    plural = count > 1
     return (
-        "Sos un crítico de cine que le predice a un usuario, hablándole directo a él, si le va a "
-        "gustar una película en particular, en español.\n\n"
-        f"Perfil de gusto detectado: {digest}\n\n"
-        f"Reseñas completas del usuario (hasta 40):\n{ratings_lines}\n\n"
-        f"Estas son {count} películas populares de esta semana en TMDb — no elegís cuáles "
-        "mostrar (eso ya está decidido y es igual para todos los usuarios), tu trabajo es "
-        f"predecir, para CADA UNA de las {count}, si le va a gustar o no a ESTE usuario en "
-        f"particular. Escribí sobre las {count}, ninguna de menos:\n{candidate_lines}\n\n"
-        "Para cada película, 1-2 frases en tono de predicción, hablándole DIRECTO en segunda "
-        "persona (vos), nunca en tercera (\"le va a encantar\", \"su perfil\").\n\n"
-        "CÓMO ESCRIBIR (reportado por Matías, 2026-07-31: los why salían calcados entre sí, "
-        "todos arrancando igual y repitiendo 'encantar'):\n"
-        "- Arrancá cada una DISTINTO. Nada de que varias empiecen con la misma fórmula.\n"
-        "- Prohibido abrir con \"Te va a encantar porque\" en más de una.\n"
-        "- Variá el verbo: enganchar, cerrar, funcionar, costar, aburrir, sorprender, "
-        "resonar, chocar. No uses \"encantar\" más de una vez en todo el conjunto.\n"
-        "- Si la predicción es tibia o negativa, decilo derecho y sin adornos — un 'no creo "
-        "que te cierre' honesto vale más que un elogio inflado.\n"
-        "- Escribí en argentino natural, como se lo contarías a un amigo. Nada de "
-        "construcciones raras: \"tenés chances de encantarte\" está MAL, no es español.\n"
-        "- No repitas la misma estructura de comparación (\"al igual que con X o Y\") en "
-        "todas: a veces citá un solo título, a veces ninguno y describí el patrón.\n\n"
-        "Que cada una cite un patrón concreto del perfil de arriba o una comparación con un "
-        "título que ya puntuó — nada de elogios genéricos que podrían aplicar a cualquier "
-        "usuario. Si citás el "
-        "puntaje de un título de 'Reseñas completas', usá EXACTAMENTE el que aparece ahí (no "
-        "inventes un número si el título dice 'sin puntaje numérico').\n\n"
+        f"{AGENT_VOICE}\n\n"
+        f"{_profile_block(ratings)}\n\n"
+        f"{'Estos son' if plural else 'Este es'} {count} "
+        f"{'títulos que ya están elegidos' if plural else 'título que ya está elegido'} — no "
+        f"elegís vos cuál mostrar. Tu trabajo es decir, para "
+        f"{'CADA UNO' if plural else 'ese título'}, si le va a gustar o no a ESTA persona en "
+        f"particular{f'. Escribí sobre {count}, ninguno de menos' if plural else ''}:\n"
+        f"{_candidate_lines(heuristic)}\n\n"
+        f"Para cada uno, 1-2 frases con tu veredicto.\n\n"
+        f"{WRITING_RULES}\n\n"
+        f"{SCORE_RULE}\n\n"
         "Respondé ÚNICAMENTE con un JSON válido, sin texto ni markdown alrededor, con esta forma "
-        'exacta: {"picks": [{"title": "...", "why": "..."}, ...]} — un elemento por cada una de '
-        f"las {count}, nunca menos."
+        'exacta: {"picks": [{"title": "...", "why": "..."}, ...]}'
+        + (f" — un elemento por cada uno de los {count}, nunca menos." if plural else ".")
     )
 
 
-def predict_weekly_fit(
+def predict_fit(
     user_id: int, ratings: list[RatedItem], heuristic: RecommendResponse
 ) -> RecommendResponse:
-    """Variante de refine_recommendations para las 'recomendaciones de la
-    semana' (pedido de Matías, 2026-07-30): mismo mecanismo de LLM, pero el
-    prompt pide una PREDICCIÓN ('¿le va a gustar o no?') en vez de una
-    justificación de por qué se eligió. A diferencia de refine_recommendations,
-    acá el set de películas es fijo — nunca se puede perder ninguna de las 5
-    aunque el LLM no las cubra todas o devuelva basura para alguna; en ese
-    caso esa una se queda con el why heurístico (mejor una card con razón
-    genérica que una card faltante)."""
+    """Veredicto del agente sobre títulos YA elegidos: '¿le va a gustar o no a
+    esta persona?'. La contracara de refine_recommendations, que además ELIGE
+    del pool.
+
+    La usan las semanales de la home (set fijo de 5, pedido 2026-07-30) y el
+    buscador (un solo título, pedido 2026-07-31) — misma voz, mismo prompt,
+    mismo manejo de 'ya la viste'. A diferencia de refine_recommendations el
+    set es fijo: ningún título se pierde aunque el LLM no lo cubra o devuelva
+    basura para alguno; en ese caso queda con su why heurístico (mejor una
+    card con razón genérica que una card faltante)."""
     api_key = os.environ.get("NVIDIA_API_KEY")
     if not api_key:
         raise LlmError("NVIDIA_API_KEY no configurada.")
     if not heuristic.recommendations:
-        raise LlmError("No hay candidatos para predecir.")
+        raise LlmError("No hay candidatos para opinar.")
 
     candidates = tuple(
         rec.tmdb_id if rec.tmdb_id is not None else rec.title.strip().lower()
@@ -423,25 +454,25 @@ def predict_weekly_fit(
         predictable_heuristic = RecommendResponse(
             taste_summary=heuristic.taste_summary, recommendations=predictable
         )
-        cached = _WEEKLY_PREDICTION_CACHE.get(cache_key)
+        cached = _VERDICT_CACHE.get(cache_key)
         cache_hit = False
         if cached is not None:
             expires_at, cached_result = cached
             if expires_at > _now_monotonic():
-                _WEEKLY_PREDICTION_CACHE.move_to_end(cache_key)
+                _VERDICT_CACHE.move_to_end(cache_key)
                 cache_hit = True
                 result = cached_result
             else:
-                del _WEEKLY_PREDICTION_CACHE[cache_key]
+                del _VERDICT_CACHE[cache_key]
         if result is None:
             result = _call_nvidia_with_fallback(
-                _build_weekly_prompt(ratings, predictable_heuristic), api_key
+                _build_verdict_prompt(ratings, predictable_heuristic), api_key
             )
         if not cache_hit:
-            _WEEKLY_PREDICTION_CACHE[cache_key] = (_now_monotonic() + REFINE_CACHE_TTL_SECONDS, result)
-            _WEEKLY_PREDICTION_CACHE.move_to_end(cache_key)
-            while len(_WEEKLY_PREDICTION_CACHE) > REFINE_CACHE_MAX_ENTRIES:
-                _WEEKLY_PREDICTION_CACHE.popitem(last=False)
+            _VERDICT_CACHE[cache_key] = (_now_monotonic() + REFINE_CACHE_TTL_SECONDS, result)
+            _VERDICT_CACHE.move_to_end(cache_key)
+            while len(_VERDICT_CACHE) > REFINE_CACHE_MAX_ENTRIES:
+                _VERDICT_CACHE.popitem(last=False)
 
     by_title = {_title_key(rec.title): rec for rec in heuristic.recommendations}
     why_by_key: dict[str, str] = {}

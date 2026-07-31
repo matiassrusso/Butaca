@@ -174,7 +174,7 @@ def catalog_stats() -> CatalogStatsResponse:
     return CatalogStatsResponse(**stats)
 
 
-def _differentiate_weekly_match_scores(heuristic: RecommendResponse) -> RecommendResponse:
+def _adjust_match_scores(heuristic: RecommendResponse) -> RecommendResponse:
     """El vocabulario de tags que usa recommend() para puntuar es chico
     (genero + KEYWORD_TAG_MAP, una allowlist angosta) y para un perfil de
     gusto activo/diverso satura rápido: varios candidatos terminan con el
@@ -207,7 +207,7 @@ def weekly_picks(user: sqlite3.Row | None = Depends(auth.get_optional_user)) -> 
     degrada así solo con ratings=[]. Con sesión y algo de historial, se
     puntúan contra el perfil real; si el LLM está configurado, además
     predice explícitamente si le va a gustar o no a esa persona en
-    particular (llm_client.predict_weekly_fit, prompt de predicción, no de
+    particular (llm_client.predict_fit, prompt de predicción, no de
     recomendación). exclude_seen=False a propósito: el catálogo acá es fijo
     (las mismas 5 para todos), así que ya haber puntuado/marcado vista
     alguna de esas 5 no puede hacerla desaparecer — solo afecta el
@@ -234,15 +234,79 @@ def weekly_picks(user: sqlite3.Row | None = Depends(auth.get_optional_user)) -> 
     heuristic = recommend(
         ratings, mood="", catalog=trending, also_seen=frozenset(), profile=profile, exclude_seen=False
     )
-    heuristic = _differentiate_weekly_match_scores(heuristic)
+    heuristic = _adjust_match_scores(heuristic)
 
     if user and ratings and llm_client.is_configured():
         try:
-            return llm_client.predict_weekly_fit(user["id"], ratings, heuristic)
+            return llm_client.predict_fit(user["id"], ratings, heuristic)
         except llm_client.LlmError as exc:
             logger.warning("Weekly LLM prediction failed, falling back to heuristic: %s", exc)
 
     return heuristic
+
+
+@app.get("/titles/search", response_model=OnboardingTitlesResponse)
+def titles_search(
+    q: str, user: sqlite3.Row = Depends(auth.get_current_user)
+) -> OnboardingTitlesResponse:
+    """Buscador de la navbar (pedido de Matías, 2026-07-31): cualquier peli o
+    serie, no solo las de la lista semilla del onboarding — de ahí
+    search_any_titles (/search/multi) y no search_titles (movies-only).
+    Degrada a lista vacía ante cualquier problema de TMDb: un buscador que
+    devuelve nada es molesto, uno que tira 502 rompe la navbar entera."""
+    if len(q.strip()) < 2 or not tmdb_client.is_configured():
+        return OnboardingTitlesResponse(titles=[])
+    try:
+        results = tmdb_client.search_any_titles(q)
+    except tmdb_client.TmdbError:
+        return OnboardingTitlesResponse(titles=[])
+    return OnboardingTitlesResponse(titles=[OnboardingTitle(**r) for r in results])
+
+
+@app.get("/titles/{tmdb_id}/verdict", response_model=Recommendation)
+def title_verdict(
+    tmdb_id: int, kind: str = "movie", user: sqlite3.Row = Depends(auth.get_current_user)
+) -> Recommendation:
+    """El veredicto de Butaca sobre UN título que el usuario buscó: cuánto le
+    va a gustar (match_score) y qué opina el agente (why).
+
+    Deliberadamente la misma tubería que /weekly, paso por paso — enriquecer
+    el título, enriquecer el historial, puntuar, ajustar score, veredicto del
+    LLM — para que el número y el tono sean IGUALES a los de la home y
+    /recommend. Ese es el pedido de Matías (2026-07-31): "que siempre sea lo
+    mismo no importa dónde estés"."""
+    if not tmdb_client.is_configured():
+        raise HTTPException(status_code=503, detail="Catálogo de TMDb no configurado.")
+    if kind not in ("movie", "series"):
+        raise HTTPException(status_code=400, detail="Tipo de título inválido.")
+
+    try:
+        item = tmdb_client.fetch_title_by_id(tmdb_id, kind=kind)
+    except tmdb_client.TmdbError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    if item is None:
+        raise HTTPException(status_code=404, detail="No encontré ese título en TMDb.")
+
+    tmdb_client.enrich_with_keyword_tags(item, kind)
+
+    ratings = _rebuild_ratings(user["id"])
+    profile = db.get_taste_profile(user["id"])
+    _enrich_loved_ratings_with_genre_tags(ratings)
+
+    heuristic = recommend(
+        ratings, mood="", catalog=[item], also_seen=frozenset(), profile=profile, exclude_seen=False
+    )
+    if not heuristic.recommendations:
+        raise HTTPException(status_code=502, detail="No pude analizar ese título.")
+    heuristic = _adjust_match_scores(heuristic)
+
+    if ratings and llm_client.is_configured():
+        try:
+            heuristic = llm_client.predict_fit(user["id"], ratings, heuristic)
+        except llm_client.LlmError as exc:
+            logger.warning("Title verdict LLM failed, falling back to heuristic: %s", exc)
+
+    return heuristic.recommendations[0]
 
 
 @app.get("/admin/stats")

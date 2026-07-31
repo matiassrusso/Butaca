@@ -769,6 +769,58 @@ def search_titles(query: str, limit: int = 8) -> list[dict]:
     return out
 
 
+MULTI_SEARCH_URL = "https://api.themoviedb.org/3/search/multi"
+
+
+def search_any_titles(query: str, limit: int = 8) -> list[dict]:
+    """Películas Y series para el buscador de la navbar (pedido de Matías,
+    2026-07-31: "que el usuario pueda buscar CUALQUIER película o serie").
+
+    search_titles() de arriba es movies-only a propósito — la lista semilla del
+    onboarding también lo es. Acá hace falta el otro alcance, así que va contra
+    /search/multi y se filtran las personas, que ese endpoint también devuelve."""
+    api_key = os.environ.get("TMDB_API_KEY")
+    if not api_key:
+        raise TmdbError("TMDB_API_KEY no configurada.")
+
+    query = query.strip()
+    if not query:
+        return []
+
+    params = {"api_key": api_key, "query": query, "language": "en-US", "include_adult": "false"}
+    data = _get_json(f"{MULTI_SEARCH_URL}?{urllib.parse.urlencode(params)}")
+
+    out: list[dict] = []
+    for raw in data.get("results", []):
+        media_type = raw.get("media_type")
+        if media_type not in ("movie", "tv"):
+            continue  # /search/multi mezcla personas
+        kind = "movie" if media_type == "movie" else "series"
+        title = (raw.get("title") if media_type == "movie" else raw.get("name")) or ""
+        title = title.strip()
+        date_value = (
+            raw.get("release_date") if media_type == "movie" else raw.get("first_air_date")
+        ) or ""
+        if not title or len(date_value) < 4:
+            continue
+        try:
+            year = int(date_value[:4])
+        except ValueError:
+            continue
+        out.append(
+            {
+                "tmdb_id": raw.get("id"),
+                "title": title,
+                "year": year,
+                "kind": kind,
+                "poster_path": _image_url(raw.get("poster_path"), "w500"),
+            }
+        )
+        if len(out) >= limit:
+            break
+    return out
+
+
 def fetch_title_by_id(tmdb_id: int, kind: str = "movie") -> dict | None:
     """Resuelve un título directo por su TMDb id, sin buscar por texto — para
     cuando ya lo tenemos (el `tmdb:movieId` que trae el feed RSS de username
@@ -987,6 +1039,14 @@ def _enrich_with_keyword_tags(item: dict, kind: str) -> None:
         len(keywords),
         sorted(extra) or "sin match",
     )
+
+
+def enrich_with_keyword_tags(item: dict, kind: str = "movie") -> None:
+    """Igual que el enriquecimiento que reciben los candidatos de /recommend y
+    /weekly, expuesto para un título suelto (el del buscador). Sin esto ese
+    título se puntúa con menos señal que el resto y su match_score no es
+    comparable con el de las otras pantallas."""
+    _enrich_with_keyword_tags(item, kind)
 
 
 def _resolve_person_id(name: str, expected_department: str | None = None) -> int | None:

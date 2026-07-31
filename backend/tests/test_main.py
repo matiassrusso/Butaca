@@ -644,6 +644,132 @@ def test_similar_titles_requires_auth() -> None:
     assert response.status_code == 401
 
 
+# ─── Buscador global (pedido de Matías, 2026-07-31) ─────────────────────────
+
+
+def test_titles_search_returns_movies_and_series(monkeypatch) -> None:
+    # el buscador de la navbar tiene que cubrir CUALQUIER título, no solo
+    # películas como el de onboarding
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.search_any_titles",
+        lambda q: [
+            {"tmdb_id": 1, "title": "A Movie", "year": 2020, "kind": "movie", "poster_path": None},
+            {"tmdb_id": 2, "title": "A Series", "year": 2019, "kind": "series", "poster_path": None},
+        ],
+    )
+    headers = _auth_headers("titlesearch")
+
+    response = client.get("/titles/search?q=algo", headers=headers)
+
+    assert response.status_code == 200
+    assert [t["kind"] for t in response.json()["titles"]] == ["movie", "series"]
+
+
+def test_titles_search_degrades_to_empty_instead_of_failing(monkeypatch) -> None:
+    # un buscador que tira 502 rompe la navbar entera en cada tecla
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+
+    def boom(q):
+        raise TmdbError("boom")
+
+    monkeypatch.setattr("backend.app.main.tmdb_client.search_any_titles", boom)
+    headers = _auth_headers("titlesearchfail")
+
+    response = client.get("/titles/search?q=algo", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json()["titles"] == []
+
+
+def test_titles_search_requires_auth() -> None:
+    assert client.get("/titles/search?q=algo").status_code == 401
+
+
+def test_title_verdict_scores_and_explains_a_searched_title(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.fetch_title_by_id",
+        lambda tmdb_id, kind: {
+            "tmdb_id": tmdb_id,
+            "title": "Searched Movie",
+            "year": 2020,
+            "kind": "movie",
+            "tags": ["dark", "psychological"],
+            "poster_path": None,
+            "backdrop_path": None,
+            "overview": "algo",
+            "vote_average": 8.0,
+        },
+    )
+    monkeypatch.setattr("backend.app.main.tmdb_client.enrich_with_keyword_tags", lambda item, kind: None)
+    monkeypatch.setattr(
+        "backend.app.main._rebuild_ratings",
+        lambda user_id: [RatedItem(title="Loved", rating=4.5, tags=["dark", "psychological"])],
+    )
+    headers = _auth_headers("verdictok")
+
+    response = client.get("/titles/42/verdict", headers=headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["title"] == "Searched Movie"
+    assert body["match_score"] > 50  # hay evidencia real, no el piso de "sin datos"
+    assert body["why"]
+
+
+def test_title_verdict_says_you_already_saw_it(monkeypatch) -> None:
+    # mismo trato que en /weekly: si ya la puntuaste, el veredicto lo dice
+    # derecho en vez de mandarle al LLM el título como candidato y como
+    # historial a la vez
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.fetch_title_by_id",
+        lambda tmdb_id, kind: {
+            "tmdb_id": tmdb_id,
+            "title": "Seen Movie",
+            "year": 2020,
+            "kind": "movie",
+            "tags": ["dark"],
+            "poster_path": None,
+            "backdrop_path": None,
+            "overview": "",
+            "vote_average": 7.0,
+        },
+    )
+    monkeypatch.setattr("backend.app.main.tmdb_client.enrich_with_keyword_tags", lambda item, kind: None)
+    monkeypatch.setattr(
+        "backend.app.main._rebuild_ratings",
+        lambda user_id: [RatedItem(title="Seen Movie", rating=4.5, tags=["dark"])],
+    )
+    headers = _auth_headers("verdictseen")
+
+    response = client.get("/titles/42/verdict", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json()["why"] == "Ya la viste — te encantó."
+
+
+def test_title_verdict_404s_for_an_unknown_tmdb_id(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setattr("backend.app.main.tmdb_client.fetch_title_by_id", lambda tmdb_id, kind: None)
+    headers = _auth_headers("verdict404")
+
+    assert client.get("/titles/999999/verdict", headers=headers).status_code == 404
+
+
+def test_title_verdict_rejects_an_invalid_kind(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    headers = _auth_headers("verdictbadkind")
+
+    assert client.get("/titles/1/verdict?kind=person", headers=headers).status_code == 400
+
+
+def test_title_verdict_requires_auth() -> None:
+    assert client.get("/titles/1/verdict").status_code == 401
+
+
 def test_feedback_rejects_invalid_status() -> None:
     headers = _auth_headers("badstatus")
     picks = _post_zip(headers).json()["recommendations"]
@@ -1580,7 +1706,7 @@ def test_weekly_uses_llm_prediction_when_configured(monkeypatch) -> None:
         "backend.app.main.tmdb_client.fetch_weekly_trending", lambda: _WEEKLY_TRENDING
     )
     monkeypatch.setattr(
-        "backend.app.main.llm_client.predict_weekly_fit",
+        "backend.app.main.llm_client.predict_fit",
         lambda user_id, ratings, heuristic: heuristic.model_copy(
             update={
                 "recommendations": [
@@ -1608,7 +1734,7 @@ def test_weekly_falls_back_to_heuristic_when_llm_fails(monkeypatch) -> None:
     def boom(user_id, ratings, heuristic):
         raise LlmError("boom")
 
-    monkeypatch.setattr("backend.app.main.llm_client.predict_weekly_fit", boom)
+    monkeypatch.setattr("backend.app.main.llm_client.predict_fit", boom)
     headers = _auth_headers("weeklyllmfail")
     client.post("/recommend/manual", headers=headers, json={"ratings": _MANUAL_RATINGS})
 
