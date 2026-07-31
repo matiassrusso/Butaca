@@ -15,7 +15,7 @@ If a session is drifting without moving hacia calidad de recomendación o clarid
 1. Definición corta del alcance (ver `docs/product-mvp.md`)
 2. Implementación en `backend` (FastAPI + SQLite) y/o `frontend` (React + Vite + Tailwind)
 3. Si hay varios agentes en paralelo: coordinación por `TASKS.md` (worktrees separados, marcar In Progress → Done, nunca mergear a `main` solo)
-4. Tests de backend en verde antes de cerrar (278 tests a la fecha)
+4. Tests de backend en verde antes de cerrar (282 tests a la fecha)
 5. Deployeado: frontend [butaca.xyz](https://butaca.xyz/) (Vercel), backend [api.butaca.xyz](https://api.butaca.xyz) (Render, free tier — cold start en la primera request)
 
 ## Key People
@@ -45,14 +45,14 @@ Solo yo (Matías), con posible coordinación multi-agente (Claude, Codex) docume
 
 > <!-- SESSION_STATE:START -->
 > **Last updated:** 2026-07-31 (sesión: 3 bugs de `/weekly` post-feedback +
-> 3 features pedidas — Unknown match, rate directo, variedad de épocas)
+> 3 features pedidas + otra ronda de 3 bugs encontrados probando las
+> features en producción — match_score plano, why autoreferencial, bitácora)
 >
 > ### ⚠️ Leer primero al retomar
 >
-> Todo lo del feedback fresco de la sesión anterior está resuelto y
-> deployado (push `bc52b2b`..`3562bd5`). Nada bloqueante pendiente — lo
-> único que falta es que Matías lo pruebe en producción una vez que Render
-> termine el redeploy, sobre todo:
+> Todo lo reportado hasta ahora está resuelto y deployado (push
+> `bc52b2b`..`0c2b95b`). Nada bloqueante pendiente — falta que Matías lo
+> pruebe en producción una vez que Render termine el redeploy, sobre todo:
 > - El botón **"¿No estás de acuerdo?"** del modal (vota similares de TMDb)
 >   — no se pudo probar en el browser local porque la TMDb key local está
 >   vieja (401), solo queda cubierto por los 6 tests de backend
@@ -61,8 +61,42 @@ Solo yo (Matías), con posible coordinación multi-agente (Claude, Codex) docume
 >   década que rota por semana ISO) — es una decisión de diseño de esta
 >   sesión, no algo que Matías haya especificado en detalle; puede querer
 >   ajustar el ratio 3/2 o las décadas (`tmdb_client.WEEKLY_CLASSIC_DECADES`).
+> - Si el match_score de las semanales sigue viéndose parejo entre sí para
+>   Matías (ya no debería ser IDÉNTICO como antes, pero con un perfil muy
+>   diverso puede seguir siendo un rango angosto — el vocabulario de tags
+>   sigue siendo chico incluso con keywords sumadas).
 >
-> **Qué se hizo el 2026-07-31** (4 commits, `c0d0931`..`3562bd5`, 263→278 tests):
+> **Qué se hizo el 2026-07-31, segunda ronda** (1 commit, `0c2b95b`,
+> 278→282 tests) — 3 bugs más encontrados por Matías probando las features
+> recién shippeadas en producción:
+> - **Las 5 semanales daban el mismo match_score (81%)**, sin importar el
+>   título. Causa: `fetch_weekly_trending` nunca enriquecía sus candidatos
+>   con keyword tags de TMDb (`_enrich_with_keyword_tags`, que sí corre
+>   para `/recommend` vía `fetch_personalized_candidates`) — con solo el
+>   vocabulario chico de ~12 tags de género, un perfil de gusto diverso
+>   satura `positive_tags` hasta cubrirlos todos, y cualquier candidato
+>   matchea "completo" dando el mismo bonus. Ahora los candidatos
+>   semanales también reciben keywords.
+> - **El why de "The Odyssey" se comparaba consigo misma** ("es una
+>   versión moderna de la misma mitología que ya amaste en tu The Odyssey
+>   puntuado"). Causa: `exclude_seen=False` en `/weekly` (fix de la
+>   primera ronda) permite que un candidato coincida con un título que el
+>   usuario ya puntuó — `predict_weekly_fit` se lo mandaba al LLM como
+>   candidato Y como historial al mismo tiempo, sin avisarle que eran la
+>   misma película. Ahora esos títulos se sacan del pool que se le manda
+>   al LLM y reciben directo un why honesto ("Ya la viste — te encantó.")
+>   con el rating real.
+> - **La bitácora (`/history`) mostraba estrellas 1-5 para todo rating**,
+>   aunque los de "Ya la vi"/modo manual son sintéticos (un botón, no
+>   estrellas puestas en Letterboxd) — mismo criterio que ya se había
+>   aplicado al why del LLM, pero nunca se llevó a esta pantalla. Nueva
+>   columna "Dónde" (Letterboxd/Butaca) + el rating se muestra como
+>   estrellas solo si `source="import"`, si no como texto ("te
+>   encantó"/"te gustó"/"no te gustó"). Sumado un toggle "Tu reseña" para
+>   ver la reseña completa de Letterboxd sin recortar (antes se cortaba a
+>   una línea siempre visible).
+>
+> **Qué se hizo el 2026-07-31, primera ronda** (4 commits, `c0d0931`..`3562bd5`, 263→278 tests):
 > - **3 bugs de `/weekly` reportados con capturas** (feedback fresco de la
 >   sesión anterior, en `NOTAS_DEL_PROYECTO.md`): solo 3 de 5 pelis
 >   (`fetch_weekly_trending` solo pedía página 1 de TMDb, ahora pagina
@@ -131,9 +165,9 @@ Solo yo (Matías), con posible coordinación multi-agente (Claude, Codex) docume
 >   deployado.
 >
 > **Pendientes reales** (detalle en `Pending` de `TASKS.md`):
-> - Que Matías pruebe en producción las 3 features nuevas del 2026-07-31
->   (Unknown match, rate directo + botón de desacuerdo, variedad de épocas)
->   y confirme si el diseño elegido le sirve tal cual.
+> - Que Matías pruebe en producción todo lo del 2026-07-31 (ambas rondas)
+>   y confirme si el diseño elegido para variedad de épocas y el
+>   match_score le sirve tal cual.
 > - Bauti reportó "Load failed" importando por username; **despriorizado por
 >   Matías**, sin logs no se pudo confirmar la causa.
 > - Borrar el proyecto viejo de Neon (São Paulo) — Matías lo tiene que
@@ -164,7 +198,7 @@ Solo yo (Matías), con posible coordinación multi-agente (Claude, Codex) docume
 > - `backend/requirements.txt` y `docs/architecture.md` siguen figurando
 >   como modificados en `git status` — sigue siendo solo ruido de line
 >   endings (CRLF/LF) de sesiones viejas, sin cambio real de contenido.
-> - Verificación de esta sesión (2026-07-31): 278 tests de backend +
+> - Verificación de la primera ronda (2026-07-31): 278 tests de backend +
 >   typecheck de frontend limpio + probado a mano en el dev server local
 >   (funciona porque `NVIDIA_API_KEY` sí anda local, aunque `TMDB_API_KEY`
 >   siga vieja — el modo manual "Sin cuenta" degrada a catálogo mock y
@@ -173,18 +207,39 @@ Solo yo (Matías), con posible coordinación multi-agente (Claude, Codex) docume
 >   visibles en la grilla y el modal. El botón "¿No estás de acuerdo?" no
 >   se vio en local porque el catálogo mock no trae `tmdb_id` — cubierto
 >   solo por tests de backend, sin verificación visual.
+> - Verificación de la segunda ronda (2026-07-31): 282 tests de backend +
+>   typecheck limpio + probado a mano en el dev server local, esta vez
+>   con un zip sintético real subido vía curl (`Whiplash`, rating 4.5,
+>   reseña con texto) además del modo manual — confirmado visualmente
+>   que `/history` muestra "Letterboxd" + estrellas + toggle "Tu reseña"
+>   para el ítem del zip, y "Butaca" + "Te encantó" (texto, sin
+>   estrellas) para los 11 ítems puntuados a mano en sesiones previas.
 > <!-- SESSION_STATE:END -->
 >
-> **2026-07-31 — 4 commits (`c0d0931`..`3562bd5`), 263→278 tests:** retomé
-> el feedback fresco de la sesión anterior. Arreglé los 3 bugs de
-> `/weekly` reportados con capturas (pelis incompletas, why con puntaje
-> inventado en likes); Matías probó en producción y encontró que la
-> corrección no alcanzaba del todo — 2 bugs más de fondo (`exclude_seen`
-> silencioso, falta de enrichment en `/weekly`) y el why seguía en
-> tercera persona en un caso puntual. Arreglados los 3, confirmado con
-> curl contra producción. Después implementé las 3 features pedidas en
-> orden: Unknown match, "Ya la vi" con rate directo + botón de
-> desacuerdo (vota similares de TMDb), variedad de épocas en las
+> **2026-07-31 (sesión 2) — 1 commit (`0c2b95b`), 278→282 tests:** Matías
+> probó en producción las features de la sesión anterior y encontró 3
+> bugs más: las 5 semanales daban el mismo match_score (81%, causa:
+> `/weekly` nunca enriquecía candidatos con keyword tags de TMDb, a
+> diferencia de `/recommend`), el why de "The Odyssey" se comparaba
+> consigo misma (causa: `exclude_seen=False` permite que un candidato
+> semanal coincida con algo ya puntuado, y el prompt del LLM no le
+> avisaba que eran la misma película — ahora esos casos ni pasan por el
+> LLM, reciben un why directo con el rating real), y la bitácora
+> (`/history`) mostraba estrellas 1-5 para ratings sintéticos del modo
+> manual (nueva columna "Dónde" + texto en vez de estrellas cuando
+> `source != "import"`, más un toggle "Tu reseña"). Los 3 arreglados y
+> verificados a mano con un zip real subido por curl.
+>
+> **2026-07-31 (sesión 1) — 4 commits (`c0d0931`..`3562bd5`), 263→278
+> tests:** retomé el feedback fresco de la sesión anterior. Arreglé los 3
+> bugs de `/weekly` reportados con capturas (pelis incompletas, why con
+> puntaje inventado en likes); Matías probó en producción y encontró que
+> la corrección no alcanzaba del todo — 2 bugs más de fondo
+> (`exclude_seen` silencioso, falta de enrichment en `/weekly`) y el why
+> seguía en tercera persona en un caso puntual. Arreglados los 3,
+> confirmado con curl contra producción. Después implementé las 3
+> features pedidas en orden: Unknown match, "Ya la vi" con rate directo +
+> botón de desacuerdo (vota similares de TMDb), variedad de épocas en las
 > semanales. Ver "Qué se hizo" arriba para el detalle completo.
 >
 > **2026-07-30 — sesión larga, 10 commits (`f7ef842`..`a889137`), 230→263
