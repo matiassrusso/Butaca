@@ -33,6 +33,25 @@ def test_recommend_excludes_titles_from_also_seen() -> None:
     assert response.recommendations == []
 
 
+def test_recommend_exclude_seen_false_keeps_already_rated_titles() -> None:
+    # /weekly necesita esto: su catálogo es un set fijo ("las mismas 5 para
+    # todo el mundo"), así que si el usuario ya puntuó/marcó vista alguna de
+    # esas 5, no puede desaparecer en silencio (bug reportado por Matías,
+    # 2026-07-31).
+    custom_catalog = [
+        {"title": "Custom Movie", "year": 2021, "kind": "movie", "tags": ["psychological", "dark"]},
+    ]
+
+    response = recommend(
+        ratings=[RatedItem(title="Custom Movie", rating=5, review="psychological")],
+        mood="",
+        catalog=custom_catalog,
+        exclude_seen=False,
+    )
+
+    assert [item.title for item in response.recommendations] == ["Custom Movie"]
+
+
 def test_recommend_uses_custom_catalog_when_provided() -> None:
     custom_catalog = [
         {"title": "Custom Movie", "year": 2021, "kind": "movie", "tags": ["psychological", "dark"]},

@@ -183,7 +183,10 @@ def weekly_picks(user: sqlite3.Row | None = Depends(auth.get_optional_user)) -> 
     puntúan contra el perfil real; si el LLM está configurado, además
     predice explícitamente si le va a gustar o no a esa persona en
     particular (llm_client.predict_weekly_fit, prompt de predicción, no de
-    recomendación)."""
+    recomendación). exclude_seen=False a propósito: el catálogo acá es fijo
+    (las mismas 5 para todos), así que ya haber puntuado/marcado vista
+    alguna de esas 5 no puede hacerla desaparecer — solo afecta el
+    match_score/why, nunca cuáles 5 se muestran."""
     if not tmdb_client.is_configured():
         raise HTTPException(status_code=503, detail="Catálogo de TMDb no configurado.")
     try:
@@ -196,7 +199,16 @@ def weekly_picks(user: sqlite3.Row | None = Depends(auth.get_optional_user)) -> 
     ratings = _rebuild_ratings(user["id"]) if user else []
     profile = db.get_taste_profile(user["id"]) if user else None
 
-    heuristic = recommend(ratings, mood="", catalog=trending, also_seen=frozenset(), profile=profile)
+    # sin esto, match_score queda ciego a cualquier título amado sin reseña
+    # (likes, favoritos, botones del modo manual) — se le escapaba a /weekly
+    # porque /recommend lo hace en _finish_recommend pero acá nunca se
+    # llamó (bug reportado por Matías, 2026-07-31: 50% match para Spider-Man
+    # pese a que el "why" del LLM sí sabía que lo había amado).
+    _enrich_loved_ratings_with_genre_tags(ratings)
+
+    heuristic = recommend(
+        ratings, mood="", catalog=trending, also_seen=frozenset(), profile=profile, exclude_seen=False
+    )
 
     if user and ratings and llm_client.is_configured():
         try:

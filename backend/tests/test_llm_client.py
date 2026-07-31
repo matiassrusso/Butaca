@@ -254,7 +254,7 @@ def test_build_prompt_does_not_cite_a_numeric_score_for_manual_ratings() -> None
 
     assert "Import Movie (4.5/5)" in prompt
     assert "Manual Movie (4.5/5)" not in prompt
-    assert "Manual Movie (le encantó, sin puntaje numérico)" in prompt
+    assert "Manual Movie (te encantó, sin puntaje numérico)" in prompt
 
 
 def test_build_prompt_does_not_cite_a_numeric_score_for_letterboxd_likes() -> None:
@@ -267,7 +267,7 @@ def test_build_prompt_does_not_cite_a_numeric_score_for_letterboxd_likes() -> No
     prompt = llm_client._build_prompt(ratings, "", HEURISTIC)
 
     assert "Liked Movie (4.5/5)" not in prompt
-    assert "Liked Movie (le encantó, sin puntaje numérico)" in prompt
+    assert "Liked Movie (te encantó, sin puntaje numérico)" in prompt
 
 
 def _fake_nvidia(call_count: list[int]):

@@ -269,10 +269,19 @@ def recommend(
     preference_ratings: list[RatedItem] | None = None,
     profile: dict | None = None,
     rejected_tags: Counter | None = None,
+    exclude_seen: bool = True,
 ) -> RecommendResponse:
     taste_ratings = ratings if preference_ratings is None else preference_ratings
     positive_tags, negative_tags = _collect_preference_tags(taste_ratings)
-    seen_titles = {_normalize(item.title) for item in ratings} | {_normalize(t) for t in also_seen}
+    # exclude_seen=False para /weekly: ese catálogo es un set fijo ("las
+    # mismas 5 para todo el mundo") — si se excluyera lo que el usuario ya
+    # puntuó/marcó visto, perdería películas de esa semana en silencio
+    # (bug reportado por Matías, 2026-07-31). ratings sigue usándose para
+    # puntuar (arriba), solo se lo saca de la exclusión.
+    seen_titles = (
+        ({_normalize(item.title) for item in ratings} if exclude_seen else set())
+        | {_normalize(t) for t in also_seen}
+    )
     mood_text = _normalize(mood)
     mood_tags = POSITIVE_HINTS.get(mood_text, [mood_text]) if mood_text else []
     profile_directors, profile_actors, top_decade = _profile_signals(profile)

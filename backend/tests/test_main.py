@@ -1395,6 +1395,57 @@ def test_weekly_scores_against_the_users_real_taste(monkeypatch) -> None:
     assert all(r["match_score"] > 50 for r in recs)
 
 
+def test_weekly_enriches_loved_ratings_with_tmdb_tags_before_scoring(monkeypatch) -> None:
+    # bug reportado por Matías (2026-07-31): un título amado sin reseña (like
+    # o favorito de Letterboxd, botón manual) llega de la DB sin tags
+    # (rated_items no tiene columna tags) y /weekly nunca llamaba a
+    # _enrich_loved_ratings_with_genre_tags como sí hace /recommend — así que
+    # match_score quedaba en el piso de 50 aunque el LLM sí supiera que lo
+    # había amado. Esto prueba que /weekly ahora pasa por el mismo
+    # enriquecimiento antes de puntuar.
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.fetch_weekly_trending", lambda: _WEEKLY_TRENDING
+    )
+    monkeypatch.setattr(
+        "backend.app.main._rebuild_ratings",
+        lambda user_id: [RatedItem(title="Loved Movie", rating=4.5, review="", source="like")],
+    )
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.search_title",
+        lambda title: {"tags": ["dark", "psychological"]} if title == "Loved Movie" else None,
+    )
+    headers = _auth_headers("weeklyenrich")
+
+    response = client.get("/weekly", headers=headers)
+
+    assert response.status_code == 200
+    assert all(r["match_score"] > 50 for r in response.json()["recommendations"])
+
+
+def test_weekly_keeps_all_five_even_when_user_already_rated_one(monkeypatch) -> None:
+    # bug reportado por Matías (2026-07-31): recommend() excluye del catálogo
+    # cualquier título que ya esté en el historial del usuario — correcto
+    # para /recommend, pero /weekly promete "las mismas 5 para todo el
+    # mundo" y perdía en silencio cualquiera de las 5 que el usuario ya
+    # hubiera puntuado o marcado como vista.
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.fetch_weekly_trending", lambda: _WEEKLY_TRENDING
+    )
+    monkeypatch.setattr(
+        "backend.app.main._rebuild_ratings",
+        lambda user_id: [RatedItem(title="Weekly Movie 0", rating=4.5, review="")],
+    )
+    headers = _auth_headers("weeklyalreadyseen")
+
+    response = client.get("/weekly", headers=headers)
+
+    assert response.status_code == 200
+    recs = response.json()["recommendations"]
+    assert {r["title"] for r in recs} == {m["title"] for m in _WEEKLY_TRENDING}
+
+
 def test_weekly_uses_llm_prediction_when_configured(monkeypatch) -> None:
     monkeypatch.setenv("TMDB_API_KEY", "fake-key")
     monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")

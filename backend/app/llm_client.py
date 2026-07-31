@@ -109,11 +109,14 @@ def _build_taste_digest(ratings: list[RatedItem]) -> str:
 
 
 def _rating_label(rating: float) -> str:
+    # segunda persona — el LLM cita esta frase literal en el "why" (reportado
+    # por Matías, 2026-07-31: decía "que ya puntuaste como 'le encantó'",
+    # mezclando el "puntuaste" en segunda persona con la frase en tercera)
     if rating >= 4:
-        return "le encantó"
+        return "te encantó"
     if rating <= 2:
-        return "no le gustó"
-    return "le gustó"
+        return "no te gustó"
+    return "te gustó"
 
 
 def _ratings_lines(ratings: list[RatedItem]) -> str:
