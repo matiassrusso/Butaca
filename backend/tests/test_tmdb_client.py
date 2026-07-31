@@ -468,6 +468,51 @@ def test_fetch_title_by_id_returns_none_on_tmdb_error(monkeypatch) -> None:
     assert tmdb_client.fetch_title_by_id(999999) is None
 
 
+def test_fetch_similar_titles_requires_api_key(monkeypatch) -> None:
+    monkeypatch.delenv("TMDB_API_KEY", raising=False)
+
+    with pytest.raises(tmdb_client.TmdbError):
+        tmdb_client.fetch_similar_titles(569094)
+
+
+def test_fetch_similar_titles_hits_the_similar_endpoint_and_filters_tagless(monkeypatch) -> None:
+    # botón "no estoy de acuerdo con el match" (pedido de Matías, 2026-07-31)
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+
+    def fake_get_json(url: str) -> dict:
+        assert "/movie/569094/similar" in url
+        return {
+            "results": [
+                {"id": 1, "title": "Tagged Movie", "release_date": "2020-01-01", "genre_ids": [28]},
+                {"id": 2, "title": "No Genres", "release_date": "2020-01-01", "genre_ids": []},
+            ]
+        }
+
+    monkeypatch.setattr(tmdb_client, "_get_json", fake_get_json)
+
+    similar = tmdb_client.fetch_similar_titles(569094)
+
+    assert [item["title"] for item in similar] == ["Tagged Movie"]
+
+
+def test_fetch_similar_titles_caps_at_the_limit(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        tmdb_client,
+        "_get_json",
+        lambda url: {
+            "results": [
+                {"id": i, "title": f"Movie {i}", "release_date": "2020-01-01", "genre_ids": [28]}
+                for i in range(20)
+            ]
+        },
+    )
+
+    similar = tmdb_client.fetch_similar_titles(1)
+
+    assert len(similar) == tmdb_client.SIMILAR_TITLES_LIMIT
+
+
 def test_resolve_person_id_defaults_to_first_result_sorted_by_popularity(monkeypatch) -> None:
     monkeypatch.setenv("TMDB_API_KEY", "fake-key")
 
@@ -1063,6 +1108,13 @@ def test_fetch_weekly_trending_hits_the_real_trending_endpoint(monkeypatch) -> N
     tmdb_client._WEEKLY_TRENDING_CACHE.clear()
 
     def fake_get_json(url: str) -> dict:
+        if "/discover/movie" in url:
+            return {
+                "results": [
+                    {"id": 900 + i, "title": f"Classic {i}", "release_date": "1985-01-01", "genre_ids": [28]}
+                    for i in range(8)
+                ]
+            }
         assert "/trending/movie/week" in url
         return {
             "results": [
@@ -1080,9 +1132,14 @@ def test_fetch_weekly_trending_hits_the_real_trending_endpoint(monkeypatch) -> N
 
     trending = tmdb_client.fetch_weekly_trending()
 
-    # capado a WEEKLY_PICKS_COUNT aunque TMDb devuelva más
+    # capado a WEEKLY_PICKS_COUNT aunque TMDb devuelva más, con
+    # WEEKLY_CLASSIC_SLOTS reservados para variedad de épocas (no todo
+    # trending puro)
     assert len(trending) == tmdb_client.WEEKLY_PICKS_COUNT
-    assert [t["title"] for t in trending] == [f"Trending {i}" for i in range(tmdb_client.WEEKLY_PICKS_COUNT)]
+    trending_count = sum(1 for t in trending if t["title"].startswith("Trending"))
+    classic_count = sum(1 for t in trending if t["title"].startswith("Classic"))
+    assert trending_count == tmdb_client.WEEKLY_PICKS_COUNT - tmdb_client.WEEKLY_CLASSIC_SLOTS
+    assert classic_count == tmdb_client.WEEKLY_CLASSIC_SLOTS
 
 
 def test_fetch_weekly_trending_paginates_when_page_one_lacks_enough_tagged_results(
@@ -1096,6 +1153,13 @@ def test_fetch_weekly_trending_paginates_when_page_one_lacks_enough_tagged_resul
     tmdb_client._WEEKLY_TRENDING_CACHE.clear()
 
     def fake_get_json(url: str) -> dict:
+        if "/discover/movie" in url:
+            return {
+                "results": [
+                    {"id": 900 + i, "title": f"Classic {i}", "release_date": "1985-01-01", "genre_ids": [28]}
+                    for i in range(tmdb_client.WEEKLY_CLASSIC_SLOTS)
+                ]
+            }
         if "page=1" in url:
             # sin genre_ids conocidos ni overview con tags -> _map_result los tira
             return {
@@ -1116,7 +1180,8 @@ def test_fetch_weekly_trending_paginates_when_page_one_lacks_enough_tagged_resul
     trending = tmdb_client.fetch_weekly_trending()
 
     assert len(trending) == tmdb_client.WEEKLY_PICKS_COUNT
-    assert all(t["title"].startswith("Tagged") for t in trending)
+    tagged = [t for t in trending if t["title"].startswith("Tagged")]
+    assert len(tagged) == tmdb_client.WEEKLY_PICKS_COUNT - tmdb_client.WEEKLY_CLASSIC_SLOTS
 
 
 def test_fetch_weekly_trending_caches_within_the_same_iso_week(monkeypatch) -> None:
@@ -1136,9 +1201,54 @@ def test_fetch_weekly_trending_caches_within_the_same_iso_week(monkeypatch) -> N
     monkeypatch.setattr(tmdb_client, "_get_json", fake_get_json)
 
     tmdb_client.fetch_weekly_trending()
+    calls_after_first = len(calls)
     tmdb_client.fetch_weekly_trending()
 
-    assert len(calls) == 1  # segunda llamada sirve del cache, no repagina
+    assert len(calls) == calls_after_first  # segunda llamada sirve del cache, no vuelve a pedir nada
+
+
+def test_fetch_weekly_classics_filters_by_the_rotating_decade(monkeypatch) -> None:
+    # variedad de épocas (pedido de Matías, 2026-07-31): la década se arma
+    # con primary_release_date, no queda hardcodeada
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    captured = {}
+
+    def fake_get_json(url: str) -> dict:
+        captured["url"] = url
+        return {"results": [{"id": 1, "title": "Classic", "release_date": "1985-01-01", "genre_ids": [28]}]}
+
+    monkeypatch.setattr(tmdb_client, "_get_json", fake_get_json)
+
+    decade = tmdb_client.WEEKLY_CLASSIC_DECADES[tmdb_client._iso_week_number() % len(tmdb_client.WEEKLY_CLASSIC_DECADES)]
+    picks = tmdb_client._fetch_weekly_classics("fake-key", set(), 2)
+
+    assert f"primary_release_date.gte={decade}-01-01" in captured["url"]
+    assert f"primary_release_date.lte={decade + 9}-12-31" in captured["url"]
+    assert picks[0]["title"] == "Classic"
+
+
+def test_fetch_weekly_trending_backfills_with_trending_when_classics_fail(monkeypatch) -> None:
+    # variedad de épocas es best-effort — si discover falla, las 5 siguen
+    # completas con más trending en vez de devolver menos
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    tmdb_client._WEEKLY_TRENDING_CACHE.clear()
+
+    def fake_get_json(url: str) -> dict:
+        if "/discover/movie" in url:
+            raise tmdb_client.TmdbError("boom")
+        return {
+            "results": [
+                {"id": i, "title": f"Trending {i}", "release_date": "2020-01-01", "genre_ids": [28]}
+                for i in range(20)
+            ]
+        }
+
+    monkeypatch.setattr(tmdb_client, "_get_json", fake_get_json)
+
+    weekly = tmdb_client.fetch_weekly_trending()
+
+    assert len(weekly) == tmdb_client.WEEKLY_PICKS_COUNT
+    assert all(t["title"].startswith("Trending") for t in weekly)
 
 
 def test_fetch_weekly_trending_does_not_alias_the_cached_dict(monkeypatch) -> None:

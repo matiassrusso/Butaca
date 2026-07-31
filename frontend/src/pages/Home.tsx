@@ -8,6 +8,7 @@ import { MovieModal, type FeedbackStatus, type Recommendation } from "@/componen
 import { PageTransition } from "@/components/PageTransition";
 import { API_BASE_URL, useAuth } from "@/hooks/useAuth";
 import { useTiltCard } from "@/hooks/useTiltCard";
+import { isUnknownMatch } from "@/lib/match";
 
 type RecommendationSession = {
   id: number;
@@ -110,7 +111,7 @@ function CurrentPickCard({ rec, onSelect }: { rec: Recommendation; onSelect: () 
           className="absolute top-2 right-2 px-2 py-1 bg-accent text-accent-foreground font-mono text-xs font-bold"
           style={{ transform: "translateZ(40px)" }}
         >
-          {rec.match_score}%
+          {isUnknownMatch(rec.match_score) ? "Match desconocido" : `${rec.match_score}%`}
         </div>
       </div>
       <h3 className="text-lg font-black uppercase tracking-tighter leading-none mb-1 group-hover:text-accent transition-colors">
@@ -187,7 +188,7 @@ function WeeklyPickCard({
             className="absolute top-2 right-2 px-2 py-1 bg-accent text-accent-foreground font-mono text-xs font-bold"
             style={{ transform: "translateZ(40px)" }}
           >
-            {rec.match_score}% match
+            {isUnknownMatch(rec.match_score) ? "Match desconocido" : `${rec.match_score}% match`}
           </div>
         )}
       </div>
@@ -235,6 +236,32 @@ export default function Home() {
       setFeedbackState((prev) => ({ ...prev, [recommendationId]: status }));
     } catch {
       toast.error("No se pudo guardar el feedback.");
+    }
+  }
+
+  // pedido de Matías (2026-07-31): "Ya la vi" → elegir cuánto te gustó queda
+  // en el perfil real (rated_items) — a diferencia de submitFeedback, esto
+  // no depende de un recommendation_id real, así que anda también desde las
+  // semanales (id -1, sin fila en recommendations_served). title/tmdbId
+  // opcionales: el botón "no estoy de acuerdo" del modal reusa esto para
+  // votar películas similares, no rec en sí.
+  async function rateTitle(rec: Recommendation, rating: number, title?: string, tmdbId?: number | null) {
+    if (!token) return;
+    const finalTitle = title ?? rec.title;
+    try {
+      const response = await fetch(`${API_BASE_URL}/profile/rate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          title: finalTitle,
+          rating,
+          tmdb_id: title ? tmdbId ?? null : rec.tmdb_id,
+        }),
+      });
+      if (!response.ok) throw new Error();
+      toast.success(`Guardado en tu perfil: ${finalTitle}`);
+    } catch {
+      toast.error("No se pudo guardar el puntaje.");
     }
   }
 
@@ -396,7 +423,8 @@ export default function Home() {
             <div className="h-px flex-grow bg-foreground/10" />
           </div>
           <p className="font-serif italic text-lg text-muted-foreground mb-10 max-w-2xl">
-            Las 5 más populares de esta semana en TMDb, las mismas para todo el mundo —
+            3 de tendencia esta semana + 2 de otras épocas, todo TMDb real — las mismas para
+            todo el mundo —
             {isAuthenticated ? " esto es lo que tu perfil dice sobre cada una." : " logueate para ver si van con vos."}
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
@@ -493,6 +521,7 @@ export default function Home() {
           feedback={feedbackState[selectedRec.id]}
           onClose={() => setSelectedRec(null)}
           onFeedback={(status) => submitFeedback(selectedRec.id, status)}
+          onRate={(rating, title, tmdbId) => rateTitle(selectedRec, rating, title, tmdbId)}
         />
       )}
     </PageTransition>

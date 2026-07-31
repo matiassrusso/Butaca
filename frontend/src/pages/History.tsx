@@ -4,6 +4,7 @@ import { useLocation } from "wouter";
 
 import { PageTransition } from "@/components/PageTransition";
 import { API_BASE_URL, useAuth } from "@/hooks/useAuth";
+import { isUnknownMatch } from "@/lib/match";
 
 type Recommendation = {
   id: number;
@@ -263,7 +264,7 @@ export default function History() {
                                 </div>
                               )}
                               <div className="absolute top-2 right-2 px-2 py-1 bg-accent text-accent-foreground font-mono text-xs font-bold">
-                                {rec.match_score}%
+                                {isUnknownMatch(rec.match_score) ? "S/D" : `${rec.match_score}%`}
                               </div>
                             </div>
                             <h3 className="text-lg font-black uppercase tracking-tighter leading-none mb-1">

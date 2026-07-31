@@ -392,6 +392,16 @@ WEEKLY_PICKS_COUNT = 5
 # _map_result descarta los sin tags, así que la página 1 sola a veces no
 # alcanza para 5 (bug reportado por Matías, 2026-07-31: solo 3 de 5)
 WEEKLY_TRENDING_MAX_PAGES = 3
+# de las 5 semanales, cuántas se reservan para variedad de épocas en vez de
+# trending puro — sin esto las 5 daban siempre estrenos del año actual,
+# porque /trending/movie/week sesga a lo nuevo por diseño (reportado por
+# Matías, 2026-07-31: "las 5 dieron todas de 2026")
+WEEKLY_CLASSIC_SLOTS = 2
+# rota una década por semana ISO en vez de siempre la misma — sigue siendo
+# 100% TMDb real (discover ordenado por vote_average), no una lista armada
+# a mano; año de inicio de cada década que /discover filtra con
+# primary_release_date
+WEEKLY_CLASSIC_DECADES = [1970, 1980, 1990, 2000, 2010]
 # cacheado por semana ISO (no por TTL fijo): "recomendaciones semanales,
 # iguales para todos" (pedido de Matías) — todos los usuarios que pidan
 # /weekly en la misma semana tienen que ver EXACTAMENTE el mismo set de
@@ -404,12 +414,66 @@ def _iso_week_key() -> str:
     return f"{year}-W{week:02d}"
 
 
+def _iso_week_number() -> int:
+    _, week, _ = datetime.datetime.now(datetime.timezone.utc).isocalendar()
+    return week
+
+
+def _fetch_trending_movies(api_key: str, seen_ids: set[int], count: int) -> list[dict]:
+    picks: list[dict] = []
+    if count <= 0:
+        return picks
+    for page in range(1, WEEKLY_TRENDING_MAX_PAGES + 1):
+        params = {"api_key": api_key, "language": "en-US", "page": page}
+        data = _get_json(f"{WEEKLY_TRENDING_URL}?{urllib.parse.urlencode(params)}")
+        for raw in data.get("results", []):
+            result = _map_result(raw, "movie", GENRE_ID_TAG_MAP)
+            if result is None or result["tmdb_id"] in seen_ids:
+                continue
+            seen_ids.add(result["tmdb_id"])
+            picks.append(result)
+            if len(picks) >= count:
+                break
+        if len(picks) >= count:
+            break
+    return picks
+
+
+def _fetch_weekly_classics(api_key: str, seen_ids: set[int], count: int) -> list[dict]:
+    """Lo mejor puntuado (vote_average, vote_count.gte para filtrar ruido)
+    de una década que rota cada semana ISO — variedad de épocas sin
+    curación a mano, ver WEEKLY_CLASSIC_SLOTS."""
+    if count <= 0:
+        return []
+    decade = WEEKLY_CLASSIC_DECADES[_iso_week_number() % len(WEEKLY_CLASSIC_DECADES)]
+    params = {
+        "api_key": api_key,
+        "language": "en-US",
+        "sort_by": "vote_average.desc",
+        "vote_count.gte": 1000,
+        "primary_release_date.gte": f"{decade}-01-01",
+        "primary_release_date.lte": f"{decade + 9}-12-31",
+    }
+    data = _get_json(f"{DISCOVER_URL}?{urllib.parse.urlencode(params)}")
+    picks: list[dict] = []
+    for raw in data.get("results", []):
+        result = _map_result(raw, "movie", GENRE_ID_TAG_MAP)
+        if result is None or result["tmdb_id"] in seen_ids:
+            continue
+        seen_ids.add(result["tmdb_id"])
+        picks.append(result)
+        if len(picks) >= count:
+            break
+    return picks
+
+
 def fetch_weekly_trending() -> list[dict]:
-    """Las 5 películas más populares de la semana según TMDb
-    (/trending/movie/week) — mismo shape que fetch_candidates (via
+    """5 películas semanales: 3 de tendencia real de TMDb
+    (/trending/movie/week) + 2 de variedad de épocas (WEEKLY_CLASSIC_SLOTS,
+    ver _fetch_weekly_classics) — mismo shape que fetch_candidates (via
     _map_result), mismas para todos los usuarios durante toda la semana
-    ISO actual. No hay curación editorial acá a propósito: es data real de
-    TMDb, no una lista armada a mano."""
+    ISO actual. No hay curación editorial a mano en ningún lado: ambas
+    fuentes son consultas reales a TMDb, no una lista armada a mano."""
     api_key = os.environ.get("TMDB_API_KEY")
     if not api_key:
         raise TmdbError("TMDB_API_KEY no configurada.")
@@ -419,21 +483,18 @@ def fetch_weekly_trending() -> list[dict]:
     if cached is not None:
         return _clone_items(cached)
 
-    mapped: list[dict] = []
     seen_ids: set[int] = set()
-    for page in range(1, WEEKLY_TRENDING_MAX_PAGES + 1):
-        params = {"api_key": api_key, "language": "en-US", "page": page}
-        data = _get_json(f"{WEEKLY_TRENDING_URL}?{urllib.parse.urlencode(params)}")
-        for raw in data.get("results", []):
-            result = _map_result(raw, "movie", GENRE_ID_TAG_MAP)
-            if result is None or result["tmdb_id"] in seen_ids:
-                continue
-            seen_ids.add(result["tmdb_id"])
-            mapped.append(result)
-            if len(mapped) >= WEEKLY_PICKS_COUNT:
-                break
-        if len(mapped) >= WEEKLY_PICKS_COUNT:
-            break
+    mapped = _fetch_trending_movies(api_key, seen_ids, WEEKLY_PICKS_COUNT - WEEKLY_CLASSIC_SLOTS)
+
+    try:
+        mapped += _fetch_weekly_classics(api_key, seen_ids, WEEKLY_CLASSIC_SLOTS)
+    except TmdbError:
+        pass  # variedad de épocas es best-effort — si falla, se rellena abajo con más trending
+
+    if len(mapped) < WEEKLY_PICKS_COUNT:
+        mapped += _fetch_trending_movies(api_key, seen_ids, WEEKLY_PICKS_COUNT - len(mapped))
+
+    mapped = mapped[:WEEKLY_PICKS_COUNT]
 
     # una sola semana vigente a la vez — no hace falta un LRU con TTL, la
     # semana vieja simplemente no se vuelve a pedir nunca más
@@ -763,6 +824,33 @@ def fetch_title_by_id(tmdb_id: int, kind: str = "movie") -> dict | None:
     while len(_TITLE_BY_ID_CACHE) > TITLE_CACHE_MAX_ENTRIES:
         _TITLE_BY_ID_CACHE.popitem(last=False)
     return result.copy() if result else None
+
+
+SIMILAR_TITLES_LIMIT = 6
+
+
+def fetch_similar_titles(tmdb_id: int, kind: str = "movie") -> list[dict]:
+    """Pedido de Matías (2026-07-31): botón "no estoy de acuerdo con el
+    match" — si un título se lo trae sin evidencia real en su perfil (ej.
+    ama a Spider-Man pero nunca puntuó nada de esa saga), le muestra
+    similares de TMDb (/movie/{id}/similar) para que vote y esa saga deje
+    de estar "en blanco". Mismo shape que fetch_candidates (vía
+    _map_result), mismo criterio: sin tags mapeables, se descarta."""
+    api_key = os.environ.get("TMDB_API_KEY")
+    if not api_key:
+        raise TmdbError("TMDB_API_KEY no configurada.")
+
+    genre_tag_map = GENRE_ID_TAG_MAP if kind == "movie" else TV_GENRE_ID_TAG_MAP
+    endpoint = _tmdb_endpoint_kind(kind)
+    data = _get_json(
+        f"https://api.themoviedb.org/3/{endpoint}/{tmdb_id}/similar?api_key={api_key}&language=en-US"
+    )
+    mapped = [
+        result
+        for raw in data.get("results", [])
+        if (result := _map_result(raw, kind, genre_tag_map)) is not None
+    ]
+    return mapped[:SIMILAR_TITLES_LIMIT]
 
 
 def fetch_taste_credits(tmdb_id: int, kind: str = "movie") -> dict:

@@ -340,6 +340,35 @@ def test_feedback_rejects_recommendation_from_another_user() -> None:
     assert response.status_code == 404
 
 
+def test_rate_title_persists_to_watched_history() -> None:
+    # pedido de Matías (2026-07-31): "Ya la vi" en el modal ahora puede
+    # puntuar directo, sin recommendation_id — tiene que andar también para
+    # picks de /weekly, que no tienen fila en recommendations_served.
+    headers = _auth_headers("ratetitle")
+
+    response = client.post(
+        "/profile/rate",
+        headers=headers,
+        json={"title": "Spider-Man: Brand New Day", "rating": 4.5, "tmdb_id": 969681},
+    )
+
+    assert response.status_code == 201
+    watched = client.get("/history/watched", headers=headers).json()["items"]
+    assert any(
+        item["title"] == "Spider-Man: Brand New Day" and item["rating"] == 4.5 for item in watched
+    )
+
+
+def test_rate_title_rejects_out_of_range_rating() -> None:
+    headers = _auth_headers("ratebadrange")
+
+    response = client.post(
+        "/profile/rate", headers=headers, json={"title": "X", "rating": 6}
+    )
+
+    assert response.status_code == 422
+
+
 def test_recommend_zip_falls_back_to_mock_catalog_when_tmdb_fails(monkeypatch) -> None:
     monkeypatch.setenv("TMDB_API_KEY", "fake-key")
 
@@ -576,6 +605,38 @@ def test_movie_details_requires_tmdb_configured() -> None:
 
 def test_movie_details_requires_auth() -> None:
     response = client.get("/movies/42/details")
+
+    assert response.status_code == 401
+
+
+def test_similar_titles_returns_onboarding_title_shape(monkeypatch) -> None:
+    # botón "no estoy de acuerdo con el match" (pedido de Matías, 2026-07-31)
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.fetch_similar_titles",
+        lambda tmdb_id, kind: [
+            {"tmdb_id": 2, "title": "Similar Movie", "year": 2010, "kind": "movie", "poster_path": None}
+        ],
+    )
+
+    headers = _auth_headers("similartitles")
+    response = client.get("/movies/1/similar", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json()["titles"] == [
+        {"title": "Similar Movie", "year": 2010, "kind": "movie", "tmdb_id": 2, "poster_path": None, "rating": None}
+    ]
+
+
+def test_similar_titles_requires_tmdb_configured() -> None:
+    headers = _auth_headers("similarnokey")
+    response = client.get("/movies/1/similar", headers=headers)
+
+    assert response.status_code == 503
+
+
+def test_similar_titles_requires_auth() -> None:
+    response = client.get("/movies/1/similar")
 
     assert response.status_code == 401
 

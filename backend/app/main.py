@@ -36,6 +36,7 @@ from .models import (
     PasswordResetRequest,
     ProfileRecommendRequest,
     RatedItem,
+    RateTitleRequest,
     RecommendationHistoryResponse,
     PasswordResetStartResponse,
     Recommendation,
@@ -176,8 +177,10 @@ def catalog_stats() -> CatalogStatsResponse:
 @app.get("/weekly", response_model=RecommendResponse)
 def weekly_picks(user: sqlite3.Row | None = Depends(auth.get_optional_user)) -> RecommendResponse:
     """Pedido de Matías (2026-07-30): 5 recomendaciones semanales, iguales
-    para todos — TMDb /trending/movie/week real (sin curación editorial a
-    mano). Público: sin sesión (o sin historial) se devuelven sin
+    para todos — 3 de TMDb /trending/movie/week real + 2 de variedad de
+    épocas (tmdb_client.WEEKLY_CLASSIC_SLOTS, pedido 2026-07-31: antes las
+    5 daban siempre estrenos del año actual), sin curación editorial a
+    mano en ningún lado. Público: sin sesión (o sin historial) se devuelven sin
     personalizar, con match_score neutro y why genérico — recommend() ya
     degrada así solo con ratings=[]. Con sesión y algo de historial, se
     puntúan contra el perfil real; si el LLM está configurado, además
@@ -972,6 +975,35 @@ def movie_details(
     return MovieDetails(cast=cast, trailer_key=trailer_key, providers=providers)
 
 
+@app.get("/movies/{tmdb_id}/similar", response_model=OnboardingTitlesResponse)
+def similar_titles(
+    tmdb_id: int, kind: str = "movie", user: sqlite3.Row = Depends(auth.get_current_user)
+) -> OnboardingTitlesResponse:
+    """Botón "no estoy de acuerdo con el match" del modal (pedido de
+    Matías, 2026-07-31): si un título llega sin evidencia real en el
+    perfil (ej. ama a Spider-Man pero nunca puntuó nada de esa saga),
+    ofrece similares de TMDb para votar — mismo shape que
+    /onboarding/titles, así el frontend reusa la misma grilla de rating."""
+    if not tmdb_client.is_configured():
+        raise HTTPException(status_code=503, detail="Catálogo de TMDb no configurado.")
+    try:
+        similar = tmdb_client.fetch_similar_titles(tmdb_id, kind=kind)
+    except tmdb_client.TmdbError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return OnboardingTitlesResponse(
+        titles=[
+            OnboardingTitle(
+                title=item["title"],
+                year=item["year"],
+                kind=item["kind"],
+                tmdb_id=item.get("tmdb_id"),
+                poster_path=item.get("poster_path"),
+            )
+            for item in similar
+        ]
+    )
+
+
 @app.post("/feedback", status_code=201)
 def submit_feedback(
     payload: FeedbackRequest, user: sqlite3.Row = Depends(auth.get_current_user)
@@ -981,4 +1013,20 @@ def submit_feedback(
         raise HTTPException(status_code=404, detail="Recomendación no encontrada.")
 
     db.save_feedback(user["id"], payload.recommendation_id, payload.status)
+    return {"status": "ok"}
+
+
+@app.post("/profile/rate", status_code=201)
+def rate_title(
+    payload: RateTitleRequest, user: sqlite3.Row = Depends(auth.get_current_user)
+) -> dict[str, str]:
+    """Puntuar un título suelto (pedido de Matías, 2026-07-31): "Ya la vi" en
+    el modal ahora ofrece un mini-menú (me encantó/bien/no me gustó) en vez
+    de solo marcarla vista, y el rating queda en rated_items para
+    recomendaciones futuras. source="manual" — mismo criterio que el modo
+    "Sin cuenta": un rating sintético elegido de un menú, no un puntaje
+    preciso, así que el "why" no debe citarlo como si lo fuera."""
+    db.save_rated_items(
+        user["id"], [(payload.title, payload.rating, "", "", "manual", payload.tmdb_id)]
+    )
     return {"status": "ok"}

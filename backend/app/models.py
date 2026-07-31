@@ -179,6 +179,17 @@ class FeedbackRequest(BaseModel):
     status: Literal["interested", "not_interested", "seen"]
 
 
+class RateTitleRequest(BaseModel):
+    # puntuar un título suelto directo desde el modal ("Ya la vi" → elegí
+    # cuánto te gustó, o el botón de "no estoy de acuerdo con el match" al
+    # votar similares) — sin recommendation_id porque tiene que andar
+    # también para picks de /weekly, que no tienen fila en
+    # recommendations_served (pedido de Matías, 2026-07-31)
+    title: str = Field(min_length=1, max_length=300)
+    rating: float = Field(ge=0.5, le=5)
+    tmdb_id: int | None = None
+
+
 class CastMember(BaseModel):
     name: str
     character: str = ""

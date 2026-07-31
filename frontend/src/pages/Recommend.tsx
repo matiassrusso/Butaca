@@ -16,6 +16,7 @@ import { PageTransition } from "@/components/PageTransition";
 import { API_BASE_URL, useAuth } from "@/hooks/useAuth";
 import { useSwipeCard } from "@/hooks/useSwipeCard";
 import { useTiltCard } from "@/hooks/useTiltCard";
+import { isUnknownMatch } from "@/lib/match";
 
 type RecommendResponse = {
   taste_summary: string;
@@ -158,10 +159,11 @@ function RecommendationCard({
           />
         </div>
         <div
-          className="absolute -top-3 -right-3 size-16 bg-accent flex items-center justify-center text-accent-foreground font-mono text-lg font-bold shadow-2xl shadow-accent/30 ring-1 ring-background/40"
+          className="absolute -top-3 -right-3 size-16 bg-accent flex items-center justify-center text-accent-foreground font-mono font-bold shadow-2xl shadow-accent/30 ring-1 ring-background/40"
           style={{ transform: "translateZ(40px)" }}
+          title={isUnknownMatch(rec.match_score) ? "Match desconocido: todavía no hay evidencia real en tu perfil" : undefined}
         >
-          {rec.match_score}%
+          {isUnknownMatch(rec.match_score) ? <span className="text-xs leading-tight text-center">S/D</span> : <span className="text-lg">{rec.match_score}%</span>}
         </div>
         {rec.kind === "series" && (
           <span className="absolute top-3 left-3 font-mono text-[10px] uppercase px-2 py-1 bg-background border border-foreground/20">
@@ -712,6 +714,30 @@ export default function Recommend() {
     }
   }
 
+  // pedido de Matías (2026-07-31): "Ya la vi" → elegir cuánto te gustó queda
+  // en el perfil real (rated_items), no solo como feedback de esta sesión.
+  // title/tmdbId opcionales: el botón "no estoy de acuerdo" del modal reusa
+  // esto para votar películas similares, no rec en sí.
+  async function rateTitle(rec: Recommendation, rating: number, title?: string, tmdbId?: number | null) {
+    if (!token) return;
+    const finalTitle = title ?? rec.title;
+    try {
+      const response = await fetch(`${API_BASE_URL}/profile/rate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          title: finalTitle,
+          rating,
+          tmdb_id: title ? tmdbId ?? null : rec.tmdb_id,
+        }),
+      });
+      if (!response.ok) throw new Error();
+      toast.success(`Guardado en tu perfil: ${finalTitle}`);
+    } catch {
+      toast.error("No se pudo guardar el puntaje.");
+    }
+  }
+
   if (authLoading || !isAuthenticated) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -1185,6 +1211,7 @@ export default function Recommend() {
             seenWhys={seenWhysRef}
             onClose={() => setSelectedRec(null)}
             onFeedback={(status) => submitFeedback(selectedRec.id, status)}
+            onRate={(rating, title, tmdbId) => rateTitle(selectedRec, rating, title, tmdbId)}
           />
         )}
       </main>
