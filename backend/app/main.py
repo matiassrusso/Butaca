@@ -623,6 +623,7 @@ def _finish_recommend(
     discarded_rows: int = 0,
     refine: bool = True,
     persist: bool = True,
+    ephemeral: bool = False,
 ) -> RecommendResponse:
     """Shared tail of both /recommend/zip and /recommend/letterboxd: once a
     source has produced (ratings, extra_seen), the rest of the flow —
@@ -658,7 +659,7 @@ def _finish_recommend(
     # el historial completo del usuario, sin importar la fuente (zip,
     # username, manual) — hoisted acá arriba porque tanto el perfil como la
     # exclusión de "ya vistas" más abajo tienen que leer del mismo lugar
-    watched = db.get_watched_items(user["id"])
+    watched = [item.model_dump() for item in ratings] if ephemeral else db.get_watched_items(user["id"])
 
     # Guarded broadly: this is a personalization/caching side effect, not the
     # point of the request — a TMDb hiccup (or a mocked search_title missing
@@ -668,7 +669,8 @@ def _finish_recommend(
     if tmdb_client.is_configured():
         try:
             profile = taste_profile.build_taste_profile(watched)
-            db.save_taste_profile(user["id"], profile)
+            if not ephemeral:
+                db.save_taste_profile(user["id"], profile)
         except Exception:
             logger.warning("Taste profile computation failed, falling back to unpersonalized candidates", exc_info=True)
             profile = None
@@ -705,7 +707,11 @@ def _finish_recommend(
     # (relaxed on retry below): a title the user marked seen or not_interested
     # must never resurface, so fold it into extra_seen up front. The tags of
     # not_interested picks feed a scoring penalty in recommend().
-    feedback = db.get_feedback_signals(user["id"])
+    feedback = (
+        {"seen_titles": [], "not_interested": []}
+        if ephemeral
+        else db.get_feedback_signals(user["id"])
+    )
     extra_seen = set(extra_seen) | set(feedback["seen_titles"]) | {
         item["title"] for item in feedback["not_interested"]
     }
@@ -716,7 +722,7 @@ def _finish_recommend(
     # exclude titles already recommended to this user before, so hitting
     # "nuevos picks" and regenerating with the same source+mood surfaces
     # different movies instead of the same deterministic top 5
-    already_recommended = db.get_recently_recommended_titles(user["id"])
+    already_recommended = set() if ephemeral else db.get_recently_recommended_titles(user["id"])
     # bug real (reportado por Matías, 2026-07-30): puntuar en "Sin cuenta" y
     # después generar con el .zip/username de Letterboxd (u otra sesión
     # manual) recomendaba de vuelta esas mismas películas — `extra_seen`
@@ -794,19 +800,25 @@ def _finish_recommend(
         except llm_client.LlmError as exc:
             logger.warning("LLM refine failed, falling back to heuristic why: %s", exc)
 
-    session_id = db.create_recommendation_session(user["id"], mood, response.taste_summary)
-    inserted_ids = db.save_recommendations(
-        session_id,
-        user["id"],
-        mood,
-        [item.model_dump() for item in response.recommendations],
-    )
-    for item, new_id in zip(response.recommendations, inserted_ids):
-        item.id = new_id
+    session_id = None
+    if ephemeral:
+        for index, item in enumerate(response.recommendations, start=1):
+            item.id = -index
+    else:
+        session_id = db.create_recommendation_session(user["id"], mood, response.taste_summary)
+        inserted_ids = db.save_recommendations(
+            session_id,
+            user["id"],
+            mood,
+            [item.model_dump() for item in response.recommendations],
+        )
+        for item, new_id in zip(response.recommendations, inserted_ids):
+            item.id = new_id
 
     response.discarded_rows = discarded_rows
     response.session_id = session_id
     response.refined = refined
+    response.ephemeral = ephemeral
     logger.info(
         "recommend done user=%s mode=%s kind=%s personalized=%s llm=%s refined=%s picks=%d discarded_rows=%d",
         user["id"],
@@ -880,16 +892,17 @@ def recommend_titles_from_letterboxd(
     # Importar persiste al perfil, así que el username tiene dueño: el primero
     # que se usa queda registrado como tuyo, y cualquier otro genera
     # recomendaciones sin guardar nada (persist=False).
-    own = (user["letterboxd_username"] or "").strip().lower()
-    incoming = username.strip().lower()
-    if not own:
+    stored_username = (user["letterboxd_username"] or "").strip().lower()
+    requested_username = username.strip().lower()
+    if not stored_username:
         db.set_letterboxd_username(user["id"], username)
-    is_own_account = not own or own == incoming
+    is_own_account = not stored_username or stored_username == requested_username
 
     return _finish_recommend(
         ratings, extra_seen, mood, mode, kind_filter, genres, user,
-        refine=_refine_enabled(refine),
+        refine=_refine_enabled(refine) if is_own_account else True,
         persist=is_own_account,
+        ephemeral=not is_own_account,
     )
 
 

@@ -96,7 +96,7 @@ export default function History() {
   }
 
   async function rateTitle(rec: Recommendation, rating: number, title?: string, tmdbId?: number | null) {
-    if (!token) return;
+    if (!token) return false;
     const finalTitle = title ?? rec.title;
     try {
       const response = await fetch(`${API_BASE_URL}/profile/rate`, {
@@ -110,8 +110,10 @@ export default function History() {
       });
       if (!response.ok) throw new Error();
       toast.success(`Guardado en tu perfil: ${finalTitle}`);
+      return true;
     } catch {
       toast.error("No se pudo guardar el puntaje.");
+      return false;
     }
   }
 

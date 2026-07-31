@@ -535,3 +535,19 @@ def test_predict_fit_caches_same_user_same_candidates(monkeypatch) -> None:
     llm_client.predict_fit(1, [], HEURISTIC)
 
     assert len(calls) == 1
+
+
+def test_predict_fit_cache_changes_when_profile_changes(monkeypatch) -> None:
+    monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
+    calls: list[int] = []
+
+    def fake_call(prompt: str, api_key: str) -> dict:
+        calls.append(1)
+        return {"picks": [{"title": "Fake Thriller", "why": "x"}, {"title": "Fake Comedy", "why": "y"}]}
+
+    monkeypatch.setattr(llm_client, "_call_nvidia_with_fallback", fake_call)
+
+    llm_client.predict_fit(1, [RatedItem(title="Alien", rating=1.5)], HEURISTIC)
+    llm_client.predict_fit(1, [RatedItem(title="Alien", rating=4.5)], HEURISTIC)
+
+    assert len(calls) == 2

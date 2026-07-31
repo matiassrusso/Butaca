@@ -173,6 +173,7 @@ def test_letterboxd_import_claims_username_then_protects_profile(monkeypatch) ->
 
     assert client.get("/auth/me", headers=headers).json()["letterboxd_username"] == "matias"
     assert any(item["title"] == "GoodFellas" for item in db.get_watched_items(user_id))
+    sessions_before = len(db.get_recommendation_history(user_id))
 
     # ahora el amigo
     response = client.post(
@@ -183,6 +184,11 @@ def test_letterboxd_import_claims_username_then_protects_profile(monkeypatch) ->
     titles = {item["title"] for item in db.get_watched_items(user_id)}
     assert "Shrek" not in titles, "el import de otra cuenta no debe escribir en tu perfil"
     assert "GoodFellas" in titles
+    body = response.json()
+    assert body["ephemeral"] is True
+    assert body["session_id"] is None
+    assert all(item["id"] < 0 for item in body["recommendations"])
+    assert len(db.get_recommendation_history(user_id)) == sessions_before
     # y el dueño no cambió
     assert client.get("/auth/me", headers=headers).json()["letterboxd_username"] == "matias"
 

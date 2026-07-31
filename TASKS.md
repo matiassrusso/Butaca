@@ -33,6 +33,11 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
 
 ## Pending
 
+- [ ] **[deploy-preflight-2026-07-31] Destrabar deploy de Vercel y cerrar la auditoría preflight**
+      — auditar `4c52f1e...HEAD`, corregir los bugs encontrados, correr build +
+      tests reales, pushear `main` y verificar el deployment | owner: codex |
+      **In Progress**
+
 - [x] **Rediseño del flujo de "no estoy de acuerdo" (2026-07-31 sesión 5,
       pedido de Matías con captura)** — detalle en `CLAUDE.md`
       (`SESSION_STATE`). Era una lista plana sin "no la vi" que trababa el

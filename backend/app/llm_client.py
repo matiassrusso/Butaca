@@ -46,7 +46,7 @@ _REFINE_CACHE: OrderedDict[tuple[str, tuple], tuple[float, dict]] = OrderedDict(
 # personalizados) pero rompería acá — las 5 películas semanales son
 # LITERALMENTE las mismas para todos, así que sin el user_id en la clave el
 # segundo usuario que pidiera /weekly recibiría la predicción del primero.
-_VERDICT_CACHE: OrderedDict[tuple[int, tuple], tuple[float, dict]] = OrderedDict()
+_VERDICT_CACHE: OrderedDict[tuple[int, tuple, str], tuple[float, dict]] = OrderedDict()
 
 
 class LlmError(Exception):
@@ -443,7 +443,7 @@ def predict_fit(
         rec.tmdb_id if rec.tmdb_id is not None else rec.title.strip().lower()
         for rec in heuristic.recommendations
     )
-    cache_key = (user_id, candidates)
+    cache_key = (user_id, candidates, _profile_block(ratings))
 
     # /weekly no excluye del catálogo lo que el usuario ya puntuó (el set de
     # 5 es fijo para todos) — así que un candidato puede ser algo que ya

@@ -197,9 +197,10 @@ export function SearchBox() {
           // no hay recommendation_id contra el que registrar feedback — pero
           // puntuar sí anda, /profile/rate no lo necesita
           onFeedback={() => undefined}
-          onRate={(rating, title, tmdbId) => {
+          onRate={async (rating, title, tmdbId) => {
             const finalTitle = title ?? selectedRec.title;
-            fetch(`${API_BASE_URL}/profile/rate`, {
+            try {
+              const response = await fetch(`${API_BASE_URL}/profile/rate`, {
               method: "POST",
               headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
               body: JSON.stringify({
@@ -207,12 +208,14 @@ export function SearchBox() {
                 rating,
                 tmdb_id: title ? tmdbId ?? null : selectedRec.tmdb_id,
               }),
-            })
-              .then((r) => {
-                if (!r.ok) throw new Error();
-                toast.success(`Guardado en tu perfil: ${finalTitle}`);
-              })
-              .catch(() => toast.error("No se pudo guardar el puntaje."));
+              });
+              if (!response.ok) throw new Error();
+              toast.success(`Guardado en tu perfil: ${finalTitle}`);
+              return true;
+            } catch {
+              toast.error("No se pudo guardar el puntaje.");
+              return false;
+            }
           }}
         />
       )}

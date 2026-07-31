@@ -123,7 +123,7 @@ export default function Home() {
   // opcionales: el botón "no estoy de acuerdo" del modal reusa esto para
   // votar películas similares, no rec en sí.
   async function rateTitle(rec: Recommendation, rating: number, title?: string, tmdbId?: number | null) {
-    if (!token) return;
+    if (!token) return false;
     const finalTitle = title ?? rec.title;
     try {
       const response = await fetch(`${API_BASE_URL}/profile/rate`, {
@@ -137,8 +137,10 @@ export default function Home() {
       });
       if (!response.ok) throw new Error();
       toast.success(`Guardado en tu perfil: ${finalTitle}`);
+      return true;
     } catch {
       toast.error("No se pudo guardar el puntaje.");
+      return false;
     }
   }
 

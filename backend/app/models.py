@@ -99,6 +99,7 @@ class RecommendResponse(BaseModel):
     # False on the fast (heuristic) response and when the LLM refine failed;
     # True once the picks have been through the LLM refine step.
     refined: bool = False
+    ephemeral: bool = False
 
 
 class RecommendationSession(BaseModel):

@@ -24,6 +24,7 @@ type RecommendResponse = {
   discarded_rows: number;
   session_id: number | null;
   refined: boolean;
+  ephemeral: boolean;
 };
 
 type RecommendMode = "profile" | "recent" | "genres" | "watchlist";
@@ -127,11 +128,6 @@ function RecommendationCard({
           {rec.title}
         </h3>
         <span className="font-mono text-xs text-muted-foreground shrink-0">{rec.year}</span>
-      </div>
-      <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground border-t border-foreground/10 pt-4">
-        {rec.director
-          ? `Dir. ${rec.director} • ${rec.tags.slice(0, 2).join(" / ") || "—"}`
-          : rec.tags.slice(0, 3).join(" / ") || "Sin tags"}
       </div>
     </PosterCard>
   );
@@ -721,7 +717,7 @@ export default function Recommend() {
   // title/tmdbId opcionales: el botón "no estoy de acuerdo" del modal reusa
   // esto para votar películas similares, no rec en sí.
   async function rateTitle(rec: Recommendation, rating: number, title?: string, tmdbId?: number | null) {
-    if (!token) return;
+    if (!token) return false;
     const finalTitle = title ?? rec.title;
     try {
       const response = await fetch(`${API_BASE_URL}/profile/rate`, {
@@ -735,8 +731,10 @@ export default function Recommend() {
       });
       if (!response.ok) throw new Error();
       toast.success(`Guardado en tu perfil: ${finalTitle}`);
+      return true;
     } catch {
       toast.error("No se pudo guardar el puntaje.");
+      return false;
     }
   }
 
@@ -1229,6 +1227,7 @@ export default function Recommend() {
             onClose={() => setSelectedRec(null)}
             onFeedback={(status) => submitFeedback(selectedRec.id, status)}
             onRate={(rating, title, tmdbId) => rateTitle(selectedRec, rating, title, tmdbId)}
+            readOnly={result?.ephemeral}
           />
         )}
       </main>

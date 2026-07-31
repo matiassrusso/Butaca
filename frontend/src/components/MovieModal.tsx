@@ -110,13 +110,14 @@ function DisagreePanel({
 }: {
   rec: Recommendation;
   token: string | null;
-  onRate: (rating: number, title: string, tmdbId: number | null) => void;
+  onRate: (rating: number, title: string, tmdbId: number | null) => Promise<boolean>;
   onEnoughVotes: () => void;
 }) {
   const [pool, setPool] = useState<SimilarTitle[] | null>(null);
   const [index, setIndex] = useState(0);
   const [votes, setVotes] = useState(0);
   const [step, setStep] = useState<"seen" | "rating">("seen");
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (rec.tmdb_id == null || !token) {
@@ -146,9 +147,12 @@ function DisagreePanel({
     setStep("seen");
   }
 
-  function vote(rating: number) {
+  async function vote(rating: number) {
     if (!current) return;
-    onRate(rating, current.title, current.tmdb_id);
+    setSaving(true);
+    const saved = await onRate(rating, current.title, current.tmdb_id);
+    setSaving(false);
+    if (!saved) return;
     const total = votes + 1;
     setVotes(total);
     if (total >= VOTES_NEEDED) {
@@ -252,6 +256,7 @@ function DisagreePanel({
               <button
                 key={opt.label}
                 onClick={() => vote(opt.value)}
+                disabled={saving}
                 className="flex-1 py-2 px-1 font-mono text-[9px] uppercase tracking-widest border border-foreground/30 hover:border-accent hover:text-accent transition-colors"
               >
                 {opt.label}
@@ -272,6 +277,7 @@ export function MovieModal({
   onClose,
   onFeedback,
   onRate,
+  readOnly = false,
 }: {
   rec: Recommendation;
   token: string | null;
@@ -287,7 +293,8 @@ export function MovieModal({
   // en el perfil para futuras recomendaciones. title/tmdbId opcionales: el
   // botón "no estoy de acuerdo" reusa este mismo callback para votar
   // similares, que no son rec — sin ellos, puntúa rec.title.
-  onRate: (rating: number, title?: string, tmdbId?: number | null) => void;
+  onRate: (rating: number, title?: string, tmdbId?: number | null) => Promise<boolean>;
+  readOnly?: boolean;
 }) {
   const [details, setDetails] = useState<MovieDetails | null>(null);
   const [showRateMenu, setShowRateMenu] = useState(false);
@@ -406,7 +413,7 @@ export function MovieModal({
               ) : (
                 `${shown.match_score}% match`
               )}
-              {rec.tmdb_id != null && token && !recalculating && (
+              {rec.tmdb_id != null && token && !readOnly && !recalculating && (
                 <span className="relative inline-block">
                   <button
                     onClick={() => setShowDisagree((v) => !v)}
@@ -530,7 +537,7 @@ export function MovieModal({
               </div>
             )}
 
-            <div className="mt-auto pt-4 border-t border-foreground/10">
+            {!readOnly && <div className="mt-auto pt-4 border-t border-foreground/10">
               <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-3">
                 ¿Qué te parece este pick?
               </p>
@@ -563,10 +570,11 @@ export function MovieModal({
                     {RATE_OPTIONS.map((opt) => (
                       <button
                         key={opt.label}
-                        onClick={() => {
-                          onRate(opt.value);
-                          onFeedback("seen");
-                          setShowRateMenu(false);
+                        onClick={async () => {
+                          if (await onRate(opt.value)) {
+                            onFeedback("seen");
+                            setShowRateMenu(false);
+                          }
                         }}
                         className={`${btn} border-foreground/30 hover:border-accent hover:text-accent`}
                       >
@@ -576,7 +584,7 @@ export function MovieModal({
                   </div>
                 </div>
               )}
-            </div>
+            </div>}
           </div>
         </div>
       </div>
