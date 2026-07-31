@@ -15,7 +15,7 @@ If a session is drifting without moving hacia calidad de recomendación o clarid
 1. Definición corta del alcance (ver `docs/product-mvp.md`)
 2. Implementación en `backend` (FastAPI + SQLite) y/o `frontend` (React + Vite + Tailwind)
 3. Si hay varios agentes en paralelo: coordinación por `TASKS.md` (worktrees separados, marcar In Progress → Done, nunca mergear a `main` solo)
-4. Tests de backend en verde antes de cerrar (293 tests a la fecha)
+4. Tests de backend en verde antes de cerrar (294 tests a la fecha)
 5. Deployeado: frontend [butaca.xyz](https://butaca.xyz/) (Vercel), backend [api.butaca.xyz](https://api.butaca.xyz) (Render, free tier — cold start en la primera request)
 
 ## Key People
@@ -44,34 +44,71 @@ Solo yo (Matías), con posible coordinación multi-agente (Claude, Codex) docume
 ## Current Status
 
 > <!-- SESSION_STATE:START -->
-> **Last updated:** 2026-07-31 (sesión larga: rondas de bugs de `/weekly` +
-> features pedidas, y al final la unificación grande — una sola voz de LLM y
-> una sola interacción para todo el sitio + buscador global)
+> **Last updated:** 2026-07-31 (sesión larga, 14 commits `c0d0931`..`5b65581`,
+> 263→294 tests: cuatro rondas de bugs de `/weekly` reportados desde
+> producción, tres features pedidas, y al final la unificación grande — una
+> sola voz de LLM y una sola interacción para todo el sitio + buscador global
+> + rediseño del flujo de "no estoy de acuerdo")
 >
-> ### ⚠️ Leer primero al retomar
+> ### ⚠️ Dónde retomar
 >
-> Todo lo reportado está resuelto y deployado (push `bc52b2b`..`4c52f1e`).
-> Nada bloqueante — falta que Matías pruebe en producción, sobre todo lo
-> último (unificación + buscador), y decida sobre estos puntos abiertos:
+> **Nada bloqueante y nada a medio hacer.** Todo está commiteado, pusheado y
+> deployándose. Lo que sigue es **que Matías pruebe en producción** (Render
+> tarda unos minutos en redeployar) y reporte. Tres cosas concretas para
+> mirar primero, en orden, porque son las que NO se pudieron verificar de
+> verdad en local:
+> 1. **La calidad de los "similares"** del flujo de votación. Se cambió
+>    `/similar` por `/recommendations` de TMDb justamente porque para "The
+>    Gentlemen" traía "Stuart Little" y "Around the World in 80 Days" — pero
+>    la mejora solo se puede juzgar con la key real. Si sigue trayendo
+>    cualquier cosa, el siguiente paso sería filtrar por género/tags contra
+>    el título original en `tmdb_client.fetch_similar_titles`.
+> 2. **El buscador de la navbar** (`/titles/search` + `/titles/{id}/verdict`)
+>    — probado solo con `fetch` mockeado.
+> 3. **El mix de variedad de épocas** en `/weekly` (3 trending + 2 de una
+>    década que rota por semana ISO).
+>
+> ### Decisiones que quedaron abiertas para Matías (no son bugs)
+>
 > - **El buscador no existe en mobile**: `SearchBox` es `hidden sm:block`
->   porque la navbar no tiene lugar en pantallas chicas. Es una decisión
->   consciente para no romper el layout, no un olvido — si lo quiere en
->   mobile hay que resolver el patrón (¿ícono que abre un overlay?).
+>   porque la navbar no tiene lugar en pantallas chicas. Decisión consciente
+>   para no romper el layout, no un olvido — si lo quiere en mobile hay que
+>   resolver el patrón (¿ícono que abre un overlay?).
 > - **El "why" en la card**: quedó visible en la home y en el archivo, pero
 >   oculto en `/recommend` (donde se revela con el typewriter al abrir el
 >   póster, decisión del 2026-07-30). NO se unificó a propósito: la sección
 >   semanal de la home está construida alrededor de mostrarlo y sacarlo la
->   vaciaría bastante. Es decisión de Matías, no mía — si quiere que sea
->   igual en los tres lados, es un cambio chico.
-> - El mix de **variedad de épocas** en `/weekly` (3 trending + 2 de una
->   década que rota por semana ISO) — decisión de diseño propia, puede
->   querer ajustar el ratio 3/2 o las décadas (`tmdb_client.WEEKLY_CLASSIC_DECADES`).
+>   vaciaría bastante. Si quiere que sea igual en los tres lados es un
+>   cambio chico, pero es su llamada.
+> - El ratio 3/2 y las décadas de la variedad de épocas
+>   (`tmdb_client.WEEKLY_CLASSIC_DECADES`).
 > - El desempate de match_score por `vote_average` (`_adjust_match_scores`
 >   en `main.py`) es pragmático, no una reescritura del scoring — el
 >   vocabulario de tags sigue siendo chico de fondo. Si vuelve a verse
 >   plano, ese es el lugar para ajustar el multiplicador (`* 3`).
-> - El botón **"¿No estás de acuerdo?"** sigue sin verificación visual en
->   local (la TMDb key local está vieja), solo cubierto por tests.
+>
+> **Qué se hizo el 2026-07-31, quinta ronda — rediseño del "no estoy de
+> acuerdo"** (1 commit, `5b65581`, 293→294 tests):
+> - Matías mandó captura del flujo viejo: una lista plana de 6 títulos con
+>   tres botones cada uno, **sin opción de "no la vi"** (un título que no
+>   viste te trababa) y sin avanzar sola. Pidió un cuadro chico que se abra
+>   desde el botón, con el póster, que pregunte primero si la viste y recién
+>   después qué te pareció, y **6 votos de 6 películas distintas** para
+>   recalcular.
+> - `DisagreePanel` (en `MovieModal.tsx`) hace exactamente eso: una peli por
+>   vez con su póster, dos pasos, contador de progreso. "No la vi" saltea
+>   **sin contar como voto**. Al sexto llama a `GET /titles/{id}/verdict` y
+>   el resultado pisa lo que muestra el modal (estado local `recalculated`,
+>   así no hay que tocar los 4 lugares que abren el modal).
+> - **Problema de fondo del mismo flujo, arreglado de paso:** los similares
+>   salían de `/similar` de TMDb, que matchea por keywords/géneros sueltos y
+>   devuelve cualquier cosa — votar "Stuart Little" para calibrar "The
+>   Gentlemen" no aporta nada, o sea que los 6 votos hubieran sido inútiles
+>   aunque la UI fuera perfecta. Ahora usa `/recommendations` (sale del
+>   comportamiento real de usuarios de TMDb), con `/similar` de fallback si
+>   viene vacío. `SIMILAR_TITLES_LIMIT` 6→20 para tener margen para salteos.
+> - Si se queda sin títulos antes de los 6, avisa y ofrece recalcular con
+>   los que juntó en vez de trabarse.
 >
 > **Qué se hizo el 2026-07-31, cuarta ronda — la unificación** (2 commits,
 > `81f589b`+`4c52f1e`, 285→293 tests). Pedido de Matías: *"TODA la página
@@ -290,7 +327,29 @@ Solo yo (Matías), con posible coordinación multi-agente (Claude, Codex) docume
 >   cambios de prompt en este proyecto: `_build_verdict_prompt` +
 >   `_call_nvidia_with_fallback` con un perfil de prueba, y leer la
 >   salida. Los tests no pueden atrapar "suena repetitivo".
+> - Verificación de la quinta ronda (2026-07-31): 294 tests + typecheck
+>   limpio. El flujo de votación se probó con `fetch` mockeado midiendo el
+>   estado paso a paso: dos "No la vi" dejaron el contador en **0/6**
+>   (confirmando que saltear no cuenta como voto), los seis votos
+>   siguientes lo llevaron a 6/6 puntuando **seis títulos distintos**, y al
+>   sexto el modal pasó de 60% a **91%** con el why recalculado — o sea que
+>   el recálculo llega de verdad a la pantalla, no solo se dispara.
+> - **Truco útil para probar el modal en local:** el botón "¿No estás de
+>   acuerdo?" solo aparece si `rec.tmdb_id != null`, y el catálogo mock que
+>   usa `/recommend` sin TMDb key **no trae `tmdb_id`** — así que desde
+>   `/history` o `/recommend` nunca se ve. Para probarlo hay que entrar por
+>   el buscador de la navbar, que sí devuelve `tmdb_id`.
 > <!-- SESSION_STATE:END -->
+>
+> **2026-07-31 (sesión 5) — 1 commit (`5b65581`), 293→294 tests:** Matías
+> probó el buscador (anda bien) y mandó captura del flujo de "no estoy de
+> acuerdo": no le gustaba la presentación ni que faltara "no la vi", y pidió
+> un cuadro chico con el póster, dos pasos (¿la viste? → ¿qué te pareció?) y
+> 6 votos de 6 películas distintas para recalcular. Hecho con
+> `DisagreePanel`. De paso salió un problema de fondo: los similares venían
+> de `/similar` de TMDb y eran basura ("Stuart Little" para "The
+> Gentlemen"), así que los 6 votos no hubieran servido — se cambió a
+> `/recommendations`. Verificado con mocks: 60% → 91% tras los 6 votos.
 >
 > **2026-07-31 (sesión 4) — 3 commits (`b16013b`, `81f589b`, `4c52f1e`),
 > 284→293 tests:** Matías señaló que los why salían calcados entre sí y

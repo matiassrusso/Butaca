@@ -33,6 +33,16 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
 
 ## Pending
 
+- [x] **Rediseño del flujo de "no estoy de acuerdo" (2026-07-31 sesión 5,
+      pedido de Matías con captura)** — detalle en `CLAUDE.md`
+      (`SESSION_STATE`). Era una lista plana sin "no la vi" que trababa el
+      flujo; ahora `DisagreePanel` va de a una peli con su póster, en dos
+      pasos (¿la viste? → ¿qué te pareció?), y pide 6 votos de 6 títulos
+      distintos antes de recalcular vía `GET /titles/{id}/verdict`. De paso,
+      los similares pasaron de `/similar` (traía "Stuart Little" para "The
+      Gentlemen") a `/recommendations` de TMDb. 1 commit `5b65581`,
+      293→294 tests.
+
 - [x] **Unificación de LLM + interacción y buscador global (2026-07-31
       sesión 4, pedido de Matías)** — detalle completo en `CLAUDE.md`
       (`SESSION_STATE`). Resumen: los why del LLM salían calcados por las
