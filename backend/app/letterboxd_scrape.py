@@ -124,9 +124,11 @@ def fetch_letterboxd_diary(username: str) -> tuple[list[RatedItem], set[str]]:
             continue
 
         rating = entry["rating"]
+        source = "import"
         if rating is None and entry["liked"]:
             # un like sin puntuar es señal positiva igual, igual que en el zip
             rating = LIKE_RATING
+            source = "like"
 
         if rating is None:
             watched_only.setdefault(key, entry["title"])
@@ -139,6 +141,7 @@ def fetch_letterboxd_diary(username: str) -> tuple[list[RatedItem], set[str]]:
             review="",
             watched_date=entry["watched_date"],
             tmdb_id=entry["tmdb_id"],
+            source=source,
         )
 
     if not ratings_by_title and not watched_only:

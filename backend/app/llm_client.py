@@ -118,14 +118,16 @@ def _rating_label(rating: float) -> str:
 
 def _ratings_lines(ratings: list[RatedItem]) -> str:
     # los items "manual" (botón Me encantó/Bien/No me gustó del modo "Sin
-    # cuenta") tienen un rating sintético internamente (para el scoring),
-    # pero el usuario nunca dio un puntaje preciso — citarlo como "(4.5/5)"
-    # en el why sería un dato inventado (reportado por Matías, 2026-07-30).
+    # cuenta") y "like" (like/favorito de Letterboxd sin estrellas) tienen un
+    # rating sintético internamente (para el scoring), pero el usuario nunca
+    # dio un puntaje preciso — citarlo como "(4.5/5)" en el why sería un dato
+    # inventado (reportado por Matías, 2026-07-30; el caso "like" seguía
+    # colándose porque su source es "import", 2026-07-31).
     return (
         "\n".join(
             (
                 f"- {item.title} ({item.rating}/5): {item.review or 'sin reseña'}"
-                if item.source != "manual"
+                if item.source == "import"
                 else f"- {item.title} ({_rating_label(item.rating)}, sin puntaje numérico): {item.review or 'sin reseña'}"
             )
             for item in ratings[:40]

@@ -113,7 +113,9 @@ def parse_letterboxd_zip(data: bytes) -> tuple[list[RatedItem], set[str], int]:
             title = row.get("Name", "").strip()
             key = _normalize(title)
             if title and key not in ratings_by_title:
-                ratings_by_title[key] = RatedItem(title=title, rating=LIKE_RATING, review="")
+                ratings_by_title[key] = RatedItem(
+                    title=title, rating=LIKE_RATING, review="", source="like"
+                )
 
         watched_rows = _read_csv(zf, WATCHED_FILE)
         extra_seen = {_normalize(row.get("Name", "")) for row in watched_rows if row.get("Name")}
@@ -139,7 +141,7 @@ def parse_letterboxd_zip(data: bytes) -> tuple[list[RatedItem], set[str], int]:
                         or ratings_by_title[key].rating < FAVORITE_RATING
                     ):
                         ratings_by_title[key] = RatedItem(
-                            title=title, rating=FAVORITE_RATING, review=""
+                            title=title, rating=FAVORITE_RATING, review="", source="like"
                         )
     except csv.Error as exc:
         raise ZipParseError("Uno de los CSV del zip vino mal formado.") from exc

@@ -1085,6 +1085,40 @@ def test_fetch_weekly_trending_hits_the_real_trending_endpoint(monkeypatch) -> N
     assert [t["title"] for t in trending] == [f"Trending {i}" for i in range(tmdb_client.WEEKLY_PICKS_COUNT)]
 
 
+def test_fetch_weekly_trending_paginates_when_page_one_lacks_enough_tagged_results(
+    monkeypatch,
+) -> None:
+    # bug reportado por Matías (2026-07-31): la home mostraba solo 3 de 5 —
+    # la página 1 de /trending/movie/week trae resultados sin genre_ids
+    # mapeables ni overview con tags positivos, _map_result los descarta, y
+    # antes se cortaba ahí sin pedir más páginas.
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    tmdb_client._WEEKLY_TRENDING_CACHE.clear()
+
+    def fake_get_json(url: str) -> dict:
+        if "page=1" in url:
+            # sin genre_ids conocidos ni overview con tags -> _map_result los tira
+            return {
+                "results": [
+                    {"id": i, "title": f"Untagged {i}", "release_date": "2020-01-01", "genre_ids": []}
+                    for i in range(20)
+                ]
+            }
+        return {
+            "results": [
+                {"id": 100 + i, "title": f"Tagged {i}", "release_date": "2020-01-01", "genre_ids": [28]}
+                for i in range(20)
+            ]
+        }
+
+    monkeypatch.setattr(tmdb_client, "_get_json", fake_get_json)
+
+    trending = tmdb_client.fetch_weekly_trending()
+
+    assert len(trending) == tmdb_client.WEEKLY_PICKS_COUNT
+    assert all(t["title"].startswith("Tagged") for t in trending)
+
+
 def test_fetch_weekly_trending_caches_within_the_same_iso_week(monkeypatch) -> None:
     monkeypatch.setenv("TMDB_API_KEY", "fake-key")
     tmdb_client._WEEKLY_TRENDING_CACHE.clear()
@@ -1092,14 +1126,19 @@ def test_fetch_weekly_trending_caches_within_the_same_iso_week(monkeypatch) -> N
 
     def fake_get_json(url: str) -> dict:
         calls.append(url)
-        return {"results": [{"id": 1, "title": "X", "release_date": "2020-01-01", "genre_ids": [28]}]}
+        return {
+            "results": [
+                {"id": i, "title": f"X{i}", "release_date": "2020-01-01", "genre_ids": [28]}
+                for i in range(tmdb_client.WEEKLY_PICKS_COUNT)
+            ]
+        }
 
     monkeypatch.setattr(tmdb_client, "_get_json", fake_get_json)
 
     tmdb_client.fetch_weekly_trending()
     tmdb_client.fetch_weekly_trending()
 
-    assert len(calls) == 1
+    assert len(calls) == 1  # segunda llamada sirve del cache, no repagina
 
 
 def test_fetch_weekly_trending_does_not_alias_the_cached_dict(monkeypatch) -> None:

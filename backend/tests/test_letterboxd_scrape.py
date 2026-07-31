@@ -90,6 +90,7 @@ def test_fetch_diary_uses_like_as_rating_when_unrated(monkeypatch) -> None:
     ratings, extra_seen = ls.fetch_letterboxd_diary("someone")
 
     assert [(r.title, r.rating) for r in ratings] == [("Weekend", ls.LIKE_RATING)]
+    assert ratings[0].source == "like"  # synthetic rating, why must not cite it as precise
     assert extra_seen == set()
 
 

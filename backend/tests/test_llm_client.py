@@ -257,6 +257,19 @@ def test_build_prompt_does_not_cite_a_numeric_score_for_manual_ratings() -> None
     assert "Manual Movie (le encantó, sin puntaje numérico)" in prompt
 
 
+def test_build_prompt_does_not_cite_a_numeric_score_for_letterboxd_likes() -> None:
+    # bug reportado por Matías (2026-07-31): los likes/favoritos de
+    # Letterboxd sin estrellas puestas (source="like") son un rating
+    # sintético igual que el modo manual, pero tenían source="import" antes
+    # y se colaban citando "(4.5/5)" como si fuera un puntaje real.
+    ratings = [RatedItem(title="Liked Movie", rating=4.5, review="", source="like")]
+
+    prompt = llm_client._build_prompt(ratings, "", HEURISTIC)
+
+    assert "Liked Movie (4.5/5)" not in prompt
+    assert "Liked Movie (le encantó, sin puntaje numérico)" in prompt
+
+
 def _fake_nvidia(call_count: list[int]):
     def fake_call_nvidia(prompt: str, api_key: str) -> dict:
         call_count.append(1)

@@ -115,6 +115,9 @@ def test_parse_letterboxd_zip_adds_liked_titles_not_already_rated() -> None:
     assert titles["Whiplash"] == 4.5
     assert titles["GoodFellas"] == 5.0  # untouched by the like
 
+    liked = next(r for r in ratings if r.title == "Whiplash")
+    assert liked.source == "like"  # synthetic rating, why must not cite it as precise
+
 
 def test_parse_letterboxd_zip_resolves_favorite_films_via_watched_csv() -> None:
     watched_csv = (
@@ -130,6 +133,7 @@ def test_parse_letterboxd_zip_resolves_favorite_films_via_watched_csv() -> None:
 
     favorite = next(r for r in ratings if r.title == "12 Angry Men")
     assert favorite.rating == 5.0
+    assert favorite.source == "like"  # synthetic rating, why must not cite it as precise
 
 
 def test_parse_letterboxd_zip_returns_watched_titles_as_extra_seen() -> None:

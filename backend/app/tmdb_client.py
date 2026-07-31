@@ -388,6 +388,10 @@ def fetch_candidates(mood: str, pages: int = 2) -> list[dict]:
 
 WEEKLY_TRENDING_URL = "https://api.themoviedb.org/3/trending/movie/week"
 WEEKLY_PICKS_COUNT = 5
+# tope de páginas para completar las 5 — cada página trae 20 resultados y
+# _map_result descarta los sin tags, así que la página 1 sola a veces no
+# alcanza para 5 (bug reportado por Matías, 2026-07-31: solo 3 de 5)
+WEEKLY_TRENDING_MAX_PAGES = 3
 # cacheado por semana ISO (no por TTL fijo): "recomendaciones semanales,
 # iguales para todos" (pedido de Matías) — todos los usuarios que pidan
 # /weekly en la misma semana tienen que ver EXACTAMENTE el mismo set de
@@ -415,13 +419,21 @@ def fetch_weekly_trending() -> list[dict]:
     if cached is not None:
         return _clone_items(cached)
 
-    params = {"api_key": api_key, "language": "en-US"}
-    data = _get_json(f"{WEEKLY_TRENDING_URL}?{urllib.parse.urlencode(params)}")
-    mapped = [
-        result
-        for raw in data.get("results", [])
-        if (result := _map_result(raw, "movie", GENRE_ID_TAG_MAP)) is not None
-    ][:WEEKLY_PICKS_COUNT]
+    mapped: list[dict] = []
+    seen_ids: set[int] = set()
+    for page in range(1, WEEKLY_TRENDING_MAX_PAGES + 1):
+        params = {"api_key": api_key, "language": "en-US", "page": page}
+        data = _get_json(f"{WEEKLY_TRENDING_URL}?{urllib.parse.urlencode(params)}")
+        for raw in data.get("results", []):
+            result = _map_result(raw, "movie", GENRE_ID_TAG_MAP)
+            if result is None or result["tmdb_id"] in seen_ids:
+                continue
+            seen_ids.add(result["tmdb_id"])
+            mapped.append(result)
+            if len(mapped) >= WEEKLY_PICKS_COUNT:
+                break
+        if len(mapped) >= WEEKLY_PICKS_COUNT:
+            break
 
     # una sola semana vigente a la vez — no hace falta un LRU con TTL, la
     # semana vieja simplemente no se vuelve a pedir nunca más
