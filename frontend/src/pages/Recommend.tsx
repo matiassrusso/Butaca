@@ -13,10 +13,10 @@ import { useLocation } from "wouter";
 
 import { MovieModal, type FeedbackStatus, type Recommendation } from "@/components/MovieModal";
 import { PageTransition } from "@/components/PageTransition";
+import { PosterCard } from "@/components/PosterCard";
 import { API_BASE_URL, useAuth } from "@/hooks/useAuth";
 import { useSwipeCard } from "@/hooks/useSwipeCard";
 import { useTiltCard } from "@/hooks/useTiltCard";
-import { isUnknownMatch } from "@/lib/match";
 
 type RecommendResponse = {
   taste_summary: string;
@@ -120,64 +120,8 @@ function RecommendationCard({
   feedback?: FeedbackStatus;
   onSelect: () => void;
 }) {
-  const poster = rec.poster_path ?? rec.backdrop_path;
-  const { wrapRef, onMouseMove, onMouseLeave } = useTiltCard();
-
   return (
-    <button
-      type="button"
-      onClick={onSelect}
-      className="animate-reveal text-left group block w-full"
-      style={{ animationDelay: `${100 + index * 100}ms`, perspective: "1000px" }}
-    >
-      <div
-        ref={wrapRef}
-        onMouseMove={onMouseMove}
-        onMouseLeave={onMouseLeave}
-        className="mb-6 relative transition-transform duration-200 ease-out"
-        style={{ transformStyle: "preserve-3d" }}
-      >
-        <div className="relative overflow-hidden">
-          {poster ? (
-            <img
-              src={poster}
-              alt={rec.title}
-              loading="lazy"
-              className="w-full aspect-[2/3] object-cover bg-secondary outline outline-1 -outline-offset-1 outline-black/10 transition-transform duration-700 group-hover:scale-[1.04]"
-            />
-          ) : (
-            <div className="w-full aspect-[2/3] bg-secondary flex items-center justify-center">
-              <Film className="w-10 h-10 text-muted-foreground/40" />
-            </div>
-          )}
-          <div
-            className="pointer-events-none absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 mix-blend-overlay"
-            style={{
-              background:
-                "radial-gradient(circle at var(--mx, 50%) var(--my, 50%), rgba(255,255,255,0.5), transparent 55%)",
-            }}
-          />
-        </div>
-        <div
-          className="absolute -top-3 -right-3 size-16 bg-accent flex items-center justify-center text-accent-foreground font-mono font-bold shadow-2xl shadow-accent/30 ring-1 ring-background/40"
-          style={{ transform: "translateZ(40px)" }}
-          title={isUnknownMatch(rec.match_score) ? "Match desconocido: todavía no hay evidencia real en tu perfil" : undefined}
-        >
-          {isUnknownMatch(rec.match_score) ? <span className="text-xs leading-tight text-center">S/D</span> : <span className="text-lg">{rec.match_score}%</span>}
-        </div>
-        {rec.kind === "series" && (
-          <span className="absolute top-3 left-3 font-mono text-[10px] uppercase px-2 py-1 bg-background border border-foreground/20">
-            Serie
-          </span>
-        )}
-        {feedback && (
-          <span className="absolute bottom-3 left-3 size-7 bg-background border border-foreground/20 flex items-center justify-center">
-            {feedback === "interested" && <ThumbsUp className="w-3.5 h-3.5 text-accent" />}
-            {feedback === "seen" && <Eye className="w-3.5 h-3.5 text-muted-foreground" />}
-            {feedback === "not_interested" && <ThumbsDown className="w-3.5 h-3.5 text-destructive" />}
-          </span>
-        )}
-      </div>
+    <PosterCard rec={rec} index={index + 1} feedback={feedback} featured onSelect={onSelect}>
       <div className="flex justify-between items-baseline gap-4 mb-4">
         <h3 className="text-2xl font-black uppercase tracking-tighter leading-none group-hover:text-accent transition-colors">
           {rec.title}
@@ -189,7 +133,7 @@ function RecommendationCard({
           ? `Dir. ${rec.director} • ${rec.tags.slice(0, 2).join(" / ") || "—"}`
           : rec.tags.slice(0, 3).join(" / ") || "Sin tags"}
       </div>
-    </button>
+    </PosterCard>
   );
 }
 

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 
+import { SearchBox } from "@/components/SearchBox";
 import { ThemeToggle, useTheme } from "@/components/ThemeToggle";
 import { useAuth } from "@/hooks/useAuth";
 
@@ -48,6 +49,7 @@ export function Navbar() {
 
       {isAuthenticated ? (
         <div className="flex items-center gap-3">
+          <SearchBox />
           <Link
             to="/recommend"
             className={`px-5 py-2 font-mono text-[10px] uppercase tracking-widest transition-colors ${

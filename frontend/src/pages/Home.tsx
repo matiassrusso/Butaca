@@ -1,14 +1,12 @@
 import { motion, useScroll, useTransform } from "framer-motion";
-import { Film } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { Link } from "wouter";
 
 import { MovieModal, type FeedbackStatus, type Recommendation } from "@/components/MovieModal";
 import { PageTransition } from "@/components/PageTransition";
+import { PosterCard } from "@/components/PosterCard";
 import { API_BASE_URL, useAuth } from "@/hooks/useAuth";
-import { useTiltCard } from "@/hooks/useTiltCard";
-import { isUnknownMatch } from "@/lib/match";
 
 type RecommendationSession = {
   id: number;
@@ -61,59 +59,11 @@ const MARQUEE_NAMES = [
   "Francis Ford Coppola", "Adam Driver", "Lupita Nyong'o", "Timothée Chalamet", "Pedro Almodóvar",
 ];
 
-// same tilt + glare treatment as the poster cards on /recommend
-function CurrentPickCard({ rec, onSelect }: { rec: Recommendation; onSelect: () => void }) {
-  const { wrapRef, onMouseMove, onMouseLeave } = useTiltCard();
-
+// El póster (tilt, glare, badge, click) sale de PosterCard, compartido con
+// /recommend y /history — acá solo va el bloque de texto de abajo.
+function PickText({ rec, why }: { rec: Recommendation; why?: ReactNode }) {
   return (
-    <article
-      className="group cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-      style={{ perspective: "1000px" }}
-      role="button"
-      tabIndex={0}
-      aria-label={`Ver detalle de ${rec.title}`}
-      onClick={onSelect}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onSelect();
-        }
-      }}
-    >
-      <div
-        ref={wrapRef}
-        onMouseMove={onMouseMove}
-        onMouseLeave={onMouseLeave}
-        className="mb-4 relative transition-transform duration-200 ease-out"
-        style={{ transformStyle: "preserve-3d" }}
-      >
-        <div className="relative overflow-hidden">
-          {rec.poster_path ?? rec.backdrop_path ? (
-            <img
-              src={rec.poster_path ?? rec.backdrop_path ?? undefined}
-              alt={rec.title}
-              className="w-full aspect-[2/3] object-cover transition-transform duration-700 group-hover:scale-[1.04]"
-            />
-          ) : (
-            <div className="w-full aspect-[2/3] bg-secondary flex items-center justify-center">
-              <Film className="w-8 h-8 text-muted-foreground/40" />
-            </div>
-          )}
-          <div
-            className="pointer-events-none absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 mix-blend-overlay"
-            style={{
-              background:
-                "radial-gradient(circle at var(--mx, 50%) var(--my, 50%), rgba(255,255,255,0.5), transparent 55%)",
-            }}
-          />
-        </div>
-        <div
-          className="absolute top-2 right-2 px-2 py-1 bg-accent text-accent-foreground font-mono text-xs font-bold"
-          style={{ transform: "translateZ(40px)" }}
-        >
-          {isUnknownMatch(rec.match_score) ? "Match desconocido" : `${rec.match_score}%`}
-        </div>
-      </div>
+    <>
       <h3 className="text-lg font-black uppercase tracking-tighter leading-none mb-1 group-hover:text-accent transition-colors">
         {rec.title}
       </h3>
@@ -121,92 +71,8 @@ function CurrentPickCard({ rec, onSelect }: { rec: Recommendation; onSelect: () 
         {rec.year}
         {rec.kind === "series" ? " · Serie" : ""}
       </p>
-      <p className="font-serif text-sm italic leading-snug">&ldquo;{rec.why}&rdquo;</p>
-    </article>
-  );
-}
-
-// pedido de Matías: mismo poster+score+why que CurrentPickCard, pero el
-// score/why solo se muestran logueado — anónimo no tiene perfil real detrás
-// del "probablemente te guste", así que mostrarlo sería un dato inventado
-// (mismo criterio que llevó a no citar puntajes falsos en el why del LLM)
-function WeeklyPickCard({
-  rec,
-  personalized,
-  onSelect,
-}: {
-  rec: Recommendation;
-  personalized: boolean;
-  onSelect: () => void;
-}) {
-  const { wrapRef, onMouseMove, onMouseLeave } = useTiltCard();
-
-  return (
-    <article
-      className="group cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-      style={{ perspective: "1000px" }}
-      role="button"
-      tabIndex={0}
-      aria-label={`Ver detalle de ${rec.title}`}
-      onClick={onSelect}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onSelect();
-        }
-      }}
-    >
-      <div
-        ref={wrapRef}
-        onMouseMove={onMouseMove}
-        onMouseLeave={onMouseLeave}
-        className="mb-4 relative transition-transform duration-200 ease-out"
-        style={{ transformStyle: "preserve-3d" }}
-      >
-        <div className="relative overflow-hidden">
-          {rec.poster_path ?? rec.backdrop_path ? (
-            <img
-              src={rec.poster_path ?? rec.backdrop_path ?? undefined}
-              alt={rec.title}
-              className="w-full aspect-[2/3] object-cover transition-transform duration-700 group-hover:scale-[1.04]"
-            />
-          ) : (
-            <div className="w-full aspect-[2/3] bg-secondary flex items-center justify-center">
-              <Film className="w-8 h-8 text-muted-foreground/40" />
-            </div>
-          )}
-          <div
-            className="pointer-events-none absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 mix-blend-overlay"
-            style={{
-              background:
-                "radial-gradient(circle at var(--mx, 50%) var(--my, 50%), rgba(255,255,255,0.5), transparent 55%)",
-            }}
-          />
-        </div>
-        {personalized && (
-          <div
-            className="absolute top-2 right-2 px-2 py-1 bg-accent text-accent-foreground font-mono text-xs font-bold"
-            style={{ transform: "translateZ(40px)" }}
-          >
-            {isUnknownMatch(rec.match_score) ? "Match desconocido" : `${rec.match_score}% match`}
-          </div>
-        )}
-      </div>
-      <h3 className="text-lg font-black uppercase tracking-tighter leading-none mb-1 group-hover:text-accent transition-colors">
-        {rec.title}
-      </h3>
-      <p className="font-mono text-[10px] text-muted-foreground mb-2">
-        {rec.year}
-        {rec.kind === "series" ? " · Serie" : ""}
-      </p>
-      {personalized ? (
-        <p className="font-serif text-sm italic leading-snug">&ldquo;{rec.why}&rdquo;</p>
-      ) : (
-        <p className="font-mono text-[10px] uppercase tracking-widest text-accent">
-          Iniciá sesión para saber si te va a gustar →
-        </p>
-      )}
-    </article>
+      {why ?? <p className="font-serif text-sm italic leading-snug">&ldquo;{rec.why}&rdquo;</p>}
+    </>
   );
 }
 
@@ -219,6 +85,12 @@ export default function Home() {
   const [selectedRec, setSelectedRec] = useState<Recommendation | null>(null);
   const [feedbackState, setFeedbackState] = useState<Record<number, FeedbackStatus>>({});
   const [weeklyPicks, setWeeklyPicks] = useState<Recommendation[]>([]);
+  // el typewriter del "why" vive en el modal pero su memoria (qué why ya se
+  // animó) tiene que sobrevivir a que el modal se desmonte al cerrarlo, así
+  // que la ref vive acá — sin esto la home mostraba el texto completo de una,
+  // sin animación, a diferencia de /recommend (pedido de Matías: "que siempre
+  // sea lo mismo no importa dónde estés")
+  const seenWhysRef = useRef<Map<number, string>>(new Map());
 
   async function submitFeedback(recommendationId: number, status: FeedbackStatus) {
     // los picks semanales no vienen de una sesión persistida (son las
@@ -428,13 +300,28 @@ export default function Home() {
             {isAuthenticated ? " esto es lo que tu perfil dice sobre cada una." : " logueate para ver si van con vos."}
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
-            {weeklyPicks.map((rec) => (
-              <WeeklyPickCard
+            {weeklyPicks.map((rec, i) => (
+              <PosterCard
                 key={rec.tmdb_id ?? rec.title}
                 rec={rec}
-                personalized={isAuthenticated}
+                index={i}
+                // sin sesión no hay perfil real detrás del "probablemente te
+                // guste": mostrar score/why sería un dato inventado (mismo
+                // criterio que el why del LLM)
+                showScore={isAuthenticated}
                 onSelect={() => setSelectedRec(rec)}
-              />
+              >
+                <PickText
+                  rec={rec}
+                  why={
+                    isAuthenticated ? undefined : (
+                      <p className="font-mono text-[10px] uppercase tracking-widest text-accent">
+                        Iniciá sesión para saber si te va a gustar →
+                      </p>
+                    )
+                  }
+                />
+              </PosterCard>
             ))}
           </div>
         </section>
@@ -453,8 +340,10 @@ export default function Home() {
             </Link>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
-            {currentPicks.map((rec) => (
-              <CurrentPickCard key={rec.id} rec={rec} onSelect={() => setSelectedRec(rec)} />
+            {currentPicks.map((rec, i) => (
+              <PosterCard key={rec.id} rec={rec} index={i} onSelect={() => setSelectedRec(rec)}>
+                <PickText rec={rec} />
+              </PosterCard>
             ))}
           </div>
         </section>
@@ -519,6 +408,7 @@ export default function Home() {
           rec={selectedRec}
           token={token}
           feedback={feedbackState[selectedRec.id]}
+          seenWhys={seenWhysRef}
           onClose={() => setSelectedRec(null)}
           onFeedback={(status) => submitFeedback(selectedRec.id, status)}
           onRate={(rating, title, tmdbId) => rateTitle(selectedRec, rating, title, tmdbId)}

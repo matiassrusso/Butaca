@@ -1,24 +1,12 @@
-import { Film, Loader2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Loader2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { useLocation } from "wouter";
 
+import { MovieModal, type FeedbackStatus, type Recommendation } from "@/components/MovieModal";
 import { PageTransition } from "@/components/PageTransition";
+import { PosterCard } from "@/components/PosterCard";
 import { API_BASE_URL, useAuth } from "@/hooks/useAuth";
-import { isUnknownMatch } from "@/lib/match";
-
-type Recommendation = {
-  id: number;
-  title: string;
-  year: number;
-  kind: string;
-  why: string;
-  match_score: number;
-  tags: string[];
-  poster_path: string | null;
-  backdrop_path: string | null;
-  overview: string;
-  vote_average: number | null;
-};
 
 type RecommendationSession = {
   id: number;
@@ -84,6 +72,48 @@ export default function History() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [openReview, setOpenReview] = useState<string | null>(null);
+  // el archivo no tenía nada de esto: los pósters no se podían ni clickear
+  // (pedido de Matías, 2026-07-31: la interacción tiene que ser la misma en
+  // todo el sitio). Ahora abre el mismo modal que /recommend y la home, con
+  // el mismo typewriter del why.
+  const [selectedRec, setSelectedRec] = useState<Recommendation | null>(null);
+  const [feedbackState, setFeedbackState] = useState<Record<number, FeedbackStatus>>({});
+  const seenWhysRef = useRef<Map<number, string>>(new Map());
+
+  async function submitFeedback(recommendationId: number, status: FeedbackStatus) {
+    if (!token) return;
+    try {
+      const response = await fetch(`${API_BASE_URL}/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ recommendation_id: recommendationId, status }),
+      });
+      if (!response.ok) throw new Error();
+      setFeedbackState((prev) => ({ ...prev, [recommendationId]: status }));
+    } catch {
+      toast.error("No se pudo guardar el feedback.");
+    }
+  }
+
+  async function rateTitle(rec: Recommendation, rating: number, title?: string, tmdbId?: number | null) {
+    if (!token) return;
+    const finalTitle = title ?? rec.title;
+    try {
+      const response = await fetch(`${API_BASE_URL}/profile/rate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          title: finalTitle,
+          rating,
+          tmdb_id: title ? tmdbId ?? null : rec.tmdb_id,
+        }),
+      });
+      if (!response.ok) throw new Error();
+      toast.success(`Guardado en tu perfil: ${finalTitle}`);
+    } catch {
+      toast.error("No se pudo guardar el puntaje.");
+    }
+  }
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
@@ -285,25 +315,14 @@ export default function History() {
                         {session.taste_summary}
                       </p>
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
-                        {session.recommendations.map((rec) => (
-                          <article key={rec.id}>
-                            <div className="mb-4 relative overflow-hidden">
-                              {rec.poster_path ?? rec.backdrop_path ? (
-                                <img
-                                  src={rec.poster_path ?? rec.backdrop_path ?? undefined}
-                                  alt={rec.title}
-                                  className="w-full aspect-[2/3] object-cover"
-                                />
-                              ) : (
-                                <div className="w-full aspect-[2/3] bg-secondary flex items-center justify-center">
-                                  <Film className="w-8 h-8 text-muted-foreground/40" />
-                                </div>
-                              )}
-                              <div className="absolute top-2 right-2 px-2 py-1 bg-accent text-accent-foreground font-mono text-xs font-bold">
-                                {isUnknownMatch(rec.match_score) ? "S/D" : `${rec.match_score}%`}
-                              </div>
-                            </div>
-                            <h3 className="text-lg font-black uppercase tracking-tighter leading-none mb-1">
+                        {session.recommendations.map((rec, i) => (
+                          <PosterCard
+                            key={rec.id}
+                            rec={rec}
+                            index={i}
+                            onSelect={() => setSelectedRec(rec)}
+                          >
+                            <h3 className="text-lg font-black uppercase tracking-tighter leading-none mb-1 group-hover:text-accent transition-colors">
                               {rec.title}
                             </h3>
                             <p className="font-mono text-[10px] text-muted-foreground mb-2">
@@ -311,7 +330,7 @@ export default function History() {
                               {rec.kind === "series" ? " · Serie" : ""}
                             </p>
                             <p className="font-serif text-sm italic leading-snug">&ldquo;{rec.why}&rdquo;</p>
-                          </article>
+                          </PosterCard>
                         ))}
                       </div>
                     </div>
@@ -322,6 +341,18 @@ export default function History() {
           </div>
         )}
       </main>
+
+      {selectedRec && (
+        <MovieModal
+          rec={selectedRec}
+          token={token}
+          feedback={feedbackState[selectedRec.id]}
+          seenWhys={seenWhysRef}
+          onClose={() => setSelectedRec(null)}
+          onFeedback={(status) => submitFeedback(selectedRec.id, status)}
+          onRate={(rating, title, tmdbId) => rateTitle(selectedRec, rating, title, tmdbId)}
+        />
+      )}
     </PageTransition>
   );
 }
