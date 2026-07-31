@@ -15,7 +15,7 @@ If a session is drifting without moving hacia calidad de recomendación o clarid
 1. Definición corta del alcance (ver `docs/product-mvp.md`)
 2. Implementación en `backend` (FastAPI + SQLite) y/o `frontend` (React + Vite + Tailwind)
 3. Si hay varios agentes en paralelo: coordinación por `TASKS.md` (worktrees separados, marcar In Progress → Done, nunca mergear a `main` solo)
-4. Tests de backend en verde antes de cerrar (282 tests a la fecha)
+4. Tests de backend en verde antes de cerrar (284 tests a la fecha)
 5. Deployeado: frontend [butaca.xyz](https://butaca.xyz/) (Vercel), backend [api.butaca.xyz](https://api.butaca.xyz) (Render, free tier — cold start en la primera request)
 
 ## Key People
@@ -45,13 +45,14 @@ Solo yo (Matías), con posible coordinación multi-agente (Claude, Codex) docume
 
 > <!-- SESSION_STATE:START -->
 > **Last updated:** 2026-07-31 (sesión: 3 bugs de `/weekly` post-feedback +
-> 3 features pedidas + otra ronda de 3 bugs encontrados probando las
-> features en producción — match_score plano, why autoreferencial, bitácora)
+> 3 features pedidas + 3 bugs más de features en producción — match_score
+> plano, why autoreferencial, bitácora — + el match_score seguía repitiéndose
+> tras el primer intento, resuelto con desempate por vote_average)
 >
 > ### ⚠️ Leer primero al retomar
 >
 > Todo lo reportado hasta ahora está resuelto y deployado (push
-> `bc52b2b`..`0c2b95b`). Nada bloqueante pendiente — falta que Matías lo
+> `bc52b2b`..`10ddce2`). Nada bloqueante pendiente — falta que Matías lo
 > pruebe en producción una vez que Render termine el redeploy, sobre todo:
 > - El botón **"¿No estás de acuerdo?"** del modal (vota similares de TMDb)
 >   — no se pudo probar en el browser local porque la TMDb key local está
@@ -61,10 +62,31 @@ Solo yo (Matías), con posible coordinación multi-agente (Claude, Codex) docume
 >   década que rota por semana ISO) — es una decisión de diseño de esta
 >   sesión, no algo que Matías haya especificado en detalle; puede querer
 >   ajustar el ratio 3/2 o las décadas (`tmdb_client.WEEKLY_CLASSIC_DECADES`).
-> - Si el match_score de las semanales sigue viéndose parejo entre sí para
->   Matías (ya no debería ser IDÉNTICO como antes, pero con un perfil muy
->   diverso puede seguir siendo un rango angosto — el vocabulario de tags
->   sigue siendo chico incluso con keywords sumadas).
+> - El desempate de match_score por `vote_average` (`_differentiate_weekly_match_scores`
+>   en `main.py`) es una solución pragmática, no una reescritura del
+>   scoring — el vocabulario de tags sigue siendo chico de fondo (ver
+>   "Contexto" abajo). Si vuelve a verse plano con otro set de trending,
+>   ese es el lugar para ajustar el multiplicador (`* 3`) o el enfoque.
+>
+> **Qué se hizo el 2026-07-31, tercera ronda** (1 commit, `10ddce2`,
+> 282→284 tests) — el match_score seguía repitiéndose tras el fix de la
+> segunda ronda:
+> - Matías mandó una captura mostrando 4 de las 5 semanales con
+>   exactamente el mismo 81% (el fix de keyword tags de la ronda anterior
+>   no alcanzó). Antes de tocar nada más, se confirmó la causa real contra
+>   **logs de producción vía la API de Render** (`RENDER_API_KEY`, service
+>   `srv-d9cnhqu1a83c739eono0`): los logs de `_enrich_with_keyword_tags`
+>   mostraban `KEYWORD_TAG_MAP` sin match para Spider-Man, Supergirl, The
+>   Odyssey y Grave of the Fireflies esa semana puntual (solo Cinema
+>   Paradiso tuvo "coming-of-age") — la allowlist de keywords es
+>   demasiado angosta para diferenciar ese set en particular, el fix
+>   anterior funciona pero no siempre alcanza.
+> - Nuevo desempate en `weekly_picks()`: cuando ya hay evidencia real
+>   (`match_score != 50`) se usa `vote_average` de TMDb —dato real, no
+>   inventado, que sí varía por título— para separar candidatos que el
+>   tag-matching no puede diferenciar. Acotado a `/weekly` en `main.py`
+>   (`_differentiate_weekly_match_scores`), `recommend()` no se toca — lo
+>   usa también `/recommend` y ahí el problema no se manifestó igual.
 >
 > **Qué se hizo el 2026-07-31, segunda ronda** (1 commit, `0c2b95b`,
 > 278→282 tests) — 3 bugs más encontrados por Matías probando las features
@@ -214,7 +236,22 @@ Solo yo (Matías), con posible coordinación multi-agente (Claude, Codex) docume
 >   que `/history` muestra "Letterboxd" + estrellas + toggle "Tu reseña"
 >   para el ítem del zip, y "Butaca" + "Te encantó" (texto, sin
 >   estrellas) para los 11 ítems puntuados a mano en sesiones previas.
+> - Verificación de la tercera ronda (2026-07-31): 284 tests de backend.
+>   Esta vez, en vez de adivinar la causa, se leyeron logs reales de
+>   producción vía la API de Render (`GET /v1/logs`, filtrando por
+>   `text=<título>`) para confirmar qué keywords de TMDb llegaban de
+>   verdad y por qué no matcheaban — diagnóstico basado en datos
+>   reales, no en hipótesis sobre el catálogo mock local.
 > <!-- SESSION_STATE:END -->
+>
+> **2026-07-31 (sesión 3) — 1 commit (`10ddce2`), 282→284 tests:** Matías
+> mandó una captura mostrando 4 de las 5 semanales con el mismo 81% pese
+> al fix de keywords de la sesión 2 — no alcanzó. Se confirmó la causa
+> real contra logs de producción (API de Render) en vez de asumir: para
+> ese set puntual de trending, `KEYWORD_TAG_MAP` no matcheaba nada para 4
+> de los 5 títulos. Se agregó un desempate por `vote_average` de TMDb
+> (dato real, varía por título) acotado a `/weekly`, sin tocar
+> `recommend()` (compartido con `/recommend`).
 >
 > **2026-07-31 (sesión 2) — 1 commit (`0c2b95b`), 278→282 tests:** Matías
 > probó en producción las features de la sesión anterior y encontró 3

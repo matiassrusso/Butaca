@@ -33,6 +33,16 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
 
 ## Pending
 
+- [x] **Match_score seguía repitiéndose tras el fix de keywords (2026-07-31
+      sesión 3, feedback de Matías probando en producción)** — detalle
+      completo en `CLAUDE.md` (`SESSION_STATE`). Resumen: 4 de 5 semanales
+      seguían en el mismo 81% pese al enrichment de keywords de la sesión
+      2 — confirmado contra logs reales de producción (API de Render) que
+      `KEYWORD_TAG_MAP` no matcheaba nada para esos 4 títulos puntuales.
+      Nuevo desempate por `vote_average` de TMDb, acotado a `/weekly`
+      (`_differentiate_weekly_match_scores` en `main.py`), sin tocar
+      `recommend()`. 1 commit `10ddce2`, 282→284 tests.
+
 - [x] **Match_score plano, why autoreferencial, bitácora sin origen
       (2026-07-31 sesión 2, feedback de Matías probando en producción)** —
       detalle completo en `CLAUDE.md` (`SESSION_STATE`). Resumen: las 5
