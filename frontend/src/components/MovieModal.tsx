@@ -140,7 +140,6 @@ function DisagreePanel({
   }, [rec.tmdb_id, rec.kind, token]);
 
   const current = pool?.[index];
-  const outOfTitles = pool !== null && !current;
 
   function next() {
     setIndex((i) => i + 1);
@@ -168,7 +167,12 @@ function DisagreePanel({
     );
   }
 
-  if (outOfTitles) {
+  // check directo sobre `current`, no un booleano derivado: acá `pool` ya no
+  // es null (early return de arriba), así que esto es exactamente el mismo
+  // caso "me quedé sin títulos" — pero TypeScript solo estrecha el tipo con
+  // la forma directa, y con la variable intermedia el build fallaba con
+  // "'current' is possibly undefined" en todo el JSX de abajo.
+  if (!current) {
     return (
       <div className="space-y-3">
         <p className="text-sm text-muted-foreground">
