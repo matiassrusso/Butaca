@@ -1,4 +1,4 @@
-import { Film, Loader2, Search } from "lucide-react";
+import { Film, Loader2, Search, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -35,9 +35,12 @@ export function SearchBox() {
   const boxRef = useRef<HTMLDivElement>(null);
   const seenWhysRef = useRef<Map<number, string>>(new Map());
 
-  // cerrar con click afuera / Escape — mismo patrón que el dropdown del avatar
+  // cerrar con click afuera / Escape — mismo patrón que el dropdown del avatar.
+  // Mientras el modal está abierto NO se cierra: el modal es un portal fuera de
+  // boxRef, así que cualquier click adentro (votar, por ejemplo) contaría como
+  // "click afuera" y mataría la lista de resultados que queremos conservar.
   useEffect(() => {
-    if (!open) return;
+    if (!open || selectedRec) return;
     function onDown(e: MouseEvent) {
       if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
     }
@@ -50,7 +53,7 @@ export function SearchBox() {
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("keydown", onKey);
     };
-  }, [open]);
+  }, [open, selectedRec]);
 
   useEffect(() => {
     const trimmed = query.trim();
@@ -100,8 +103,10 @@ export function SearchBox() {
       const rec: Omit<Recommendation, "id"> & { id: number | null } = await response.json();
       // sin sesión persistida detrás no hay id real — -1, igual que /weekly
       setSelectedRec({ ...rec, id: rec.id ?? -1 });
-      setOpen(false);
-      setQuery("");
+      // la búsqueda queda como está a propósito (pedido de Matías,
+      // 2026-07-31): antes se borraba al abrir un resultado, así que puntuar
+      // cinco de Spider-Man obligaba a re-escribir "spiderman" cinco veces.
+      // Se limpia con la X o vaciando el input, no sola.
     } catch {
       toast.error("No pude analizar ese título.");
     } finally {
@@ -123,6 +128,20 @@ export function SearchBox() {
             className="w-40 lg:w-56 bg-transparent font-mono text-[10px] uppercase tracking-widest placeholder:text-muted-foreground focus:outline-none"
           />
           {searching && <Loader2 className="w-3.5 h-3.5 animate-spin text-accent shrink-0" />}
+          {query && !searching && (
+            <button
+              type="button"
+              onClick={() => {
+                setQuery("");
+                setResults([]);
+                setOpen(false);
+              }}
+              aria-label="Limpiar búsqueda"
+              className="shrink-0 text-muted-foreground hover:text-accent transition-colors"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
 
         {open && (

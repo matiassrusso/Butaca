@@ -61,17 +61,22 @@ const MARQUEE_NAMES = [
 
 // El póster (tilt, glare, badge, click) sale de PosterCard, compartido con
 // /recommend y /history — acá solo va el bloque de texto de abajo.
+//
+// El "why" NO va acá (pedido de Matías, 2026-07-31): afuera solo póster,
+// título, año y match; el veredicto se lee al abrir el detalle, con el
+// typewriter. De paso empareja las cards — un why de 2 líneas contra uno de 5
+// dejaba la grilla del weekly visiblemente despareja.
 function PickText({ rec, why }: { rec: Recommendation; why?: ReactNode }) {
   return (
     <>
       <h3 className="text-lg font-black uppercase tracking-tighter leading-none mb-1 group-hover:text-accent transition-colors">
         {rec.title}
       </h3>
-      <p className="font-mono text-[10px] text-muted-foreground mb-2">
+      <p className="font-mono text-[10px] text-muted-foreground">
         {rec.year}
         {rec.kind === "series" ? " · Serie" : ""}
       </p>
-      {why ?? <p className="font-serif text-sm italic leading-snug">&ldquo;{rec.why}&rdquo;</p>}
+      {why}
     </>
   );
 }

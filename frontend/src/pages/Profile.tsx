@@ -132,6 +132,65 @@ function PeopleList({ people }: { people: PersonCount[] }) {
   );
 }
 
+// Tu cuenta de Letterboxd (pedido de Matías, 2026-07-31). No es cosmético: el
+// backend solo persiste un import por username si es el tuyo, así que un amigo
+// probando la página con su usuario ya no te pisa el perfil. La reclama sola el
+// primer import; esto existe para corregirla o desvincularla.
+function LetterboxdAccount() {
+  const { user, saveLetterboxdUsername } = useAuth();
+  const [value, setValue] = useState(user?.letterboxdUsername ?? "");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setValue(user?.letterboxdUsername ?? "");
+  }, [user?.letterboxdUsername]);
+
+  const dirty = value.trim() !== (user?.letterboxdUsername ?? "");
+
+  async function save() {
+    setSaving(true);
+    try {
+      await saveLetterboxdUsername(value.trim());
+      toast.success(value.trim() ? "Guardado." : "Cuenta de Letterboxd desvinculada.");
+    } catch {
+      toast.error("No pude guardar tu usuario de Letterboxd.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="mt-10 border-2 border-foreground p-5">
+      <label
+        htmlFor="letterboxd-account"
+        className="block font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-2"
+      >
+        Tu cuenta de Letterboxd
+      </label>
+      <div className="flex flex-wrap items-center gap-3">
+        <input
+          id="letterboxd-account"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder="sin vincular"
+          className="flex-1 min-w-40 bg-transparent border-b-2 border-foreground/30 py-2 font-mono text-sm placeholder:text-muted-foreground focus:outline-none focus:border-accent"
+        />
+        <button
+          onClick={save}
+          disabled={!dirty || saving}
+          className="px-4 py-2 font-mono text-[10px] uppercase tracking-widest border border-foreground/30 hover:border-accent hover:text-accent disabled:opacity-40 disabled:hover:border-foreground/30 disabled:hover:text-foreground transition-colors"
+        >
+          {saving ? "Guardando…" : "Guardar"}
+        </button>
+      </div>
+      <p className="font-mono text-[10px] uppercase leading-relaxed text-muted-foreground/60 mt-3">
+        Solo los imports de esta cuenta se guardan en tu perfil. Si alguien más prueba Butaca
+        con su usuario desde tu sesión, ve sus picks pero no toca tus datos.
+      </p>
+    </div>
+  );
+}
+
 export default function Profile() {
   const { isAuthenticated, loading: authLoading, token, user, deleteAccount } = useAuth();
   const [, navigate] = useLocation();
@@ -271,6 +330,8 @@ export default function Profile() {
               )}
             </div>
           </div>
+
+          <LetterboxdAccount />
 
           {summary && (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-0 mt-10 border-2 border-foreground">

@@ -15,7 +15,7 @@ import { MovieModal, type FeedbackStatus, type Recommendation } from "@/componen
 import { PageTransition } from "@/components/PageTransition";
 import { PosterCard } from "@/components/PosterCard";
 import { API_BASE_URL, useAuth } from "@/hooks/useAuth";
-import { useSwipeCard } from "@/hooks/useSwipeCard";
+import { useSwipeCard, type SwipeDirection } from "@/hooks/useSwipeCard";
 import { useTiltCard } from "@/hooks/useTiltCard";
 
 type RecommendResponse = {
@@ -245,6 +245,16 @@ function ManualRatingGrid({
 const swipeActionBtn =
   "flex-1 py-3 font-mono text-[10px] uppercase tracking-widest border transition-colors border-foreground/20 hover:border-foreground";
 
+const LETTERBOXD_USERNAMES_KEY = "butaca.letterboxdUsernames";
+const MAX_REMEMBERED_USERNAMES = 5;
+
+const SWIPE_HINTS: Record<SwipeDirection, string> = {
+  right: "Me encantó",
+  up: "Bien",
+  left: "No me gustó",
+  down: "No la vi",
+};
+
 // pedido de Matías: alternativa "estilo swipe/Tinder" al modo manual, una
 // peli a la vez en vez de la grilla completa — arrastrar el poster (derecha
 // = me encantó, izquierda = no me gustó) o los botones de abajo (que además
@@ -275,10 +285,12 @@ function SwipeRating({
     }
   }
 
-  const { cardRef, onPointerDown, onPointerMove, onPointerUp } = useSwipeCard(
-    () => rate(4.5),
-    () => rate(1.5)
-  );
+  const { cardRef, hint, onPointerDown, onPointerMove, onPointerUp } = useSwipeCard({
+    right: () => rate(4.5),
+    left: () => rate(1.5),
+    up: () => rate(3.5),
+    down: () => rate(null),
+  });
 
   if (!current) {
     return (
@@ -293,7 +305,9 @@ function SwipeRating({
       <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground text-center mb-4">
         {doneCount} / {titles.length}
       </div>
-      <div className="max-w-xs mx-auto" style={{ touchAction: "pan-y" }}>
+      {/* touchAction none, no pan-y: ahora el swipe también usa el eje
+          vertical, y con pan-y el navegador se queda el gesto para scrollear */}
+      <div className="max-w-xs mx-auto" style={{ touchAction: "none" }}>
         <div
           key={current.title}
           ref={cardRef}
@@ -301,8 +315,15 @@ function SwipeRating({
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerUp}
-          className="select-none cursor-grab active:cursor-grabbing border-2 border-foreground bg-secondary"
+          className="relative select-none cursor-grab active:cursor-grabbing border-2 border-foreground bg-secondary"
         >
+          {hint && (
+            <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-background/70">
+              <span className="font-mono text-xs uppercase tracking-widest px-3 py-2 border-2 border-foreground bg-background">
+                {SWIPE_HINTS[hint]}
+              </span>
+            </div>
+          )}
           {current.poster_path ? (
             <img
               src={current.poster_path}
@@ -337,7 +358,8 @@ function SwipeRating({
         </button>
       </div>
       <p className="text-center font-mono text-[9px] text-muted-foreground/60 mt-3">
-        Deslizá el poster — derecha: me encantó, izquierda: no me gustó
+        Deslizá el poster — derecha: me encantó · arriba: bien · izquierda: no me gustó ·
+        abajo: no la vi
       </p>
     </div>
   );
@@ -346,7 +368,7 @@ function SwipeRating({
 // ─── Main Page ───────────────────────────────────────────────────────────────
 
 export default function Recommend() {
-  const { isAuthenticated, loading: authLoading, token } = useAuth();
+  const { isAuthenticated, loading: authLoading, token, user } = useAuth();
   const [, navigate] = useLocation();
 
   const [step, setStep] = useState<WizardStep>(1);
@@ -358,6 +380,41 @@ export default function Recommend() {
   const [letterboxdUsername, setLetterboxdUsername] = useState("");
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Pedido de Matías (2026-07-31): que recuerde los usuarios que vas poniendo,
+  // y que el tuyo esté precargado. El tuyo es dato del perfil (decide si el
+  // import escribe en tu cuenta); el historial de los otros es solo comodidad,
+  // así que vive en localStorage y se ofrece con un <datalist> nativo.
+  const [rememberedUsernames, setRememberedUsernames] = useState<string[]>(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem(LETTERBOXD_USERNAMES_KEY) ?? "[]");
+      return Array.isArray(stored) ? stored.filter((x) => typeof x === "string") : [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    if (user?.letterboxdUsername) setLetterboxdUsername(user.letterboxdUsername);
+  }, [user?.letterboxdUsername]);
+
+  const isForeignAccount =
+    Boolean(user?.letterboxdUsername) &&
+    letterboxdUsername.trim().length > 0 &&
+    letterboxdUsername.trim().toLowerCase() !== user!.letterboxdUsername!.toLowerCase();
+
+  function rememberUsername(name: string) {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setRememberedUsernames((prev) => {
+      const next = [trimmed, ...prev.filter((x) => x.toLowerCase() !== trimmed.toLowerCase())].slice(
+        0,
+        MAX_REMEMBERED_USERNAMES,
+      );
+      localStorage.setItem(LETTERBOXD_USERNAMES_KEY, JSON.stringify(next));
+      return next;
+    });
+  }
 
   // onboarding without Letterboxd: seed titles fetched lazily, ratings by title
   const [onboardingTitles, setOnboardingTitles] = useState<OnboardingTitle[]>([]);
@@ -565,6 +622,7 @@ export default function Recommend() {
         } else {
           endpoint = `${API_BASE_URL}/recommend/letterboxd`;
           formData.append("username", letterboxdUsername.trim());
+          rememberUsername(letterboxdUsername);
         }
 
         response = await fetch(endpoint, {
@@ -813,8 +871,23 @@ export default function Recommend() {
                       value={letterboxdUsername}
                       onChange={(e) => setLetterboxdUsername(e.target.value)}
                       placeholder="ej: scorsese"
+                      list="letterboxd-usernames"
                       className="w-full bg-transparent border-b-2 border-foreground py-3 font-mono text-sm placeholder:text-muted-foreground focus:outline-none focus:border-accent"
                     />
+                    {/* datalist nativo: el historial de usuarios tipeados es
+                        comodidad del navegador, no dato del perfil — no
+                        necesita backend */}
+                    <datalist id="letterboxd-usernames">
+                      {rememberedUsernames.map((name) => (
+                        <option key={name} value={name} />
+                      ))}
+                    </datalist>
+                    {isForeignAccount && (
+                      <p className="font-mono text-[10px] uppercase leading-relaxed text-accent mt-3">
+                        Ojo: «{letterboxdUsername.trim()}» no es tu cuenta ({user?.letterboxdUsername}).
+                        Te muestro los picks igual, pero no lo guardo en tu perfil.
+                      </p>
+                    )}
                   </div>
                 ) : (
                   <div>

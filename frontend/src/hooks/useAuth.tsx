@@ -10,7 +10,14 @@ import {
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8001";
 const TOKEN_KEY = "butaca_token";
 
-type User = { username: string; email: string | null; emailVerified: boolean };
+type User = {
+  username: string;
+  email: string | null;
+  emailVerified: boolean;
+  // tu cuenta de Letterboxd: la reclama el primer import por username y decide
+  // si un import escribe en tu perfil o no (ver /profile/letterboxd)
+  letterboxdUsername: string | null;
+};
 
 type AuthState = {
   user: User | null;
@@ -20,6 +27,7 @@ type AuthState = {
   isAuthenticated: boolean;
   login: (username: string, password: string) => Promise<void>;
   register: (username: string, password: string, email: string) => Promise<void>;
+  saveLetterboxdUsername: (letterboxdUsername: string) => Promise<void>;
   logout: () => Promise<void>;
   deleteAccount: (password: string) => Promise<void>;
 };
@@ -61,6 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             username: data.username,
             email: data.email ?? null,
             emailVerified: Boolean(data.email_verified),
+            letterboxdUsername: data.letterboxd_username ?? null,
           });
       })
       .catch(() => {
@@ -99,7 +108,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.setItem(TOKEN_KEY, body.token);
       // minimal until the /auth/me effect (fired by setToken) fills in email +
       // verification status
-      setUser({ username: body.username, email: null, emailVerified: false });
+      setUser({
+        username: body.username,
+        email: null,
+        emailVerified: false,
+        letterboxdUsername: null,
+      });
       setToken(body.token);
     },
     [],
@@ -148,6 +162,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [token],
   );
 
+  const saveLetterboxdUsername = useCallback(
+    async (letterboxdUsername: string) => {
+      if (!token) return;
+      const response = await fetch(`${API_BASE_URL}/profile/letterboxd`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ letterboxd_username: letterboxdUsername }),
+      });
+      if (!response.ok) throw new Error("No pude guardar tu usuario de Letterboxd.");
+      const body = await response.json();
+      setUser((prev) =>
+        prev ? { ...prev, letterboxdUsername: body.letterboxd_username ?? null } : prev,
+      );
+    },
+    [token],
+  );
+
   return (
     <AuthContext.Provider
       value={{
@@ -160,6 +191,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         register,
         logout,
         deleteAccount,
+        saveLetterboxdUsername,
       }}
     >
       {children}

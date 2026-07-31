@@ -325,11 +325,10 @@ export default function History() {
                             <h3 className="text-lg font-black uppercase tracking-tighter leading-none mb-1 group-hover:text-accent transition-colors">
                               {rec.title}
                             </h3>
-                            <p className="font-mono text-[10px] text-muted-foreground mb-2">
+                            <p className="font-mono text-[10px] text-muted-foreground">
                               {rec.year}
                               {rec.kind === "series" ? " · Serie" : ""}
                             </p>
-                            <p className="font-serif text-sm italic leading-snug">&ldquo;{rec.why}&rdquo;</p>
                           </PosterCard>
                         ))}
                       </div>
