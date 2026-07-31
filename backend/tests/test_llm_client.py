@@ -12,8 +12,10 @@ def _clear_refine_cache():
     # clear between tests so one test's cached refine result can't leak into
     # another test that reuses the same mood/candidates.
     llm_client._REFINE_CACHE.clear()
+    llm_client._WEEKLY_PREDICTION_CACHE.clear()
     yield
     llm_client._REFINE_CACHE.clear()
+    llm_client._WEEKLY_PREDICTION_CACHE.clear()
 
 
 HEURISTIC = RecommendResponse(
@@ -377,3 +379,83 @@ def test_refine_does_not_cache_a_response_that_failed_validation(monkeypatch) ->
 
     assert len(calls) == 2  # volvió a preguntar en vez de servir la respuesta mala
     assert [r.title for r in result.recommendations] == ["Fake Thriller"]
+
+
+def test_predict_weekly_fit_requires_api_key(monkeypatch) -> None:
+    monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
+
+    with pytest.raises(llm_client.LlmError):
+        llm_client.predict_weekly_fit(1, [], HEURISTIC)
+
+
+def test_predict_weekly_fit_overwrites_why_for_matched_picks(monkeypatch) -> None:
+    monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        llm_client,
+        "_call_nvidia_with_fallback",
+        lambda prompt, api_key: {
+            "picks": [
+                {"title": "Fake Thriller", "why": "le va a encantar por el tono oscuro"},
+                {"title": "Fake Comedy", "why": "probablemente no le enganche"},
+            ]
+        },
+    )
+
+    result = llm_client.predict_weekly_fit(1, [], HEURISTIC)
+
+    by_title = {r.title: r.why for r in result.recommendations}
+    assert by_title["Fake Thriller"] == "Le va a encantar por el tono oscuro"
+    assert by_title["Fake Comedy"] == "Probablemente no le enganche"
+
+
+def test_predict_weekly_fit_never_drops_a_candidate_the_llm_missed(monkeypatch) -> None:
+    # el set de las 5 semanales es fijo — si el LLM solo predice para una,
+    # la otra tiene que sobrevivir con su why heurístico, no desaparecer
+    monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        llm_client,
+        "_call_nvidia_with_fallback",
+        lambda prompt, api_key: {"picks": [{"title": "Fake Thriller", "why": "le va a encantar"}]},
+    )
+
+    result = llm_client.predict_weekly_fit(1, [], HEURISTIC)
+
+    assert [r.title for r in result.recommendations] == ["Fake Thriller", "Fake Comedy"]
+    assert result.recommendations[1].why == "heurística"  # el why original de HEURISTIC, sin tocar
+
+
+def test_predict_weekly_fit_cache_is_isolated_per_user(monkeypatch) -> None:
+    # bug evitado a propósito: las 5 películas semanales son las MISMAS para
+    # todos, así que sin el user_id en la clave de cache el usuario 2
+    # recibiría la predicción cacheada del usuario 1
+    monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
+    calls: list[int] = []
+
+    def fake_call(prompt: str, api_key: str) -> dict:
+        calls.append(1)
+        why = f"predicción para el llamado {len(calls)}"
+        return {"picks": [{"title": "Fake Thriller", "why": why}, {"title": "Fake Comedy", "why": why}]}
+
+    monkeypatch.setattr(llm_client, "_call_nvidia_with_fallback", fake_call)
+
+    result_user_1 = llm_client.predict_weekly_fit(1, [], HEURISTIC)
+    result_user_2 = llm_client.predict_weekly_fit(2, [], HEURISTIC)
+
+    assert len(calls) == 2  # cada usuario disparó su propia llamada al LLM
+    assert result_user_1.recommendations[0].why != result_user_2.recommendations[0].why
+
+
+def test_predict_weekly_fit_caches_same_user_same_candidates(monkeypatch) -> None:
+    monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
+    calls: list[int] = []
+
+    def fake_call(prompt: str, api_key: str) -> dict:
+        calls.append(1)
+        return {"picks": [{"title": "Fake Thriller", "why": "x"}, {"title": "Fake Comedy", "why": "y"}]}
+
+    monkeypatch.setattr(llm_client, "_call_nvidia_with_fallback", fake_call)
+
+    llm_client.predict_weekly_fit(1, [], HEURISTIC)
+    llm_client.predict_weekly_fit(1, [], HEURISTIC)
+
+    assert len(calls) == 1

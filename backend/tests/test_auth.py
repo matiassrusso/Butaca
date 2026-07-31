@@ -3,7 +3,7 @@ import zipfile
 
 from fastapi.testclient import TestClient
 
-from backend.app import db
+from backend.app import auth, db
 from backend.app.main import app
 
 client = TestClient(app)
@@ -161,6 +161,20 @@ def test_auth_me_rejects_missing_or_invalid_token() -> None:
         client.get("/auth/me", headers={"Authorization": "Bearer nonsense"}).status_code
         == 401
     )
+
+
+def test_get_optional_user_returns_none_without_token() -> None:
+    assert auth.get_optional_user(authorization=None) is None
+    assert auth.get_optional_user(authorization="Bearer nonsense") is None
+
+
+def test_get_optional_user_returns_user_with_valid_token() -> None:
+    token = _register("optionaluser")["token"]
+
+    user = auth.get_optional_user(authorization=f"Bearer {token}")
+
+    assert user is not None
+    assert user["username"] == "optionaluser"
 
 
 def test_expired_session_is_rejected() -> None:

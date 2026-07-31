@@ -173,6 +173,40 @@ def catalog_stats() -> CatalogStatsResponse:
     return CatalogStatsResponse(**stats)
 
 
+@app.get("/weekly", response_model=RecommendResponse)
+def weekly_picks(user: sqlite3.Row | None = Depends(auth.get_optional_user)) -> RecommendResponse:
+    """Pedido de Matías (2026-07-30): 5 recomendaciones semanales, iguales
+    para todos — TMDb /trending/movie/week real (sin curación editorial a
+    mano). Público: sin sesión (o sin historial) se devuelven sin
+    personalizar, con match_score neutro y why genérico — recommend() ya
+    degrada así solo con ratings=[]. Con sesión y algo de historial, se
+    puntúan contra el perfil real; si el LLM está configurado, además
+    predice explícitamente si le va a gustar o no a esa persona en
+    particular (llm_client.predict_weekly_fit, prompt de predicción, no de
+    recomendación)."""
+    if not tmdb_client.is_configured():
+        raise HTTPException(status_code=503, detail="Catálogo de TMDb no configurado.")
+    try:
+        trending = tmdb_client.fetch_weekly_trending()
+    except tmdb_client.TmdbError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    if not trending:
+        raise HTTPException(status_code=502, detail="TMDb no devolvió películas en tendencia esta semana.")
+
+    ratings = _rebuild_ratings(user["id"]) if user else []
+    profile = db.get_taste_profile(user["id"]) if user else None
+
+    heuristic = recommend(ratings, mood="", catalog=trending, also_seen=frozenset(), profile=profile)
+
+    if user and ratings and llm_client.is_configured():
+        try:
+            return llm_client.predict_weekly_fit(user["id"], ratings, heuristic)
+        except llm_client.LlmError as exc:
+            logger.warning("Weekly LLM prediction failed, falling back to heuristic: %s", exc)
+
+    return heuristic
+
+
 @app.get("/admin/stats")
 def admin_stats(x_admin_token: str | None = Header(default=None)) -> dict:
     # gated by a shared secret in BUTACA_ADMIN_TOKEN. When that env isn't

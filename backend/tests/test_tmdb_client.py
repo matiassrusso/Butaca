@@ -1049,3 +1049,76 @@ def test_fetch_watch_providers_empty_when_region_absent(monkeypatch) -> None:
     providers = tmdb_client.fetch_watch_providers(99, kind="movie")
 
     assert providers == {"link": None, "flatrate": [], "rent": [], "buy": []}
+
+
+def test_fetch_weekly_trending_requires_api_key(monkeypatch) -> None:
+    monkeypatch.delenv("TMDB_API_KEY", raising=False)
+
+    with pytest.raises(tmdb_client.TmdbError):
+        tmdb_client.fetch_weekly_trending()
+
+
+def test_fetch_weekly_trending_hits_the_real_trending_endpoint(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    tmdb_client._WEEKLY_TRENDING_CACHE.clear()
+
+    def fake_get_json(url: str) -> dict:
+        assert "/trending/movie/week" in url
+        return {
+            "results": [
+                {
+                    "id": i,
+                    "title": f"Trending {i}",
+                    "release_date": "2020-01-01",
+                    "genre_ids": [28],
+                }
+                for i in range(8)
+            ]
+        }
+
+    monkeypatch.setattr(tmdb_client, "_get_json", fake_get_json)
+
+    trending = tmdb_client.fetch_weekly_trending()
+
+    # capado a WEEKLY_PICKS_COUNT aunque TMDb devuelva más
+    assert len(trending) == tmdb_client.WEEKLY_PICKS_COUNT
+    assert [t["title"] for t in trending] == [f"Trending {i}" for i in range(tmdb_client.WEEKLY_PICKS_COUNT)]
+
+
+def test_fetch_weekly_trending_caches_within_the_same_iso_week(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    tmdb_client._WEEKLY_TRENDING_CACHE.clear()
+    calls: list[str] = []
+
+    def fake_get_json(url: str) -> dict:
+        calls.append(url)
+        return {"results": [{"id": 1, "title": "X", "release_date": "2020-01-01", "genre_ids": [28]}]}
+
+    monkeypatch.setattr(tmdb_client, "_get_json", fake_get_json)
+
+    tmdb_client.fetch_weekly_trending()
+    tmdb_client.fetch_weekly_trending()
+
+    assert len(calls) == 1
+
+
+def test_fetch_weekly_trending_does_not_alias_the_cached_dict(monkeypatch) -> None:
+    # _clone_items hace un .copy() por item — protege reasignar una key del
+    # dict top-level (ej. item["title"] = otra cosa) de contaminar el cache
+    # compartido. Mismo alcance que el resto de los caches del módulo: nunca
+    # mutar item["tags"] IN PLACE (asignar una lista nueva sí es seguro),
+    # así que no es lo que este test cubre.
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    tmdb_client._WEEKLY_TRENDING_CACHE.clear()
+    monkeypatch.setattr(
+        tmdb_client,
+        "_get_json",
+        lambda url: {"results": [{"id": 1, "title": "X", "release_date": "2020-01-01", "genre_ids": [28]}]},
+    )
+
+    first = tmdb_client.fetch_weekly_trending()
+    first[0]["title"] = "Contaminated"
+
+    second = tmdb_client.fetch_weekly_trending()
+
+    assert second[0]["title"] == "X"

@@ -1,3 +1,4 @@
+import datetime
 import json
 import logging
 import os
@@ -383,6 +384,50 @@ def fetch_candidates(mood: str, pages: int = 2) -> list[dict]:
         DISCOVER_TV_URL, "series", TV_GENRE_ID_TAG_MAP, MOOD_TV_GENRE_ID_MAP, mood, api_key, pages
     )
     return movies + series
+
+
+WEEKLY_TRENDING_URL = "https://api.themoviedb.org/3/trending/movie/week"
+WEEKLY_PICKS_COUNT = 5
+# cacheado por semana ISO (no por TTL fijo): "recomendaciones semanales,
+# iguales para todos" (pedido de Matías) — todos los usuarios que pidan
+# /weekly en la misma semana tienen que ver EXACTAMENTE el mismo set de
+# películas, así que la clave de cache es la semana, no un timestamp.
+_WEEKLY_TRENDING_CACHE: dict[str, list[dict]] = {}
+
+
+def _iso_week_key() -> str:
+    year, week, _ = datetime.datetime.now(datetime.timezone.utc).isocalendar()
+    return f"{year}-W{week:02d}"
+
+
+def fetch_weekly_trending() -> list[dict]:
+    """Las 5 películas más populares de la semana según TMDb
+    (/trending/movie/week) — mismo shape que fetch_candidates (via
+    _map_result), mismas para todos los usuarios durante toda la semana
+    ISO actual. No hay curación editorial acá a propósito: es data real de
+    TMDb, no una lista armada a mano."""
+    api_key = os.environ.get("TMDB_API_KEY")
+    if not api_key:
+        raise TmdbError("TMDB_API_KEY no configurada.")
+
+    cache_key = _iso_week_key()
+    cached = _WEEKLY_TRENDING_CACHE.get(cache_key)
+    if cached is not None:
+        return _clone_items(cached)
+
+    params = {"api_key": api_key, "language": "en-US"}
+    data = _get_json(f"{WEEKLY_TRENDING_URL}?{urllib.parse.urlencode(params)}")
+    mapped = [
+        result
+        for raw in data.get("results", [])
+        if (result := _map_result(raw, "movie", GENRE_ID_TAG_MAP)) is not None
+    ][:WEEKLY_PICKS_COUNT]
+
+    # una sola semana vigente a la vez — no hace falta un LRU con TTL, la
+    # semana vieja simplemente no se vuelve a pedir nunca más
+    _WEEKLY_TRENDING_CACHE.clear()
+    _WEEKLY_TRENDING_CACHE[cache_key] = mapped
+    return _clone_items(mapped)
 
 
 def fetch_catalog_stats() -> dict:

@@ -14,6 +14,11 @@ type RecommendationSession = {
   recommendations: Recommendation[];
 };
 
+// /weekly no persiste sesión — id siempre null a diferencia de /history
+type RecommendResponse = {
+  recommendations: (Omit<Recommendation, "id"> & { id: number | null })[];
+};
+
 const STEPS = [
   {
     number: "01",
@@ -120,6 +125,90 @@ function CurrentPickCard({ rec, onSelect }: { rec: Recommendation; onSelect: () 
   );
 }
 
+// pedido de Matías: mismo poster+score+why que CurrentPickCard, pero el
+// score/why solo se muestran logueado — anónimo no tiene perfil real detrás
+// del "probablemente te guste", así que mostrarlo sería un dato inventado
+// (mismo criterio que llevó a no citar puntajes falsos en el why del LLM)
+function WeeklyPickCard({
+  rec,
+  personalized,
+  onSelect,
+}: {
+  rec: Recommendation;
+  personalized: boolean;
+  onSelect: () => void;
+}) {
+  const { wrapRef, onMouseMove, onMouseLeave } = useTiltCard();
+
+  return (
+    <article
+      className="group cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+      style={{ perspective: "1000px" }}
+      role="button"
+      tabIndex={0}
+      aria-label={`Ver detalle de ${rec.title}`}
+      onClick={onSelect}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect();
+        }
+      }}
+    >
+      <div
+        ref={wrapRef}
+        onMouseMove={onMouseMove}
+        onMouseLeave={onMouseLeave}
+        className="mb-4 relative transition-transform duration-200 ease-out"
+        style={{ transformStyle: "preserve-3d" }}
+      >
+        <div className="relative overflow-hidden">
+          {rec.poster_path ?? rec.backdrop_path ? (
+            <img
+              src={rec.poster_path ?? rec.backdrop_path ?? undefined}
+              alt={rec.title}
+              className="w-full aspect-[2/3] object-cover transition-transform duration-700 group-hover:scale-[1.04]"
+            />
+          ) : (
+            <div className="w-full aspect-[2/3] bg-secondary flex items-center justify-center">
+              <Film className="w-8 h-8 text-muted-foreground/40" />
+            </div>
+          )}
+          <div
+            className="pointer-events-none absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 mix-blend-overlay"
+            style={{
+              background:
+                "radial-gradient(circle at var(--mx, 50%) var(--my, 50%), rgba(255,255,255,0.5), transparent 55%)",
+            }}
+          />
+        </div>
+        {personalized && (
+          <div
+            className="absolute top-2 right-2 px-2 py-1 bg-accent text-accent-foreground font-mono text-xs font-bold"
+            style={{ transform: "translateZ(40px)" }}
+          >
+            {rec.match_score}% match
+          </div>
+        )}
+      </div>
+      <h3 className="text-lg font-black uppercase tracking-tighter leading-none mb-1 group-hover:text-accent transition-colors">
+        {rec.title}
+      </h3>
+      <p className="font-mono text-[10px] text-muted-foreground mb-2">
+        {rec.year}
+        {rec.kind === "series" ? " · Serie" : ""}
+      </p>
+      {personalized ? (
+        <p className="font-serif text-sm italic leading-snug">&ldquo;{rec.why}&rdquo;</p>
+      ) : (
+        <p className="font-mono text-[10px] uppercase tracking-widest text-accent">
+          Iniciá sesión para saber si te va a gustar →
+        </p>
+      )}
+    </article>
+  );
+}
+
 export default function Home() {
   const { isAuthenticated, token } = useAuth();
   const { scrollY } = useScroll();
@@ -128,9 +217,14 @@ export default function Home() {
   const [latestSession, setLatestSession] = useState<RecommendationSession | null>(null);
   const [selectedRec, setSelectedRec] = useState<Recommendation | null>(null);
   const [feedbackState, setFeedbackState] = useState<Record<number, FeedbackStatus>>({});
+  const [weeklyPicks, setWeeklyPicks] = useState<Recommendation[]>([]);
 
   async function submitFeedback(recommendationId: number, status: FeedbackStatus) {
-    if (!token) return;
+    // los picks semanales no vienen de una sesión persistida (son las
+    // mismas 5 pelis para todo el mundo, no un pedido individual), así que
+    // no tienen un id real — se les asigna -1 al mapear la respuesta de
+    // /weekly, y el feedback no aplica ahí
+    if (!token || recommendationId < 0) return;
     try {
       const response = await fetch(`${API_BASE_URL}/feedback`, {
         method: "POST",
@@ -166,6 +260,28 @@ export default function Home() {
         if (!cancelled) setLatestSession(null);
       });
 
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
+  // pedido de Matías (2026-07-30): 5 recomendaciones semanales, iguales para
+  // todos — públicas, no hace falta sesión. Con token, /weekly ADEMÁS
+  // personaliza match_score/why contra el historial real del usuario.
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${API_BASE_URL}/weekly`, token ? { headers: { Authorization: `Bearer ${token}` } } : {})
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body: RecommendResponse | null) => {
+        if (cancelled || !body) return;
+        // sin sesión persistida no hay id real — -1 en vez de null para no
+        // ensanchar el type Recommendation compartido con /recommend, que
+        // sí siempre trae un id válido
+        setWeeklyPicks(body.recommendations.map((rec) => ({ ...rec, id: rec.id ?? -1 })));
+      })
+      .catch(() => {
+        if (!cancelled) setWeeklyPicks([]);
+      });
     return () => {
       cancelled = true;
     };
@@ -270,6 +386,31 @@ export default function Home() {
           ))}
         </div>
       </div>
+
+      {weeklyPicks.length > 0 && (
+        <section className="max-w-7xl mx-auto px-6 py-24 border-b-2 border-foreground">
+          <div className="flex items-baseline gap-4 mb-10">
+            <span className="font-mono text-xs px-2 py-1 border border-foreground/20">
+              [Recomendaciones de la semana]
+            </span>
+            <div className="h-px flex-grow bg-foreground/10" />
+          </div>
+          <p className="font-serif italic text-lg text-muted-foreground mb-10 max-w-2xl">
+            Las 5 más populares de esta semana en TMDb, las mismas para todo el mundo —
+            {isAuthenticated ? " esto es lo que tu perfil dice sobre cada una." : " logueate para ver si van con vos."}
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
+            {weeklyPicks.map((rec) => (
+              <WeeklyPickCard
+                key={rec.tmdb_id ?? rec.title}
+                rec={rec}
+                personalized={isAuthenticated}
+                onSelect={() => setSelectedRec(rec)}
+              />
+            ))}
+          </div>
+        </section>
+      )}
 
       {currentPicks.length > 0 && (
         <section className="max-w-7xl mx-auto px-6 py-24 border-b-2 border-foreground">

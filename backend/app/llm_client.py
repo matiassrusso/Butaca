@@ -40,6 +40,13 @@ REFINE_CACHE_TTL_SECONDS = 15 * 60
 REFINE_CACHE_MAX_ENTRIES = 64
 
 _REFINE_CACHE: OrderedDict[tuple[str, tuple], tuple[float, dict]] = OrderedDict()
+# cache DISTINTA de _REFINE_CACHE, no reusada: esa cachea por (mood,
+# candidatos) sin el usuario, lo cual está bien para /recommend (perfiles
+# distintos casi nunca comparten exactamente el mismo pool de candidatos
+# personalizados) pero rompería acá — las 5 películas semanales son
+# LITERALMENTE las mismas para todos, así que sin el user_id en la clave el
+# segundo usuario que pidiera /weekly recibiría la predicción del primero.
+_WEEKLY_PREDICTION_CACHE: OrderedDict[tuple[int, tuple], tuple[float, dict]] = OrderedDict()
 
 
 class LlmError(Exception):
@@ -109,13 +116,12 @@ def _rating_label(rating: float) -> str:
     return "le gustó"
 
 
-def _build_prompt(ratings: list[RatedItem], mood: str, heuristic: RecommendResponse) -> str:
-    digest = _build_taste_digest(ratings)
+def _ratings_lines(ratings: list[RatedItem]) -> str:
     # los items "manual" (botón Me encantó/Bien/No me gustó del modo "Sin
     # cuenta") tienen un rating sintético internamente (para el scoring),
     # pero el usuario nunca dio un puntaje preciso — citarlo como "(4.5/5)"
     # en el why sería un dato inventado (reportado por Matías, 2026-07-30).
-    ratings_lines = (
+    return (
         "\n".join(
             (
                 f"- {item.title} ({item.rating}/5): {item.review or 'sin reseña'}"
@@ -126,10 +132,19 @@ def _build_prompt(ratings: list[RatedItem], mood: str, heuristic: RecommendRespo
         )
         or "sin historial"
     )
-    candidate_lines = "\n".join(
+
+
+def _candidate_lines(heuristic: RecommendResponse) -> str:
+    return "\n".join(
         f"- {rec.title} ({rec.year}, tags: {', '.join(rec.tags)}): {rec.overview[:200]}"
         for rec in heuristic.recommendations
     )
+
+
+def _build_prompt(ratings: list[RatedItem], mood: str, heuristic: RecommendResponse) -> str:
+    digest = _build_taste_digest(ratings)
+    ratings_lines = _ratings_lines(ratings)
+    candidate_lines = _candidate_lines(heuristic)
     return (
         "Sos un crítico de cine que arma recomendaciones muy personalizadas en español.\n\n"
         f"Perfil de gusto detectado: {digest}\n\n"
@@ -315,3 +330,89 @@ def refine_recommendations(
 
     taste_summary = capitalize_sentence(str(result.get("taste_summary", "")).strip()) or heuristic.taste_summary
     return RecommendResponse(taste_summary=taste_summary, recommendations=reordered[:6])
+
+
+def _build_weekly_prompt(ratings: list[RatedItem], heuristic: RecommendResponse) -> str:
+    digest = _build_taste_digest(ratings)
+    ratings_lines = _ratings_lines(ratings)
+    candidate_lines = _candidate_lines(heuristic)
+    return (
+        "Sos un crítico de cine que predice si a un usuario le va a gustar una película en "
+        "particular, en español.\n\n"
+        f"Perfil de gusto detectado: {digest}\n\n"
+        f"Reseñas completas del usuario (hasta 40):\n{ratings_lines}\n\n"
+        "Estas son las 5 películas más populares de esta semana en TMDb — no elegís cuáles "
+        "mostrar (eso ya está decidido y es igual para todos los usuarios), tu trabajo es "
+        "predecir, para CADA UNA de las 5, si le va a gustar o no a ESTE usuario en particular. "
+        f"Escribí sobre las 5, ninguna de menos:\n{candidate_lines}\n\n"
+        "Para cada película, 1-2 frases en tono de predicción (\"le va a encantar porque...\", "
+        "\"es probable que no le enganche porque...\", \"tiene chances, aunque...\") que citen un "
+        "patrón concreto del perfil de arriba o una comparación explícita con un título que ya "
+        "puntuó — nada de elogios genéricos que podrían aplicar a cualquier usuario. Si citás el "
+        "puntaje de un título de 'Reseñas completas', usá EXACTAMENTE el que aparece ahí (no "
+        "inventes un número si el título dice 'sin puntaje numérico').\n\n"
+        "Respondé ÚNICAMENTE con un JSON válido, sin texto ni markdown alrededor, con esta forma "
+        'exacta: {"picks": [{"title": "...", "why": "..."}, ...]} — un elemento por cada una de '
+        "las 5, nunca menos."
+    )
+
+
+def predict_weekly_fit(
+    user_id: int, ratings: list[RatedItem], heuristic: RecommendResponse
+) -> RecommendResponse:
+    """Variante de refine_recommendations para las 'recomendaciones de la
+    semana' (pedido de Matías, 2026-07-30): mismo mecanismo de LLM, pero el
+    prompt pide una PREDICCIÓN ('¿le va a gustar o no?') en vez de una
+    justificación de por qué se eligió. A diferencia de refine_recommendations,
+    acá el set de películas es fijo — nunca se puede perder ninguna de las 5
+    aunque el LLM no las cubra todas o devuelva basura para alguna; en ese
+    caso esa una se queda con el why heurístico (mejor una card con razón
+    genérica que una card faltante)."""
+    api_key = os.environ.get("NVIDIA_API_KEY")
+    if not api_key:
+        raise LlmError("NVIDIA_API_KEY no configurada.")
+    if not heuristic.recommendations:
+        raise LlmError("No hay candidatos para predecir.")
+
+    candidates = tuple(
+        rec.tmdb_id if rec.tmdb_id is not None else rec.title.strip().lower()
+        for rec in heuristic.recommendations
+    )
+    cache_key = (user_id, candidates)
+    cached = _WEEKLY_PREDICTION_CACHE.get(cache_key)
+    cache_hit = False
+    if cached is not None:
+        expires_at, cached_result = cached
+        if expires_at > _now_monotonic():
+            _WEEKLY_PREDICTION_CACHE.move_to_end(cache_key)
+            cache_hit = True
+            result = cached_result
+        else:
+            del _WEEKLY_PREDICTION_CACHE[cache_key]
+            result = None
+    else:
+        result = None
+    if result is None:
+        result = _call_nvidia_with_fallback(_build_weekly_prompt(ratings, heuristic), api_key)
+
+    by_title = {_title_key(rec.title): rec for rec in heuristic.recommendations}
+    why_by_key: dict[str, str] = {}
+    for pick in result.get("picks", []):
+        key = _title_key(str(pick.get("title", "")))
+        if key not in by_title:
+            continue
+        why = capitalize_sentence(str(pick.get("why", "")).strip())
+        if why:
+            why_by_key[key] = why
+
+    if not cache_hit:
+        _WEEKLY_PREDICTION_CACHE[cache_key] = (_now_monotonic() + REFINE_CACHE_TTL_SECONDS, result)
+        _WEEKLY_PREDICTION_CACHE.move_to_end(cache_key)
+        while len(_WEEKLY_PREDICTION_CACHE) > REFINE_CACHE_MAX_ENTRIES:
+            _WEEKLY_PREDICTION_CACHE.popitem(last=False)
+
+    recommendations = [
+        rec.model_copy(update={"why": why_by_key.get(_title_key(rec.title), rec.why)})
+        for rec in heuristic.recommendations
+    ]
+    return RecommendResponse(taste_summary=heuristic.taste_summary, recommendations=recommendations)

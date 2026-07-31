@@ -33,6 +33,55 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
 
 ## Pending
 
+- [x] **Recomendaciones de la semana (2026-07-30, pedido de Matías)** — 5
+      pelis en la home, iguales para todo el mundo, con "probabilidad de que
+      te guste" personalizada. Sin curación editorial:
+      `tmdb_client.fetch_weekly_trending()` pega contra el
+      `/trending/movie/week` real de TMDb, cacheado por semana ISO (no por
+      TTL) para que "iguales para todos" sea literal.
+      - `GET /weekly` (público, `auth.get_optional_user` nuevo — nunca 401,
+        `None` sin token/token inválido en vez de cortar la request). Reusa
+        `recommender.recommend()` tal cual pasándole las 5 trending como
+        `catalog` — sin tocar el motor de scoring, ya acepta un catalog
+        custom. Sin sesión o sin historial, `recommend([])` ya degrada solo
+        a match_score neutro (50%) y why heurístico genérico — cero código
+        especial para el caso anónimo.
+      - Con sesión + historial + `NVIDIA_API_KEY` configurada:
+        `llm_client.predict_weekly_fit()`, prompt nuevo (no reusa
+        `refine_recommendations`) que pide una PREDICCIÓN ("le va a
+        encantar porque...", no una justificación de por qué se eligió)
+        para las 5, sin poder dropear ninguna — a diferencia del refine de
+        `/recommend`, acá el LLM no puede reducir el set.
+      - **Bug de diseño evitado antes de escribir código, no encontrado
+        después:** `_REFINE_CACHE` (la que ya usa `refine_recommendations`)
+        cachea por `(mood, candidatos)`, sin el usuario — para `/recommend`
+        eso está bien (perfiles distintos casi nunca comparten pool de
+        candidatos), pero acá las 5 películas son LITERALMENTE las mismas
+        para todos, así que reusarla habría hecho que el segundo usuario en
+        pedir `/weekly` recibiera la predicción del primero. Cache separada
+        (`_WEEKLY_PREDICTION_CACHE`) con el `user_id` en la clave.
+        Verificado reintroduciendo el bug a propósito (clave sin
+        `user_id`): el test de aislamiento
+        (`test_predict_weekly_fit_cache_is_isolated_per_user`) lo agarra
+        (`1 == 2` falla como se esperaba).
+      - Frontend: nueva sección en `Home.tsx` (pública, entre el marquee y
+        "Current picks"), reusa `MovieModal` para el detalle. Sin sesión no
+        se muestra el score/why (sería un dato sin base real) — CTA "Iniciá
+        sesión para saber si te va a gustar" en su lugar. Las 5 recs de
+        `/weekly` no tienen `id` real (no hay sesión persistida detrás,
+        `recommendations_served` no aplica acá) — se mapea a `-1` al leer
+        la respuesta (evitando ensanchar el type `Recommendation`
+        compartido con `/recommend`, que sí siempre trae un id válido) y
+        `submitFeedback` guardea `recommendationId < 0` para no mandar
+        feedback a un pick que no existe como fila.
+      Verificado end-to-end en el preview local mockeando `/weekly`: caso
+      logueado muestra score+why, caso anónimo muestra el CTA sin datos
+      inventados, el modal abre bien con id=-1, clickear feedback en un
+      pick semanal no manda nada ni tira error. `tsc --noEmit` y
+      `npm run build` limpios. Backend: 8 tests nuevos entre
+      `tmdb_client`/`llm_client`/`auth`/`main` (incluye el de aislamiento de
+      cache por usuario y el de que ninguna de las 5 se pierde si el LLM no
+      cubre todas). 263 tests.
 - [x] **Pedido de Matías (2026-07-30): buscar una peli en "Sin cuenta"
       mostraba los resultados en un dropdown angosto, no como posters** —
       `Recommend.tsx`. El dropdown flotante (fila chica con thumbnail 8x12 +

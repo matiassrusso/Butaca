@@ -1310,3 +1310,131 @@ def test_profile_summary_counts_activity() -> None:
     # top_title = la mejor puntuada, no la última importada
     assert body["top_title"] == "Whiplash"
     assert body["top_rating"] == 4.5
+
+
+# ─── Recomendaciones de la semana (pedido de Matías, 2026-07-30) ────────────
+
+_WEEKLY_TRENDING = [
+    {
+        "tmdb_id": i,
+        "title": f"Weekly Movie {i}",
+        "year": 2020,
+        "kind": "movie",
+        "tags": ["dark", "psychological"],
+        "poster_path": None,
+        "backdrop_path": None,
+        "overview": "",
+        "vote_average": 7.5,
+    }
+    for i in range(5)
+]
+
+
+def test_weekly_requires_tmdb_configured(monkeypatch) -> None:
+    monkeypatch.delenv("TMDB_API_KEY", raising=False)
+
+    assert client.get("/weekly").status_code == 503
+
+
+def test_weekly_works_without_auth_no_personalization(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.fetch_weekly_trending", lambda: _WEEKLY_TRENDING
+    )
+
+    response = client.get("/weekly")
+
+    assert response.status_code == 200
+    recs = response.json()["recommendations"]
+    assert len(recs) == 5
+    assert {r["title"] for r in recs} == {m["title"] for m in _WEEKLY_TRENDING}
+    # sin historial no hay evidencia — match_score neutro (50, "sin evidencia")
+    assert all(r["match_score"] == 50 for r in recs)
+
+
+def test_weekly_same_five_movies_for_every_user_this_week(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.fetch_weekly_trending", lambda: _WEEKLY_TRENDING
+    )
+    headers_a = _auth_headers("weeklyusera")
+    headers_b = _auth_headers("weeklyuserb")
+
+    titles_a = {r["title"] for r in client.get("/weekly", headers=headers_a).json()["recommendations"]}
+    titles_b = {r["title"] for r in client.get("/weekly", headers=headers_b).json()["recommendations"]}
+    titles_anon = {r["title"] for r in client.get("/weekly").json()["recommendations"]}
+
+    assert titles_a == titles_b == titles_anon == {m["title"] for m in _WEEKLY_TRENDING}
+
+
+def test_weekly_scores_against_the_users_real_taste(monkeypatch) -> None:
+    # /recommend/manual no carga review (solo title+rating) y las tags de
+    # _enrich_loved_ratings_with_genre_tags nunca se persisten (rated_items no
+    # tiene columna tags) — así que el signal de un usuario real solo
+    # sobrevive entre requests vía review text o el profile de directores/
+    # actores/década. Para aislar lo que este test quiere probar (que /weekly
+    # efectivamente pasa el historial del usuario a recommend() y puntúa con
+    # eso) se mockea _rebuild_ratings directo con tags ya puestas, en vez de
+    # depender de esa cadena completa de persistencia.
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.fetch_weekly_trending", lambda: _WEEKLY_TRENDING
+    )
+    monkeypatch.setattr(
+        "backend.app.main._rebuild_ratings",
+        lambda user_id: [
+            RatedItem(title="Loved Movie", rating=4.5, tags=["dark", "psychological"])
+        ],
+    )
+    headers = _auth_headers("weeklytaste")
+
+    response = client.get("/weekly", headers=headers)
+
+    assert response.status_code == 200
+    recs = response.json()["recommendations"]
+    assert all(r["match_score"] > 50 for r in recs)
+
+
+def test_weekly_uses_llm_prediction_when_configured(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.fetch_weekly_trending", lambda: _WEEKLY_TRENDING
+    )
+    monkeypatch.setattr(
+        "backend.app.main.llm_client.predict_weekly_fit",
+        lambda user_id, ratings, heuristic: heuristic.model_copy(
+            update={
+                "recommendations": [
+                    r.model_copy(update={"why": "predicción del LLM"}) for r in heuristic.recommendations
+                ]
+            }
+        ),
+    )
+    headers = _auth_headers("weeklyllm")
+    client.post("/recommend/manual", headers=headers, json={"ratings": _MANUAL_RATINGS})
+
+    response = client.get("/weekly", headers=headers)
+
+    assert response.status_code == 200
+    assert all(r["why"] == "predicción del LLM" for r in response.json()["recommendations"])
+
+
+def test_weekly_falls_back_to_heuristic_when_llm_fails(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.fetch_weekly_trending", lambda: _WEEKLY_TRENDING
+    )
+
+    def boom(user_id, ratings, heuristic):
+        raise LlmError("boom")
+
+    monkeypatch.setattr("backend.app.main.llm_client.predict_weekly_fit", boom)
+    headers = _auth_headers("weeklyllmfail")
+    client.post("/recommend/manual", headers=headers, json={"ratings": _MANUAL_RATINGS})
+
+    response = client.get("/weekly", headers=headers)
+
+    assert response.status_code == 200
+    assert len(response.json()["recommendations"]) == 5

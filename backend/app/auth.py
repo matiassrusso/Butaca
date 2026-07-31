@@ -65,3 +65,12 @@ def get_current_user(authorization: str | None = Header(default=None)) -> sqlite
         raise HTTPException(status_code=401, detail="Sesión inválida o expirada.")
 
     return user
+
+
+def get_optional_user(authorization: str | None = Header(default=None)) -> sqlite3.Row | None:
+    """Como get_current_user, pero para endpoints públicos que personalizan
+    SI hay sesión en vez de exigirla — nunca 401, devuelve None sin token o
+    con uno inválido/expirado en vez de cortar la request."""
+    if not authorization or not authorization.startswith("Bearer "):
+        return None
+    return db.get_user_by_token(authorization.removeprefix("Bearer ").strip())
