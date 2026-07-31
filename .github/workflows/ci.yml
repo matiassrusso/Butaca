@@ -25,7 +25,7 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: backend/requirements.txt
-      - run: pip install -r backend/requirements.txt
+      - run: pip install -r backend/requirements.txt pytest httpx
       # desde la raiz, no desde backend/: los tests importan
       # `backend.app.*`, asi que correrlos desde backend/ falla la coleccion
       # entera con ModuleNotFoundError y parece que no hubiera tests
