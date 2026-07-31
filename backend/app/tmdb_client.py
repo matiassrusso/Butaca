@@ -887,30 +887,48 @@ def fetch_title_by_id(tmdb_id: int, kind: str = "movie") -> dict | None:
     return result.copy() if result else None
 
 
-SIMILAR_TITLES_LIMIT = 6
+# Pool, no cuántos se muestran: el flujo de votación descarta los que el
+# usuario no vio, así que hacen falta bastantes más que los 6 votos que pide
+# para tener margen (pedido de Matías, 2026-07-31).
+SIMILAR_TITLES_LIMIT = 20
 
 
 def fetch_similar_titles(tmdb_id: int, kind: str = "movie") -> list[dict]:
-    """Pedido de Matías (2026-07-31): botón "no estoy de acuerdo con el
-    match" — si un título se lo trae sin evidencia real en su perfil (ej.
-    ama a Spider-Man pero nunca puntuó nada de esa saga), le muestra
-    similares de TMDb (/movie/{id}/similar) para que vote y esa saga deje
-    de estar "en blanco". Mismo shape que fetch_candidates (vía
-    _map_result), mismo criterio: sin tags mapeables, se descarta."""
+    """Botón "no estoy de acuerdo con el match": si un título llega sin
+    evidencia real en el perfil (ej. ama a Spider-Man pero nunca puntuó nada
+    de esa saga), le ofrece títulos parecidos para votar y llenar ese hueco.
+
+    Pega contra /recommendations y NO contra /similar: /similar matchea por
+    keywords y géneros y devuelve cualquier cosa — para "The Gentlemen" traía
+    "Stuart Little" y "Around the World in 80 Days" (reportado por Matías con
+    captura, 2026-07-31), y votar eso no dice nada sobre su gusto.
+    /recommendations sale del comportamiento real de los usuarios de TMDb y
+    es bastante mejor. Cae a /similar solo si /recommendations viene vacío,
+    que pasa con títulos muy nuevos o de nicho.
+
+    Mismo shape que fetch_candidates (vía _map_result), mismo criterio: sin
+    tags mapeables, se descarta."""
     api_key = os.environ.get("TMDB_API_KEY")
     if not api_key:
         raise TmdbError("TMDB_API_KEY no configurada.")
 
     genre_tag_map = GENRE_ID_TAG_MAP if kind == "movie" else TV_GENRE_ID_TAG_MAP
     endpoint = _tmdb_endpoint_kind(kind)
-    data = _get_json(
-        f"https://api.themoviedb.org/3/{endpoint}/{tmdb_id}/similar?api_key={api_key}&language=en-US"
-    )
-    mapped = [
-        result
-        for raw in data.get("results", [])
-        if (result := _map_result(raw, kind, genre_tag_map)) is not None
-    ]
+
+    def _fetch(path: str) -> list[dict]:
+        data = _get_json(
+            f"https://api.themoviedb.org/3/{endpoint}/{tmdb_id}/{path}"
+            f"?api_key={api_key}&language=en-US"
+        )
+        return [
+            result
+            for raw in data.get("results", [])
+            if (result := _map_result(raw, kind, genre_tag_map)) is not None
+        ]
+
+    mapped = _fetch("recommendations")
+    if not mapped:
+        mapped = _fetch("similar")
     return mapped[:SIMILAR_TITLES_LIMIT]
 
 

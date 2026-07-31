@@ -94,6 +94,172 @@ const RATE_OPTIONS: { label: string; value: number }[] = [
 
 type SimilarTitle = { title: string; year: number; kind: string; tmdb_id: number | null; poster_path: string | null };
 
+// cuántas opiniones hacen falta para recalcular el match (pedido de Matías,
+// 2026-07-31: "que tengas que reunir 6 votos de 6 películas distintas")
+const VOTES_NEEDED = 6;
+
+// Panel de "no estoy de acuerdo con el match". Va de a UNA película por vez,
+// con su póster, y en dos pasos: primero si la viste, y recién si la viste
+// pregunta qué te pareció. Antes era una lista plana sin opción de "no la vi",
+// así que un título que no habías visto te trababa el flujo.
+function DisagreePanel({
+  rec,
+  token,
+  onRate,
+  onEnoughVotes,
+}: {
+  rec: Recommendation;
+  token: string | null;
+  onRate: (rating: number, title: string, tmdbId: number | null) => void;
+  onEnoughVotes: () => void;
+}) {
+  const [pool, setPool] = useState<SimilarTitle[] | null>(null);
+  const [index, setIndex] = useState(0);
+  const [votes, setVotes] = useState(0);
+  const [step, setStep] = useState<"seen" | "rating">("seen");
+
+  useEffect(() => {
+    if (rec.tmdb_id == null || !token) {
+      setPool([]);
+      return;
+    }
+    let cancelled = false;
+    fetch(`${API_BASE_URL}/movies/${rec.tmdb_id}/similar?kind=${encodeURIComponent(rec.kind)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body: { titles: SimilarTitle[] } | null) => {
+        if (!cancelled) setPool(body?.titles ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setPool([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [rec.tmdb_id, rec.kind, token]);
+
+  const current = pool?.[index];
+  const outOfTitles = pool !== null && !current;
+
+  function next() {
+    setIndex((i) => i + 1);
+    setStep("seen");
+  }
+
+  function vote(rating: number) {
+    if (!current) return;
+    onRate(rating, current.title, current.tmdb_id);
+    const total = votes + 1;
+    setVotes(total);
+    if (total >= VOTES_NEEDED) {
+      onEnoughVotes();
+      return;
+    }
+    next();
+  }
+
+  if (pool === null) {
+    return (
+      <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+        Buscando parecidas...
+      </div>
+    );
+  }
+
+  if (outOfTitles) {
+    return (
+      <div className="space-y-3">
+        <p className="text-sm text-muted-foreground">
+          {votes > 0
+            ? `Me quedé sin títulos parecidos. Con ${votes} voto${votes === 1 ? "" : "s"} ya afiné algo tu perfil.`
+            : "No encontré títulos parecidos para votar."}
+        </p>
+        {votes > 0 && (
+          <button
+            onClick={onEnoughVotes}
+            className="w-full py-2 font-mono text-[10px] uppercase tracking-widest border border-foreground/30 hover:border-accent hover:text-accent transition-colors"
+          >
+            Recalcular igual
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between font-mono text-[9px] uppercase tracking-widest text-muted-foreground">
+        <span>Ajustá el match</span>
+        <span className="text-accent">
+          {votes}/{VOTES_NEEDED}
+        </span>
+      </div>
+
+      <div className="flex gap-3">
+        {current.poster_path ? (
+          <img
+            src={current.poster_path}
+            alt={current.title}
+            className="w-16 aspect-[2/3] object-cover shrink-0 outline outline-1 -outline-offset-1 outline-black/10"
+          />
+        ) : (
+          <div className="w-16 aspect-[2/3] bg-secondary flex items-center justify-center shrink-0">
+            <Film className="w-5 h-5 text-muted-foreground/40" />
+          </div>
+        )}
+        <div className="min-w-0">
+          <p className="font-medium leading-tight">{current.title}</p>
+          <p className="font-mono text-[10px] text-muted-foreground">
+            {current.year}
+            {current.kind === "series" ? " · Serie" : ""}
+          </p>
+        </div>
+      </div>
+
+      {step === "seen" ? (
+        <>
+          <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+            ¿La viste?
+          </p>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setStep("rating")}
+              className="flex-1 py-2 font-mono text-[10px] uppercase tracking-widest border border-foreground/30 hover:border-accent hover:text-accent transition-colors"
+            >
+              Sí, la vi
+            </button>
+            <button
+              onClick={next}
+              className="flex-1 py-2 font-mono text-[10px] uppercase tracking-widest border border-foreground/30 hover:border-foreground transition-colors"
+            >
+              No la vi
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+            ¿Qué te pareció?
+          </p>
+          <div className="flex gap-2">
+            {RATE_OPTIONS.map((opt) => (
+              <button
+                key={opt.label}
+                onClick={() => vote(opt.value)}
+                className="flex-1 py-2 px-1 font-mono text-[9px] uppercase tracking-widest border border-foreground/30 hover:border-accent hover:text-accent transition-colors"
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export function MovieModal({
   rec,
   token,
@@ -122,28 +288,31 @@ export function MovieModal({
   const [details, setDetails] = useState<MovieDetails | null>(null);
   const [showRateMenu, setShowRateMenu] = useState(false);
   const [loadingDetails, setLoadingDetails] = useState(false);
-  const displayedWhy = useTypewriterWhy(rec.id, rec.why, seenWhys);
 
-  // pedido de Matías (2026-07-31): "no estoy de acuerdo con el match" — si
-  // el motivo es no tener nada puntuado de esa saga/género (ej. ama a
-  // Spider-Man pero nunca votó nada de esa franquicia), esto le muestra
-  // similares de TMDb para votar y arreglar esa laguna en el perfil.
+  // "no estoy de acuerdo con el match": después de juntar VOTES_NEEDED
+  // opiniones se recalcula contra el perfil ya actualizado. El resultado se
+  // guarda acá y pisa lo que muestra el modal, en vez de avisarle a la página
+  // que lo abrió — así no hay que tocar los cuatro lugares que lo usan.
   const [showDisagree, setShowDisagree] = useState(false);
-  const [similar, setSimilar] = useState<SimilarTitle[] | null>(null);
-  const [loadingSimilar, setLoadingSimilar] = useState(false);
-  const [votedSimilar, setVotedSimilar] = useState<Set<string>>(new Set());
+  const [recalculated, setRecalculated] = useState<Recommendation | null>(null);
+  const [recalculating, setRecalculating] = useState(false);
 
-  function toggleDisagree() {
-    setShowDisagree((v) => !v);
-    if (similar !== null || rec.tmdb_id == null || !token) return;
-    setLoadingSimilar(true);
-    fetch(`${API_BASE_URL}/movies/${rec.tmdb_id}/similar?kind=${encodeURIComponent(rec.kind)}`, {
+  const shown = recalculated ?? rec;
+  const displayedWhy = useTypewriterWhy(shown.id, shown.why, seenWhys);
+
+  function recalculate() {
+    if (rec.tmdb_id == null || !token) return;
+    setRecalculating(true);
+    fetch(`${API_BASE_URL}/titles/${rec.tmdb_id}/verdict?kind=${encodeURIComponent(rec.kind)}`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((response) => (response.ok ? response.json() : null))
-      .then((body: { titles: SimilarTitle[] } | null) => setSimilar(body?.titles ?? []))
-      .catch(() => setSimilar([]))
-      .finally(() => setLoadingSimilar(false));
+      .then((body: (Omit<Recommendation, "id"> & { id: number | null }) | null) => {
+        if (body) setRecalculated({ ...body, id: body.id ?? rec.id });
+        setShowDisagree(false);
+      })
+      .catch(() => setShowDisagree(false))
+      .finally(() => setRecalculating(false));
   }
 
   useEffect(() => {
@@ -222,31 +391,50 @@ export function MovieModal({
               {rec.title}
             </h2>
             <div className="font-mono text-xs text-muted-foreground uppercase tracking-widest mb-6">
-              {rec.year}
-              {rec.kind === "series" ? " · Serie" : ""}
-              {rec.vote_average != null ? ` · ★ ${rec.vote_average.toFixed(1)}` : ""}
+              {shown.year}
+              {shown.kind === "series" ? " · Serie" : ""}
+              {shown.vote_average != null ? ` · ★ ${shown.vote_average.toFixed(1)}` : ""}
               {" · "}
-              {isUnknownMatch(rec.match_score) ? "Match desconocido" : `${rec.match_score}% match`}
-              {rec.tmdb_id != null && token && (
-                <button
-                  onClick={toggleDisagree}
-                  className="ml-2 normal-case tracking-normal underline decoration-dotted hover:text-accent"
-                >
-                  ¿No estás de acuerdo?
-                </button>
+              {recalculating ? (
+                <span className="text-accent">Recalculando…</span>
+              ) : isUnknownMatch(shown.match_score) ? (
+                "Match desconocido"
+              ) : (
+                `${shown.match_score}% match`
+              )}
+              {rec.tmdb_id != null && token && !recalculating && (
+                <span className="relative inline-block">
+                  <button
+                    onClick={() => setShowDisagree((v) => !v)}
+                    aria-expanded={showDisagree}
+                    className="ml-2 normal-case tracking-normal underline decoration-dotted hover:text-accent"
+                  >
+                    ¿No estás de acuerdo?
+                  </button>
+                  {showDisagree && (
+                    <div className="absolute left-0 top-full mt-2 z-10 w-72 p-4 border-2 border-foreground bg-background shadow-2xl normal-case tracking-normal text-foreground">
+                      <DisagreePanel
+                        rec={rec}
+                        token={token}
+                        onRate={onRate}
+                        onEnoughVotes={recalculate}
+                      />
+                    </div>
+                  )}
+                </span>
               )}
             </div>
             <p className="font-serif text-2xl italic leading-snug text-balance mb-6">
               &ldquo;{displayedWhy}
-              {displayedWhy.length < rec.why.length && (
+              {displayedWhy.length < shown.why.length && (
                 <span className="inline-block w-2 h-5 -mb-0.5 ml-0.5 bg-accent animate-pulse" />
               )}
               &rdquo;
             </p>
 
-            {rec.tags.length > 0 && (
+            {shown.tags.length > 0 && (
               <div className="flex flex-wrap gap-2 mb-6">
-                {rec.tags.map((tag) => (
+                {shown.tags.map((tag) => (
                   <span key={tag} className="font-mono text-[10px] uppercase px-2 py-1 border border-foreground/20">
                     {tag}
                   </span>
@@ -254,52 +442,8 @@ export function MovieModal({
               </div>
             )}
 
-            {rec.overview && (
-              <p className="text-sm text-muted-foreground leading-relaxed mb-6">{rec.overview}</p>
-            )}
-
-            {showDisagree && (
-              <div className="border-t border-foreground/10 pt-4 mb-6">
-                <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-3">
-                  Votá similares para que el match mejore
-                </p>
-                {loadingSimilar ? (
-                  <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    Buscando similares...
-                  </div>
-                ) : similar && similar.length > 0 ? (
-                  <div className="space-y-3">
-                    {similar.map((item) => (
-                      <div key={item.tmdb_id ?? item.title} className="flex items-center justify-between gap-3">
-                        <span className="text-sm">
-                          {item.title} <span className="text-muted-foreground">({item.year})</span>
-                        </span>
-                        {votedSimilar.has(item.title) ? (
-                          <span className="font-mono text-[10px] uppercase text-accent">¡Gracias!</span>
-                        ) : (
-                          <div className="flex gap-1 shrink-0">
-                            {RATE_OPTIONS.map((opt) => (
-                              <button
-                                key={opt.label}
-                                onClick={() => {
-                                  onRate(opt.value, item.title, item.tmdb_id);
-                                  setVotedSimilar((prev) => new Set(prev).add(item.title));
-                                }}
-                                className="px-2 py-1 font-mono text-[9px] uppercase border border-foreground/30 hover:border-accent hover:text-accent transition-colors"
-                              >
-                                {opt.label}
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground">No encontré similares para votar.</p>
-                )}
-              </div>
+            {shown.overview && (
+              <p className="text-sm text-muted-foreground leading-relaxed mb-6">{shown.overview}</p>
             )}
 
             {loadingDetails && (

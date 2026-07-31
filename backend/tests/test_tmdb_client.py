@@ -475,12 +475,15 @@ def test_fetch_similar_titles_requires_api_key(monkeypatch) -> None:
         tmdb_client.fetch_similar_titles(569094)
 
 
-def test_fetch_similar_titles_hits_the_similar_endpoint_and_filters_tagless(monkeypatch) -> None:
-    # botón "no estoy de acuerdo con el match" (pedido de Matías, 2026-07-31)
+def test_fetch_similar_titles_prefers_recommendations_over_similar(monkeypatch) -> None:
+    # /similar matchea por keywords/géneros y devuelve cualquier cosa: para
+    # "The Gentlemen" traía "Stuart Little" (reportado por Matías con captura,
+    # 2026-07-31). /recommendations sale del comportamiento real de usuarios.
     monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    called: list[str] = []
 
     def fake_get_json(url: str) -> dict:
-        assert "/movie/569094/similar" in url
+        called.append(url)
         return {
             "results": [
                 {"id": 1, "title": "Tagged Movie", "release_date": "2020-01-01", "genre_ids": [28]},
@@ -492,7 +495,31 @@ def test_fetch_similar_titles_hits_the_similar_endpoint_and_filters_tagless(monk
 
     similar = tmdb_client.fetch_similar_titles(569094)
 
-    assert [item["title"] for item in similar] == ["Tagged Movie"]
+    assert "/movie/569094/recommendations" in called[0]
+    assert not any("/similar" in url for url in called)  # no hizo falta el fallback
+    assert [item["title"] for item in similar] == ["Tagged Movie"]  # filtra los sin tags
+
+
+def test_fetch_similar_titles_falls_back_to_similar_when_recommendations_is_empty(
+    monkeypatch,
+) -> None:
+    # títulos muy nuevos o de nicho no tienen /recommendations todavía
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+
+    def fake_get_json(url: str) -> dict:
+        if "/recommendations" in url:
+            return {"results": []}
+        return {
+            "results": [
+                {"id": 9, "title": "From Similar", "release_date": "2020-01-01", "genre_ids": [28]}
+            ]
+        }
+
+    monkeypatch.setattr(tmdb_client, "_get_json", fake_get_json)
+
+    similar = tmdb_client.fetch_similar_titles(1)
+
+    assert [item["title"] for item in similar] == ["From Similar"]
 
 
 def test_fetch_similar_titles_caps_at_the_limit(monkeypatch) -> None:
@@ -503,7 +530,7 @@ def test_fetch_similar_titles_caps_at_the_limit(monkeypatch) -> None:
         lambda url: {
             "results": [
                 {"id": i, "title": f"Movie {i}", "release_date": "2020-01-01", "genre_ids": [28]}
-                for i in range(20)
+                for i in range(tmdb_client.SIMILAR_TITLES_LIMIT + 10)
             ]
         },
     )
