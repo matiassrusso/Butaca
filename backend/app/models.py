@@ -195,6 +195,11 @@ class RateTitleRequest(BaseModel):
     tmdb_id: int | None = None
 
 
+class LetterboxdUsernameRequest(BaseModel):
+    # "" desvincula la cuenta; el largo tope es el de Letterboxd
+    letterboxd_username: str = Field(default="", max_length=100)
+
+
 class CastMember(BaseModel):
     name: str
     character: str = ""

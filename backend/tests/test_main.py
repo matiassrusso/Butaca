@@ -155,6 +155,48 @@ def test_recommend_letterboxd_persists_tmdb_id_from_rss(monkeypatch) -> None:
     assert goodfellas["source"] == "import"
 
 
+def test_letterboxd_import_claims_username_then_protects_profile(monkeypatch) -> None:
+    """El primer username importado queda registrado como tuyo y persiste. Un
+    username distinto después genera picks pero NO toca tus rated_items —
+    escenario de Matías: le mostrás la página a un amigo, pone su usuario, y
+    antes te sobrescribía el perfil."""
+
+    def diary_for(username: str):
+        title = "GoodFellas" if username == "matias" else "Shrek"
+        return ([RatedItem(title=title, rating=5, review="", watched_date="2024-01-01")], set())
+
+    monkeypatch.setattr(letterboxd_scrape, "fetch_letterboxd_diary", diary_for)
+    headers = _auth_headers("lbowner")
+    user_id = db.get_user_by_username("lbowner")["id"]
+
+    client.post("/recommend/letterboxd", headers=headers, data={"username": "matias", "mood": ""})
+
+    assert client.get("/auth/me", headers=headers).json()["letterboxd_username"] == "matias"
+    assert any(item["title"] == "GoodFellas" for item in db.get_watched_items(user_id))
+
+    # ahora el amigo
+    response = client.post(
+        "/recommend/letterboxd", headers=headers, data={"username": "elamigo", "mood": ""}
+    )
+
+    assert response.status_code == 200
+    titles = {item["title"] for item in db.get_watched_items(user_id)}
+    assert "Shrek" not in titles, "el import de otra cuenta no debe escribir en tu perfil"
+    assert "GoodFellas" in titles
+    # y el dueño no cambió
+    assert client.get("/auth/me", headers=headers).json()["letterboxd_username"] == "matias"
+
+
+def test_put_profile_letterboxd_overwrites_and_unlinks() -> None:
+    headers = _auth_headers("lbsetter")
+
+    client.put("/profile/letterboxd", headers=headers, json={"letterboxd_username": "  nuevo  "})
+    assert client.get("/auth/me", headers=headers).json()["letterboxd_username"] == "nuevo"
+
+    client.put("/profile/letterboxd", headers=headers, json={"letterboxd_username": ""})
+    assert client.get("/auth/me", headers=headers).json()["letterboxd_username"] is None
+
+
 def test_recommend_letterboxd_surfaces_scrape_errors_as_400(monkeypatch) -> None:
     def raise_scrape_error(username: str):
         raise letterboxd_scrape.ScrapeError(f"No encontré un usuario de Letterboxd llamado «{username}».")
@@ -1100,28 +1142,38 @@ def test_refine_session_applies_llm_and_persists(monkeypatch) -> None:
     session_id = fast["session_id"]
     rec_id = fast["recommendations"][0]["id"]
 
-    def fake_refine(ratings, mood, heuristic):
-        picks = [heuristic.recommendations[0].model_copy(update={"why": "razón del agente"})]
-        return heuristic.model_copy(
-            update={"taste_summary": "resumen del agente", "recommendations": picks}
-        )
+    # predict_fit (set fijo), NO refine_recommendations (elige del pool): los
+    # picks de la sesión ya se le mostraron al usuario, así que TODOS tienen
+    # que recibir why del agente. Antes se usaba refine_recommendations, que
+    # devuelve solo los que el LLM eligió — los demás se quedaban con el why
+    # heurístico persistido para siempre (bug reportado por Matías en
+    # "Current picks" de la home, 2026-07-31).
+    def fake_predict(user_id, ratings, heuristic):
+        picks = [
+            rec.model_copy(update={"why": f"razón del agente {i}"})
+            for i, rec in enumerate(heuristic.recommendations)
+        ]
+        return heuristic.model_copy(update={"recommendations": picks})
 
-    monkeypatch.setattr("backend.app.main.llm_client.refine_recommendations", fake_refine)
+    monkeypatch.setattr("backend.app.main.llm_client.predict_fit", fake_predict)
 
     response = client.post(f"/recommend/sessions/{session_id}/refine", headers=headers)
 
     assert response.status_code == 200
     body = response.json()
     assert body["refined"] is True
-    assert body["taste_summary"] == "resumen del agente"
-    assert body["recommendations"][0]["why"] == "razón del agente"
+    assert body["recommendations"][0]["why"] == "razón del agente 0"
+    # ningún pick se pierde por el camino
+    assert len(body["recommendations"]) == len(fast["recommendations"])
 
-    # persisted: history reflects the rewritten why + summary
+    # persisted: history refleja los why reescritos, y NINGUNO quedó heurístico
     sessions = client.get("/history", headers=headers).json()["sessions"]
     session = next(item for item in sessions if item["id"] == session_id)
-    assert session["taste_summary"] == "resumen del agente"
     updated = next(item for item in session["recommendations"] if item["id"] == rec_id)
-    assert updated["why"] == "razón del agente"
+    assert updated["why"] == "razón del agente 0"
+    assert all(
+        item["why"].startswith("razón del agente") for item in session["recommendations"]
+    )
 
 
 def test_refine_session_404_for_other_user() -> None:

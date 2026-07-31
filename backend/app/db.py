@@ -304,6 +304,13 @@ def _run_migrations(conn) -> None:
         conn.execute("ALTER TABLE users ADD COLUMN email TEXT")
     if not _has_column(conn, "users", "email_verified"):
         conn.execute("ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0")
+    if not _has_column(conn, "users", "letterboxd_username"):
+        # Tu usuario de Letterboxd (pedido de Matías, 2026-07-31). No es solo
+        # una comodidad para no re-tipearlo: importar por username persiste los
+        # ratings al perfil, así que un amigo probando la página con SU usuario
+        # te pisaba el tuyo. Con esto seteado, un username distinto genera
+        # recomendaciones sin guardar nada.
+        conn.execute("ALTER TABLE users ADD COLUMN letterboxd_username TEXT")
     if not _has_column(conn, "sessions", "expires_at"):
         # Las filas preexistentes quedan con expires_at=0 → expiradas. A la vez
         # se pasó a guardar el token hasheado, así que esas filas viejas (token
@@ -404,6 +411,16 @@ def get_user_by_username(username: str) -> sqlite3.Row | None:
         return conn.execute(
             "SELECT * FROM users WHERE username = ?", (username,)
         ).fetchone()
+
+
+def set_letterboxd_username(user_id: int, letterboxd_username: str) -> None:
+    """Cadena vacía = desvincular (vuelve a NULL), así el perfil puede borrarlo
+    sin un endpoint aparte."""
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE users SET letterboxd_username = ? WHERE id = ?",
+            (letterboxd_username.strip() or None, user_id),
+        )
 
 
 def create_session(token: str, user_id: int) -> None:

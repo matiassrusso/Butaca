@@ -36,6 +36,7 @@ from .models import (
     PasswordResetRequest,
     ProfileRecommendRequest,
     RatedItem,
+    LetterboxdUsernameRequest,
     RateTitleRequest,
     RecommendationHistoryResponse,
     PasswordResetStartResponse,
@@ -457,7 +458,20 @@ def me(user: sqlite3.Row = Depends(auth.get_current_user)) -> dict:
         "email": user["email"],
         # never block features on this (see plan): it's a non-blocking prompt
         "email_verified": bool(user["email_verified"]),
+        "letterboxd_username": user["letterboxd_username"],
     }
+
+
+@app.put("/profile/letterboxd")
+def set_letterboxd_username(
+    payload: LetterboxdUsernameRequest, user: sqlite3.Row = Depends(auth.get_current_user)
+) -> dict:
+    """Tu cuenta de Letterboxd. Se autocompleta con el primer import por
+    username; esto existe para corregirla (o desvincularla mandando "") si el
+    primero fue el de otra persona. Ver recommend_titles_from_letterboxd por
+    qué importa quién es el dueño."""
+    db.set_letterboxd_username(user["id"], payload.letterboxd_username)
+    return {"letterboxd_username": payload.letterboxd_username.strip() or None}
 
 
 @app.post("/auth/logout", status_code=204)
@@ -861,8 +875,21 @@ def recommend_titles_from_letterboxd(
     except letterboxd_scrape.ScrapeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    # Pedido de Matías (2026-07-31): "capaz le estás mostrando la página a algún
+    # amigo y pone su usuario y te cambia todos tus ratings de Butaca".
+    # Importar persiste al perfil, así que el username tiene dueño: el primero
+    # que se usa queda registrado como tuyo, y cualquier otro genera
+    # recomendaciones sin guardar nada (persist=False).
+    own = (user["letterboxd_username"] or "").strip().lower()
+    incoming = username.strip().lower()
+    if not own:
+        db.set_letterboxd_username(user["id"], username)
+    is_own_account = not own or own == incoming
+
     return _finish_recommend(
-        ratings, extra_seen, mood, mode, kind_filter, genres, user, refine=_refine_enabled(refine)
+        ratings, extra_seen, mood, mode, kind_filter, genres, user,
+        refine=_refine_enabled(refine),
+        persist=is_own_account,
     )
 
 
@@ -999,10 +1026,18 @@ def recommend_titles_from_profile(
 def refine_session(
     session_id: int, user: sqlite3.Row = Depends(auth.get_current_user)
 ) -> RecommendResponse:
-    """Second half of progressive rendering: re-run the LLM refine over a
-    session's already-served heuristic picks and persist the rewritten
-    reasons. Returns refined=False (200, not an error) when the LLM isn't
-    configured or fails, so the frontend just keeps the heuristic text."""
+    """Second half of progressive rendering: re-run the LLM over a session's
+    already-served heuristic picks and persist the rewritten reasons. Returns
+    refined=False (200, not an error) when the LLM isn't configured or fails,
+    so the frontend just keeps the heuristic text.
+
+    Usa predict_fit y NO refine_recommendations aunque el nombre diga "refine":
+    los picks de esta sesión YA se le mostraron al usuario, así que la tarea es
+    opinar sobre un set fijo, no elegir de un pool. refine_recommendations
+    elige y descarta — devolvía menos picks de los que la sesión tenía, y los
+    que no cubría se quedaban con el why heurístico persistido para siempre.
+    Eso es lo que Matías vio en "Current picks" de la home (2026-07-31): 1 de 3
+    con voz del LLM y 2 con el texto genérico del motor."""
     session = db.get_recommendation_session(session_id, user["id"])
     if session is None:
         raise HTTPException(status_code=404, detail="Sesión no encontrada.")
@@ -1022,8 +1057,8 @@ def refine_session(
         return heuristic
 
     try:
-        refined = llm_client.refine_recommendations(
-            _rebuild_ratings(user["id"]), session["mood"], heuristic
+        refined = llm_client.predict_fit(
+            user["id"], _rebuild_ratings(user["id"]), heuristic
         )
     except llm_client.LlmError as exc:
         logger.warning("Session refine failed, returning heuristic: %s", exc)
