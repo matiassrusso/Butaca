@@ -15,7 +15,7 @@ If a session is drifting without moving hacia calidad de recomendación o clarid
 1. Definición corta del alcance (ver `docs/product-mvp.md`)
 2. Implementación en `backend` (FastAPI + SQLite) y/o `frontend` (React + Vite + Tailwind)
 3. Si hay varios agentes en paralelo: coordinación por `TASKS.md` (worktrees separados, marcar In Progress → Done, nunca mergear a `main` solo)
-4. Tests de backend en verde antes de cerrar (284 tests a la fecha)
+4. Tests de backend en verde antes de cerrar (293 tests a la fecha)
 5. Deployeado: frontend [butaca.xyz](https://butaca.xyz/) (Vercel), backend [api.butaca.xyz](https://api.butaca.xyz) (Render, free tier — cold start en la primera request)
 
 ## Key People
@@ -44,29 +44,63 @@ Solo yo (Matías), con posible coordinación multi-agente (Claude, Codex) docume
 ## Current Status
 
 > <!-- SESSION_STATE:START -->
-> **Last updated:** 2026-07-31 (sesión: 3 bugs de `/weekly` post-feedback +
-> 3 features pedidas + 3 bugs más de features en producción — match_score
-> plano, why autoreferencial, bitácora — + el match_score seguía repitiéndose
-> tras el primer intento, resuelto con desempate por vote_average)
+> **Last updated:** 2026-07-31 (sesión larga: rondas de bugs de `/weekly` +
+> features pedidas, y al final la unificación grande — una sola voz de LLM y
+> una sola interacción para todo el sitio + buscador global)
 >
 > ### ⚠️ Leer primero al retomar
 >
-> Todo lo reportado hasta ahora está resuelto y deployado (push
-> `bc52b2b`..`10ddce2`). Nada bloqueante pendiente — falta que Matías lo
-> pruebe en producción una vez que Render termine el redeploy, sobre todo:
-> - El botón **"¿No estás de acuerdo?"** del modal (vota similares de TMDb)
->   — no se pudo probar en el browser local porque la TMDb key local está
->   vieja (401), solo queda cubierto por los 6 tests de backend
->   (`fetch_similar_titles` + `GET /movies/{id}/similar`).
+> Todo lo reportado está resuelto y deployado (push `bc52b2b`..`4c52f1e`).
+> Nada bloqueante — falta que Matías pruebe en producción, sobre todo lo
+> último (unificación + buscador), y decida sobre estos puntos abiertos:
+> - **El buscador no existe en mobile**: `SearchBox` es `hidden sm:block`
+>   porque la navbar no tiene lugar en pantallas chicas. Es una decisión
+>   consciente para no romper el layout, no un olvido — si lo quiere en
+>   mobile hay que resolver el patrón (¿ícono que abre un overlay?).
+> - **El "why" en la card**: quedó visible en la home y en el archivo, pero
+>   oculto en `/recommend` (donde se revela con el typewriter al abrir el
+>   póster, decisión del 2026-07-30). NO se unificó a propósito: la sección
+>   semanal de la home está construida alrededor de mostrarlo y sacarlo la
+>   vaciaría bastante. Es decisión de Matías, no mía — si quiere que sea
+>   igual en los tres lados, es un cambio chico.
 > - El mix de **variedad de épocas** en `/weekly` (3 trending + 2 de una
->   década que rota por semana ISO) — es una decisión de diseño de esta
->   sesión, no algo que Matías haya especificado en detalle; puede querer
->   ajustar el ratio 3/2 o las décadas (`tmdb_client.WEEKLY_CLASSIC_DECADES`).
-> - El desempate de match_score por `vote_average` (`_differentiate_weekly_match_scores`
->   en `main.py`) es una solución pragmática, no una reescritura del
->   scoring — el vocabulario de tags sigue siendo chico de fondo (ver
->   "Contexto" abajo). Si vuelve a verse plano con otro set de trending,
->   ese es el lugar para ajustar el multiplicador (`* 3`) o el enfoque.
+>   década que rota por semana ISO) — decisión de diseño propia, puede
+>   querer ajustar el ratio 3/2 o las décadas (`tmdb_client.WEEKLY_CLASSIC_DECADES`).
+> - El desempate de match_score por `vote_average` (`_adjust_match_scores`
+>   en `main.py`) es pragmático, no una reescritura del scoring — el
+>   vocabulario de tags sigue siendo chico de fondo. Si vuelve a verse
+>   plano, ese es el lugar para ajustar el multiplicador (`* 3`).
+> - El botón **"¿No estás de acuerdo?"** sigue sin verificación visual en
+>   local (la TMDb key local está vieja), solo cubierto por tests.
+>
+> **Qué se hizo el 2026-07-31, cuarta ronda — la unificación** (2 commits,
+> `81f589b`+`4c52f1e`, 285→293 tests). Pedido de Matías: *"TODA la página
+> debería tener el mismo sistema de LLM, con los mismos prompts y los mismos
+> tonos... la idea es que siempre sea lo mismo no importa dónde estés. Con la
+> interacción también"* + un buscador global:
+> - **Una sola voz de LLM**: `AGENT_VOICE` + `WRITING_RULES` + `SCORE_RULE`
+>   son constantes compartidas que arman los dos prompts. Lo único que cambia
+>   entre pantallas es la TAREA (elegir de un pool en `/recommend` vs opinar
+>   sobre títulos ya elegidos en `/weekly` y el buscador). Hay un test que
+>   falla si un prompt deja de compartir la voz. Renombrado todo lo que era
+>   weekly-específico pero ya no lo es: `predict_weekly_fit`→`predict_fit`,
+>   `_build_weekly_prompt`→`_build_verdict_prompt`, `_WEEKLY_PREDICTION_CACHE`
+>   →`_VERDICT_CACHE`, `_differentiate_weekly_match_scores`→`_adjust_match_scores`.
+> - **Una sola interacción**: el póster interactivo estaba copiado en tres
+>   lugares y se había desincronizado — **History no tenía tilt, ni glare, ni
+>   era clickeable** (no había forma de abrir el modal desde el archivo), y
+>   **Home nunca pasaba `seenWhys`**, así que el typewriter no corría ahí.
+>   Ahora todo sale de `PosterCard` (`frontend/src/components/PosterCard.tsx`);
+>   cada pantalla pasa su bloque de texto como children.
+> - **Buscador global** (`SearchBox` en la navbar, arriba a la derecha):
+>   cualquier peli o serie, debounce 300ms. Backend nuevo:
+>   `tmdb_client.search_any_titles()` contra `/search/multi` (el
+>   `search_titles` viejo es movies-only, correcto para la lista semilla del
+>   onboarding), `GET /titles/search` (degrada a lista vacía ante cualquier
+>   error de TMDb: un 502 rompería la navbar en cada tecla) y
+>   `GET /titles/{id}/verdict`, que corre **la misma tubería que `/weekly`**
+>   paso por paso para que el número y el tono sean idénticos a los del resto
+>   del sitio (incluye el mismo trato de "ya la viste").
 >
 > **Qué se hizo el 2026-07-31, tercera ronda** (1 commit, `10ddce2`,
 > 282→284 tests) — el match_score seguía repitiéndose tras el fix de la
@@ -242,7 +276,35 @@ Solo yo (Matías), con posible coordinación multi-agente (Claude, Codex) docume
 >   `text=<título>`) para confirmar qué keywords de TMDb llegaban de
 >   verdad y por qué no matcheaban — diagnóstico basado en datos
 >   reales, no en hipótesis sobre el catálogo mock local.
+> - Verificación de la cuarta ronda (2026-07-31): 293 tests + typecheck
+>   limpio + probado a mano en el dev server local. El buscador se probó
+>   con `window.fetch` mockeado en el browser (la TMDb key local sigue
+>   vieja): devolvió película y serie, y al clickear abrió el modal con
+>   veredicto real. El typewriter se verificó **midiendo el largo del
+>   texto en el tiempo** en vez de a ojo: History 6→12→17→23→28 chars y
+>   Home 5→11→17→22→28, o sea que efectivamente anima en las dos
+>   pantallas donde antes no lo hacía. Sin errores de consola.
+> - **El prompt del LLM se probó contra la API real de NVIDIA** (que sí
+>   anda local, a diferencia de TMDb), dos corridas seguidas, antes de
+>   commitear el fix de los why calcados. Ese es el camino para validar
+>   cambios de prompt en este proyecto: `_build_verdict_prompt` +
+>   `_call_nvidia_with_fallback` con un perfil de prueba, y leer la
+>   salida. Los tests no pueden atrapar "suena repetitivo".
 > <!-- SESSION_STATE:END -->
+>
+> **2026-07-31 (sesión 4) — 3 commits (`b16013b`, `81f589b`, `4c52f1e`),
+> 284→293 tests:** Matías señaló que los why salían calcados entre sí y
+> abusaban de "encantar" ("tenés chances de encantarte" ni siquiera es
+> español) — la causa eran las frases de EJEMPLO del prompt, que el modelo
+> copiaba como plantilla; se reemplazaron por reglas de escritura y se
+> verificó contra la API real de NVIDIA. Después pidió la unificación
+> grande: misma voz de LLM y misma interacción en todo el sitio, más un
+> buscador global. Se extrajeron `AGENT_VOICE`/`WRITING_RULES`/`SCORE_RULE`
+> compartidos, se unificó el póster en `PosterCard` (History no era ni
+> clickeable, Home no tenía typewriter) y se sumó el buscador de la navbar
+> con `GET /titles/search` + `GET /titles/{id}/verdict`, que corre la misma
+> tubería que `/weekly`. Ver "Leer primero al retomar" por los dos puntos
+> de diseño que quedaron deliberadamente sin unificar.
 >
 > **2026-07-31 (sesión 3) — 1 commit (`10ddce2`), 282→284 tests:** Matías
 > mandó una captura mostrando 4 de las 5 semanales con el mismo 81% pese

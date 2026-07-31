@@ -33,6 +33,20 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
 
 ## Pending
 
+- [x] **Unificación de LLM + interacción y buscador global (2026-07-31
+      sesión 4, pedido de Matías)** — detalle completo en `CLAUDE.md`
+      (`SESSION_STATE`). Resumen: los why del LLM salían calcados por las
+      frases de ejemplo del prompt (reemplazadas por reglas, verificado
+      contra la API real de NVIDIA); voz del agente unificada en
+      `AGENT_VOICE`/`WRITING_RULES`/`SCORE_RULE` compartidos por los dos
+      prompts; póster interactivo unificado en `PosterCard` (History no era
+      clickeable y Home no tenía typewriter); buscador global en la navbar
+      con `GET /titles/search` + `GET /titles/{id}/verdict`, que corre la
+      misma tubería que `/weekly`. 3 commits `b16013b`..`4c52f1e`,
+      284→293 tests. **Abierto para Matías:** el buscador no está en mobile
+      (`hidden sm:block`) y el "why" quedó visible en la card en home/archivo
+      pero oculto en `/recommend` — las dos son decisiones suyas, no bugs.
+
 - [x] **Match_score seguía repitiéndose tras el fix de keywords (2026-07-31
       sesión 3, feedback de Matías probando en producción)** — detalle
       completo en `CLAUDE.md` (`SESSION_STATE`). Resumen: 4 de 5 semanales
