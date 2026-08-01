@@ -518,6 +518,16 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
 
 ## Done
 
+- [x] **[ratings-refresh-2026-07-31] Nuevos picks + precedencia + edición de estrellas**
+      | owner: codex | el fallback de candidatos viejos ya no entra al selector
+      del LLM y desplaza los títulos nuevos; `import` de Letterboxd tiene
+      prioridad sobre `star`/ratings sintéticos aun si es más antiguo, y
+      `/profile/rate` preserva ese dato; el modal precarga ratings precisos,
+      permite editar los de Butaca y bloquea los de Letterboxd con aviso |
+      archivos: `backend/app/{db,main,models}.py`, `MovieModal.tsx`,
+      `Recommend.tsx`, `Home.tsx`, `History.tsx`, `SearchBox.tsx`, tests |
+      verificación: 306 tests, build Vite/TypeScript y Playwright
+
 - [x] **[star-ratings-2026-08-01] Ratings de Butaca con estrellas**
       | owner: codex | selector SVG compartido de 0.5 a 5 con hover/click en
       onboarding, vista de a una, modal y panel de desacuerdo; ratings nuevos

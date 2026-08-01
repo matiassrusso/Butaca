@@ -11,6 +11,7 @@ DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "butaca.db"
 
 # Las sesiones expiran: un token robado deja de servir pasado esto.
 SESSION_TTL_SECONDS = 30 * 24 * 60 * 60  # 30 días
+RATING_SOURCE_PRIORITY = {"import": 3, "star": 2, "manual": 1, "like": 0}
 
 
 def _hash_token(token: str) -> str:
@@ -592,14 +593,42 @@ def get_watched_items(user_id: int) -> list[dict]:
             (user_id,),
         ).fetchall()
 
-    seen_titles: set[str] = set()
-    items: list[dict] = []
+    # Un rating preciso de Letterboxd es la fuente de verdad aunque haya un
+    # click de Butaca posterior. Entre filas de la misma fuente gana la más
+    # reciente porque la query ya viene DESC.
+    items_by_title: dict[str, dict] = {}
     for row in rows:
         normalized_title = row["title"].strip().lower()
-        if normalized_title not in seen_titles:
-            seen_titles.add(normalized_title)
-            items.append(dict(row))
-    return items
+        current = items_by_title.get(normalized_title)
+        item = dict(row)
+        if current is None or RATING_SOURCE_PRIORITY.get(
+            item["source"], 0
+        ) > RATING_SOURCE_PRIORITY.get(current["source"], 0):
+            items_by_title[normalized_title] = item
+    return list(items_by_title.values())
+
+
+def get_preferred_rated_item(
+    user_id: int, title: str, tmdb_id: int | None = None
+) -> dict | None:
+    items = get_watched_items(user_id)
+    normalized_title = title.strip().casefold()
+    matches = (
+        item
+        for item in items
+        if (tmdb_id is not None and item.get("tmdb_id") == tmdb_id)
+        or item["title"].strip().casefold() == normalized_title
+    )
+    return max(
+        matches,
+        key=lambda item: RATING_SOURCE_PRIORITY.get(item["source"], 0),
+        default=None,
+    )
+
+
+def invalidate_taste_profile(user_id: int) -> None:
+    with get_connection() as conn:
+        conn.execute("DELETE FROM taste_profiles WHERE user_id = ?", (user_id,))
 
 
 def get_profile_summary(user_id: int) -> dict:

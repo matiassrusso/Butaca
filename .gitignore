@@ -22,3 +22,5 @@ dist/
 
 # Obsidian vault config (para trabajar este proyecto desde AI Brain)
 .obsidian/
+
+.vercel

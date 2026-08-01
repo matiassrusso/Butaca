@@ -214,6 +214,8 @@ class MovieDetails(BaseModel):
     # {"link": str|None, "flatrate": [{"name", "logo_path"}], "rent": [...], "buy": [...]}
     # from TMDb /watch/providers (JustWatch). None when unavailable/failed.
     providers: dict | None = None
+    user_rating: float | None = None
+    rating_source: Literal["import", "manual", "like", "star"] | None = None
 
 
 class GenreWeight(BaseModel):

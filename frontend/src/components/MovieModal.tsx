@@ -36,6 +36,8 @@ export type MovieDetails = {
     rent: Provider[];
     buy: Provider[];
   } | null;
+  user_rating: number | null;
+  rating_source: "import" | "manual" | "like" | "star" | null;
 };
 
 // pedido de Matías: revelar el "why" con efecto máquina de escribir, pero
@@ -345,15 +347,23 @@ export function MovieModal({
     }
 
     setLoadingDetails(true);
-    fetch(`${API_BASE_URL}/movies/${rec.tmdb_id}/details?kind=${encodeURIComponent(rec.kind)}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
+    fetch(
+      `${API_BASE_URL}/movies/${rec.tmdb_id}/details?kind=${encodeURIComponent(rec.kind)}&title=${encodeURIComponent(rec.title)}`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+      },
+    )
       .then((response) => {
         if (!response.ok) throw new Error();
         return response.json() as Promise<MovieDetails>;
       })
       .then((body) => {
-        if (!cancelled) setDetails(body);
+        if (!cancelled) {
+          setDetails(body);
+          if (body.rating_source === "import" || body.rating_source === "star") {
+            setRatingDraft(body.user_rating);
+          }
+        }
       })
       .catch(() => undefined)
       .finally(() => {
@@ -567,7 +577,17 @@ export function MovieModal({
                   <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-2">
                     ¿Qué te pareció?
                   </p>
-                  <StarRating value={ratingDraft} onChange={saveRating} disabled={ratingSaving} />
+                  <StarRating
+                    value={ratingDraft}
+                    onChange={saveRating}
+                    disabled={ratingSaving || details?.rating_source === "import"}
+                  />
+                  {details?.rating_source === "import" && (
+                    <p className="mt-2 border border-accent/40 bg-accent/10 p-2 font-mono text-[9px] uppercase leading-relaxed text-accent">
+                      Este rating viene de Letterboxd y tiene prioridad. Para cambiarlo,
+                      actualizalo ahí y volvé a importar.
+                    </p>
+                  )}
                 </div>
               )}
             </div>}

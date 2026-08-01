@@ -771,12 +771,11 @@ def _finish_recommend(
         limit=candidate_limit,
     )
 
-    # the "don't repeat what I already recommended" exclusion can exhaust a
-    # small candidate pool (narrow genre filter, small personalized pool,
-    # or just enough "nuevos picks" clicks in one session) — resurfacing an
-    # older pick beats failing the request outright once there's genuinely
-    # nothing new left to show.
-    if len(response.recommendations) < candidate_limit and already_recommended:
+    # Only reintroduce old picks when there aren't six genuinely new ones.
+    # Filling the LLM's 12-candidate shortlist with old high-scoring titles
+    # made "Nuevos picks" select the exact same six again.
+    filled_with_old = False
+    if len(response.recommendations) < 6 and already_recommended:
         logger.info("Candidate pool partially exhausted by already-recommended exclusion, filling without it")
         # solo se relaja already_recommended (soft, "no lo repitas de vuelta
         # tan rápido") — extra_seen/watched siguen siendo hard exclusions,
@@ -791,7 +790,7 @@ def _finish_recommend(
             preference_ratings=preference_ratings,
             profile=profile,
             rejected_tags=rejected_tags or None,
-            limit=candidate_limit,
+            limit=6,
         )
 
         existing = {item.title.casefold() for item in response.recommendations}
@@ -799,7 +798,8 @@ def _finish_recommend(
             if item.title.casefold() not in existing:
                 response.recommendations.append(item)
                 existing.add(item.title.casefold())
-            if len(response.recommendations) == candidate_limit:
+                filled_with_old = True
+            if len(response.recommendations) == 6:
                 break
 
     refined = False
@@ -807,7 +807,14 @@ def _finish_recommend(
         logger.warning("LLM refine skipped: NVIDIA_API_KEY no está configurada.")
     elif use_llm:
         try:
-            response = llm_client.refine_recommendations(ratings, mood, response)
+            # predict_fit preserves the chosen set. refine_recommendations is
+            # allowed to drop candidates, so after a fallback fill it could
+            # discard every genuinely new title in favor of old high scorers.
+            response = (
+                llm_client.predict_fit(user["id"], ratings, response)
+                if filled_with_old
+                else llm_client.refine_recommendations(ratings, mood, response)
+            )
             refined = True
         except llm_client.LlmError as exc:
             logger.warning("LLM refine failed, falling back to heuristic why: %s", exc)
@@ -1107,7 +1114,10 @@ def refine_session(
 
 @app.get("/movies/{tmdb_id}/details", response_model=MovieDetails)
 def movie_details(
-    tmdb_id: int, kind: str = "movie", user: sqlite3.Row = Depends(auth.get_current_user)
+    tmdb_id: int,
+    kind: str = "movie",
+    title: str = "",
+    user: sqlite3.Row = Depends(auth.get_current_user),
 ) -> MovieDetails:
     if not tmdb_client.is_configured():
         raise HTTPException(status_code=503, detail="Catálogo de TMDb no configurado.")
@@ -1125,7 +1135,14 @@ def movie_details(
     except tmdb_client.TmdbError:
         providers = None
 
-    return MovieDetails(cast=cast, trailer_key=trailer_key, providers=providers)
+    rated = db.get_preferred_rated_item(user["id"], title, tmdb_id)
+    return MovieDetails(
+        cast=cast,
+        trailer_key=trailer_key,
+        providers=providers,
+        user_rating=rated["rating"] if rated else None,
+        rating_source=rated["source"] if rated else None,
+    )
 
 
 @app.get("/movies/{tmdb_id}/similar", response_model=OnboardingTitlesResponse)
@@ -1172,9 +1189,19 @@ def submit_feedback(
 @app.post("/profile/rate", status_code=201)
 def rate_title(
     payload: RateTitleRequest, user: sqlite3.Row = Depends(auth.get_current_user)
-) -> dict[str, str]:
+) -> dict[str, str | float]:
     """Guarda un rating explícito de Butaca, en pasos de media estrella."""
+    existing = db.get_preferred_rated_item(
+        user["id"], payload.title, payload.tmdb_id
+    )
+    if existing and existing["source"] == "import":
+        return {
+            "status": "preserved",
+            "rating": existing["rating"],
+            "source": "import",
+        }
     db.save_rated_items(
         user["id"], [(payload.title, payload.rating, "", "", "star", payload.tmdb_id)]
     )
-    return {"status": "ok"}
+    db.invalidate_taste_profile(user["id"])
+    return {"status": "saved", "rating": payload.rating, "source": "star"}

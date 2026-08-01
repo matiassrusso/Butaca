@@ -210,6 +210,11 @@ export function SearchBox() {
               }),
               });
               if (!response.ok) throw new Error();
+              const body = await response.json();
+              if (body.status === "preserved") {
+                toast.info(`Tu ${body.rating}/5 de Letterboxd tiene prioridad. Cambialo ahí y volvé a importar.`);
+                return true;
+              }
               toast.success(`Guardado en tu perfil: ${finalTitle}`);
               return true;
             } catch {

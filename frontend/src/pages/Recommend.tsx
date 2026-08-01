@@ -139,6 +139,7 @@ function ManualRatingCard({
   onRate: (title: string, rating: number | null) => void;
 }) {
   const { wrapRef, onMouseMove, onMouseLeave } = useTiltCard();
+  const letterboxdRating = item.rating_source === "import";
 
   return (
     <div className="flex flex-col">
@@ -174,13 +175,24 @@ function ManualRatingCard({
       <div className="font-black uppercase text-xs tracking-tighter leading-none mb-0.5">{item.title}</div>
       <div className="font-mono text-[10px] text-muted-foreground mb-2">{item.year || ""}</div>
       <div className="mt-auto">
-        <StarRating value={current} onChange={(rating) => onRate(item.title, rating)} size="sm" />
-        <button
-          onClick={() => onRate(item.title, null)}
-          className="mt-1 w-full py-1 font-mono text-[9px] uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
-        >
-          No la vi
-        </button>
+        <StarRating
+          value={current}
+          onChange={(rating) => onRate(item.title, rating)}
+          size="sm"
+          disabled={letterboxdRating}
+        />
+        {letterboxdRating ? (
+          <p className="mt-1 text-center font-mono text-[8px] uppercase tracking-wider text-accent">
+            Rating de Letterboxd
+          </p>
+        ) : (
+          <button
+            onClick={() => onRate(item.title, null)}
+            className="mt-1 w-full py-1 font-mono text-[9px] uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
+          >
+            No la vi
+          </button>
+        )}
       </div>
     </div>
   );
@@ -638,6 +650,11 @@ export default function Recommend() {
         }),
       });
       if (!response.ok) throw new Error();
+      const body = await response.json();
+      if (body.status === "preserved") {
+        toast.info(`Tu ${body.rating}/5 de Letterboxd tiene prioridad. Cambialo ahí y volvé a importar.`);
+        return true;
+      }
       toast.success(`Guardado en tu perfil: ${finalTitle}`);
       return true;
     } catch {

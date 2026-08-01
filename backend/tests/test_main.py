@@ -3,7 +3,7 @@ import zipfile
 
 from fastapi.testclient import TestClient
 
-from backend.app import db, letterboxd_scrape, onboarding_titles
+from backend.app import catalog, db, letterboxd_scrape, onboarding_titles
 from backend.app.llm_client import LlmError
 from backend.app.main import TASTE_TAG_LOOKUP_CAP, _enrich_loved_ratings_with_genre_tags, app
 from backend.app.models import RatedItem
@@ -428,6 +428,59 @@ def test_rate_title_rejects_non_half_star_rating() -> None:
     )
 
     assert response.status_code == 422
+
+
+def test_rate_title_does_not_override_letterboxd_rating() -> None:
+    headers = _auth_headers("rateletterboxdpriority")
+    user_id = db.get_user_by_username("rateletterboxdpriority")["id"]
+    db.save_rated_items(
+        user_id, [("Rocky", 4.5, "From Letterboxd", "", "import", 1366)]
+    )
+    # También cubre duplicados creados antes de que existiera esta regla.
+    db.save_rated_items(user_id, [("Rocky (1976)", 2.0, "", "", "star", 1366)])
+
+    response = client.post(
+        "/profile/rate",
+        headers=headers,
+        json={"title": "Rocky", "rating": 1.0, "tmdb_id": 1366},
+    )
+
+    assert response.status_code == 201
+    assert response.json() == {
+        "status": "preserved",
+        "rating": 4.5,
+        "source": "import",
+    }
+    rocky = next(item for item in db.get_watched_items(user_id) if item["title"] == "Rocky")
+    assert rocky["rating"] == 4.5
+    assert rocky["source"] == "import"
+
+
+def test_movie_details_returns_saved_butaca_rating(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setattr("backend.app.main.tmdb_client.fetch_credits", lambda *args, **kwargs: [])
+    monkeypatch.setattr("backend.app.main.tmdb_client.fetch_trailer_key", lambda *args, **kwargs: None)
+    monkeypatch.setattr("backend.app.main.tmdb_client.fetch_watch_providers", lambda *args, **kwargs: None)
+    headers = _auth_headers("detailsrating")
+    client.post(
+        "/profile/rate",
+        headers=headers,
+        json={"title": "Rocky", "rating": 4.0, "tmdb_id": 1366},
+    )
+
+    response = client.get("/movies/1366/details?title=Rocky", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json()["user_rating"] == 4.0
+    assert response.json()["rating_source"] == "star"
+
+    client.post(
+        "/profile/rate",
+        headers=headers,
+        json={"title": "Rocky", "rating": 2.5, "tmdb_id": 1366},
+    )
+    updated = client.get("/movies/1366/details?title=Rocky", headers=headers)
+    assert updated.json()["user_rating"] == 2.5
 
 
 def test_recommend_zip_falls_back_to_mock_catalog_when_tmdb_fails(monkeypatch) -> None:
@@ -1555,6 +1608,45 @@ def test_recommend_profile_reuses_saved_ratings_without_duplicating() -> None:
     # persist=False: regenerating from the saved profile must not re-insert
     # the same rated_items rows
     assert len(db.get_watched_items(user_id)) == watched_before
+
+
+def test_new_picks_keeps_available_unseen_titles_with_llm_enabled(monkeypatch) -> None:
+    monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
+
+    def rank_by_match(ratings, mood, response):
+        return response.model_copy(
+            update={
+                "recommendations": sorted(
+                    response.recommendations,
+                    key=lambda item: item.match_score,
+                    reverse=True,
+                )[:6]
+            }
+        )
+
+    monkeypatch.setattr("backend.app.main.llm_client.refine_recommendations", rank_by_match)
+    monkeypatch.setattr(
+        "backend.app.main.llm_client.predict_fit",
+        lambda user_id, ratings, response: response,
+    )
+    headers = _auth_headers("newpickschanges")
+
+    first = client.post(
+        "/recommend/manual",
+        headers=headers,
+        json={"ratings": _MANUAL_RATINGS, "refine": True},
+    ).json()["recommendations"]
+    second = client.post(
+        "/recommend/manual",
+        headers=headers,
+        json={"ratings": _MANUAL_RATINGS, "refine": True},
+    ).json()["recommendations"]
+
+    first_titles = {item["title"] for item in first}
+    second_titles = {item["title"] for item in second}
+    unseen_available = {item["title"] for item in catalog.CATALOG} - first_titles
+    assert unseen_available
+    assert unseen_available <= second_titles
 
 
 def test_recommend_profile_requires_existing_profile() -> None:
