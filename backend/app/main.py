@@ -756,6 +756,8 @@ def _finish_recommend(
             status_code=400, detail="Elegí al menos un género para este modo."
         )
 
+    use_llm = refine and llm_client.is_configured()
+    candidate_limit = 12 if use_llm else 6
     response = recommend(
         ratings,
         mood,
@@ -766,6 +768,7 @@ def _finish_recommend(
         preference_ratings=preference_ratings,
         profile=profile,
         rejected_tags=rejected_tags or None,
+        limit=candidate_limit,
     )
 
     # the "don't repeat what I already recommended" exclusion can exhaust a
@@ -773,12 +776,12 @@ def _finish_recommend(
     # or just enough "nuevos picks" clicks in one session) — resurfacing an
     # older pick beats failing the request outright once there's genuinely
     # nothing new left to show.
-    if not response.recommendations and already_recommended:
-        logger.info("Candidate pool exhausted by already-recommended exclusion, retrying without it")
+    if len(response.recommendations) < candidate_limit and already_recommended:
+        logger.info("Candidate pool partially exhausted by already-recommended exclusion, filling without it")
         # solo se relaja already_recommended (soft, "no lo repitas de vuelta
         # tan rápido") — extra_seen/watched siguen siendo hard exclusions,
         # nunca hay que recomendar algo que el usuario ya vio de verdad
-        response = recommend(
+        relaxed = recommend(
             ratings,
             mood,
             catalog=candidates,
@@ -788,17 +791,28 @@ def _finish_recommend(
             preference_ratings=preference_ratings,
             profile=profile,
             rejected_tags=rejected_tags or None,
+            limit=candidate_limit,
         )
 
+        existing = {item.title.casefold() for item in response.recommendations}
+        for item in relaxed.recommendations:
+            if item.title.casefold() not in existing:
+                response.recommendations.append(item)
+                existing.add(item.title.casefold())
+            if len(response.recommendations) == candidate_limit:
+                break
+
     refined = False
-    if refine and not llm_client.is_configured():
+    if refine and not use_llm:
         logger.warning("LLM refine skipped: NVIDIA_API_KEY no está configurada.")
-    elif refine:
+    elif use_llm:
         try:
             response = llm_client.refine_recommendations(ratings, mood, response)
             refined = True
         except llm_client.LlmError as exc:
             logger.warning("LLM refine failed, falling back to heuristic why: %s", exc)
+
+    response.recommendations = response.recommendations[:6]
 
     session_id = None
     if ephemeral:

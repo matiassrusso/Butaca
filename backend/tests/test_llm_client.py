@@ -54,8 +54,16 @@ def test_refine_reorders_and_overrides_why(monkeypatch) -> None:
         return {
             "taste_summary": "resumen del agente",
             "picks": [
-                {"title": "Fake Comedy", "why": "porque te reís poco últimamente"},
-                {"title": "Fake Thriller", "why": "porque te gusta lo oscuro"},
+                {
+                    "title": "Fake Comedy",
+                    "why": "porque te reís poco últimamente",
+                    "match_score": 78,
+                },
+                {
+                    "title": "Fake Thriller",
+                    "why": "porque te gusta lo oscuro",
+                    "match_score": 91,
+                },
             ],
         }
 
@@ -67,9 +75,86 @@ def test_refine_reorders_and_overrides_why(monkeypatch) -> None:
     assert result.taste_summary == "Resumen del agente"
     assert [r.title for r in result.recommendations] == ["Fake Comedy", "Fake Thriller"]
     assert result.recommendations[0].why == "Porque te reís poco últimamente"
-    # fields not touched by the LLM (score, tags) survive untouched
-    assert result.recommendations[0].match_score == 60
+    assert result.recommendations[0].match_score == 78
     assert result.recommendations[0].tags == ["funny", "light"]
+
+
+def test_refine_backfills_six_when_model_returns_fewer_picks(monkeypatch) -> None:
+    monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
+    candidates = RecommendResponse(
+        taste_summary="heurístico",
+        recommendations=[
+            Recommendation(
+                title=f"Candidate {index}",
+                year=2000 + index,
+                kind="movie",
+                why="heurística",
+                match_score=50,
+                tags=["dark"],
+            )
+            for index in range(8)
+        ],
+    )
+    monkeypatch.setattr(
+        llm_client,
+        "_call_nvidia_with_fallback",
+        lambda prompt, api_key: {
+            "taste_summary": "refinado",
+            "picks": [
+                {"title": f"Candidate {index}", "why": "buen fit", "match_score": 80 + index}
+                for index in range(4)
+            ],
+        },
+    )
+
+    result = llm_client.refine_recommendations([], "", candidates)
+
+    assert len(result.recommendations) == 6
+    assert [rec.title for rec in result.recommendations[:4]] == [
+        "Candidate 0",
+        "Candidate 1",
+        "Candidate 2",
+        "Candidate 3",
+    ]
+
+
+def test_refine_drops_a_pick_with_a_negative_verdict(monkeypatch) -> None:
+    monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
+    candidates = RecommendResponse(
+        taste_summary="heurístico",
+        recommendations=[
+            Recommendation(
+                title=f"Candidate {index}",
+                year=2000 + index,
+                kind="movie",
+                why="heurística",
+                match_score=60,
+                tags=["dark"],
+            )
+            for index in range(7)
+        ],
+    )
+    monkeypatch.setattr(
+        llm_client,
+        "_call_nvidia_with_fallback",
+        lambda prompt, api_key: {
+            "taste_summary": "refinado",
+            "picks": [
+                {
+                    "title": f"Candidate {index}",
+                    "why": "no es para vos" if index == 0 else "buen fit",
+                    "match_score": 20 if index == 0 else 80,
+                }
+                for index in range(7)
+            ],
+        },
+    )
+
+    result = llm_client.refine_recommendations([], "", candidates)
+
+    assert len(result.recommendations) == 6
+    assert "Candidate 0" not in {rec.title for rec in result.recommendations}
+    assert all(rec.match_score > 50 for rec in result.recommendations)
 
 
 def test_refine_ignores_titles_outside_the_candidate_list(monkeypatch) -> None:
@@ -319,6 +404,21 @@ def test_refine_recommendations_cache_misses_on_different_mood(monkeypatch) -> N
 
     llm_client.refine_recommendations([], "funny", HEURISTIC)
     llm_client.refine_recommendations([], "romance", HEURISTIC)
+
+    assert len(calls) == 2
+
+
+def test_refine_recommendations_cache_misses_on_different_profiles(monkeypatch) -> None:
+    monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
+    calls: list[int] = []
+    monkeypatch.setattr(llm_client, "_call_nvidia_with_fallback", _fake_nvidia(calls))
+
+    llm_client.refine_recommendations(
+        [RatedItem(title="Alien", rating=5)], "funny", HEURISTIC
+    )
+    llm_client.refine_recommendations(
+        [RatedItem(title="Alien", rating=1)], "funny", HEURISTIC
+    )
 
     assert len(calls) == 2
 

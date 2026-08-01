@@ -432,7 +432,7 @@ def test_recommend_zip_falls_back_to_mock_catalog_when_tmdb_fails(monkeypatch) -
     response = _post_zip(headers)
 
     assert response.status_code == 200
-    assert response.json()["recommendations"]
+    assert len(response.json()["recommendations"]) == 6
 
 
 def test_recommend_zip_carries_poster_and_overview_fields(monkeypatch) -> None:
@@ -501,10 +501,10 @@ def test_recommend_zip_falls_back_to_heuristic_when_llm_fails(monkeypatch) -> No
     response = _post_zip(headers)
 
     assert response.status_code == 200
-    assert response.json()["recommendations"]
+    assert len(response.json()["recommendations"]) == 6
 
 
-def test_recommend_zip_excludes_previously_recommended_titles() -> None:
+def test_recommend_zip_prioritizes_new_titles_then_fills_to_six() -> None:
     headers = _auth_headers("nuevospicks")
 
     first = _post_zip(headers).json()["recommendations"]
@@ -512,7 +512,8 @@ def test_recommend_zip_excludes_previously_recommended_titles() -> None:
 
     first_titles = {item["title"] for item in first}
     second_titles = {item["title"] for item in second}
-    assert first_titles.isdisjoint(second_titles)
+    assert len(second) == 6
+    assert second_titles - first_titles
 
 
 def test_recommend_zip_rejects_invalid_mode() -> None:
@@ -1122,6 +1123,24 @@ def test_recommend_excludes_not_interested_titles_even_on_pool_exhaustion(monkey
     second_titles = {item["title"] for item in _post_zip(headers).json()["recommendations"]}
     assert "Rejected Pick" not in second_titles
     assert "Kept Pick" in second_titles
+
+
+def test_recommend_fills_partial_pool_after_recent_exclusions(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    candidates = [
+        {"title": f"Pool Pick {index}", "year": 2000 + index, "kind": "movie", "tags": ["dark"]}
+        for index in range(10)
+    ]
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.fetch_candidates", lambda mood: candidates
+    )
+
+    headers = _auth_headers("partialpool")
+    first = _post_zip(headers, refine="0").json()["recommendations"]
+    second = _post_zip(headers, refine="0").json()["recommendations"]
+
+    assert len(first) == 6
+    assert len(second) == 6
 
 
 def test_recommend_zip_refine_false_skips_llm(monkeypatch) -> None:

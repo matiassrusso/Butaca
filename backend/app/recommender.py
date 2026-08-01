@@ -270,6 +270,7 @@ def recommend(
     profile: dict | None = None,
     rejected_tags: Counter | None = None,
     exclude_seen: bool = True,
+    limit: int = 6,
 ) -> RecommendResponse:
     taste_ratings = ratings if preference_ratings is None else preference_ratings
     positive_tags, negative_tags = _collect_preference_tags(taste_ratings)
@@ -417,9 +418,9 @@ def recommend(
     scored.sort(key=lambda quad: quad[0], reverse=True)
 
     if required_any_tags:
-        picks = _pick_with_genre_coverage(scored, required_any_tags)
+        picks = _pick_with_genre_coverage(scored, required_any_tags, limit=limit)
     else:
-        picks = _pick_with_exploration(scored)
+        picks = _pick_with_exploration(scored, limit=limit)
 
     return RecommendResponse(
         taste_summary=summarize_taste(taste_ratings, mood),

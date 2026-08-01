@@ -518,6 +518,15 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
 
 ## Done
 
+- [x] **[recommend-regression-2026-08-01] 4 picks + S/D + why negativo corregidos**
+      | owner: codex | `/recommend` completa a seis cuando las exclusiones
+      recientes dejan un pool parcial, pasa 12 candidatos al LLM para que
+      elija seis, persiste su `match_score` junto al why y descarta veredictos
+      negativos. El frontend espera esa selección final en vez de mostrar un
+      set heurístico que el LLM ya no podía cambiar. Caché del refine aislada
+      por perfil. Archivos: `backend/app/{llm_client,main,models,recommender}.py`,
+      tests de backend y `frontend/src/pages/Recommend.tsx`. 301 tests + build.
+
 - [x] **[weekly-cta-2026-07-31] CTA anónimo semanal consolidado**
       | owner: codex | `frontend/src/pages/Home.tsx`: se eliminó “Iniciá sesión”
       de cada card y quedó un único link en la introducción de la sección.

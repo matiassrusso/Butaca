@@ -39,7 +39,7 @@ REQUEST_TIMEOUT = 20
 REFINE_CACHE_TTL_SECONDS = 15 * 60
 REFINE_CACHE_MAX_ENTRIES = 64
 
-_REFINE_CACHE: OrderedDict[tuple[str, tuple], tuple[float, dict]] = OrderedDict()
+_REFINE_CACHE: OrderedDict[tuple, tuple[float, dict]] = OrderedDict()
 # cache DISTINTA de _REFINE_CACHE, no reusada: esa cachea por (mood,
 # candidatos) sin el usuario, lo cual está bien para /recommend (perfiles
 # distintos casi nunca comparten exactamente el mismo pool de candidatos
@@ -197,6 +197,12 @@ SCORE_RULE = (
     "aparece ahí (no inventes un número si el título dice 'sin puntaje numérico')."
 )
 
+MATCH_SCORE_RULE = (
+    "Para cada título devolvé también match_score: un entero de 1 a 99 que estime cuánto "
+    "le va a gustar a esta persona. 50 significa que no hay evidencia; el número y el "
+    "veredicto escrito nunca pueden contradecirse."
+)
+
 
 def _profile_block(ratings: list[RatedItem]) -> str:
     return (
@@ -213,15 +219,20 @@ def _build_prompt(ratings: list[RatedItem], mood: str, heuristic: RecommendRespo
         f"{AGENT_VOICE}\n\n"
         f"{_profile_block(ratings)}\n\n"
         f"Mood de hoy: {mood or 'sin preferencia'}\n\n"
-        "Candidatos ya filtrados por un motor heurístico. Elegí y ordená como mucho 6, "
+        "Candidatos ya filtrados por un motor heurístico. Elegí y ordená exactamente 6 "
+        "si hay al menos 6. Estos son PICKS FINALES: todos deben tener match_score entre "
+        "51 y 99 y un why que explique por qué sí pueden funcionarle. Si tu veredicto sería "
+        "que no le va a gustar, no incluyas ese título: elegí otro del pool. "
         "usando SOLO títulos de esta lista (no inventes ni agregues otros):\n"
         f"{_candidate_lines(heuristic)}\n\n"
         "Devolvé un resumen breve del gusto del usuario que use el perfil de arriba, no una "
         "frase genérica, y para cada pick elegido una razón de 1-2 frases.\n\n"
         f"{WRITING_RULES}\n\n"
         f"{SCORE_RULE}\n\n"
+        f"{MATCH_SCORE_RULE}\n\n"
         "Respondé ÚNICAMENTE con un JSON válido, sin texto ni markdown alrededor, con esta forma "
-        'exacta: {"taste_summary": "...", "picks": [{"title": "...", "why": "..."}, ...]}'
+        'exacta: {"taste_summary": "...", "picks": [{"title": "...", "why": "...", '
+        '"match_score": 85}, ...]}'
     )
 
 
@@ -299,12 +310,14 @@ def _now_monotonic() -> float:
     return time.monotonic()
 
 
-def _refine_cache_key(mood: str, heuristic: RecommendResponse) -> tuple[str, tuple]:
+def _refine_cache_key(
+    ratings: list[RatedItem], mood: str, heuristic: RecommendResponse
+) -> tuple[str, str, tuple]:
     candidates = tuple(
         rec.tmdb_id if rec.tmdb_id is not None else rec.title.strip().lower()
         for rec in heuristic.recommendations
     )
-    return (mood.strip().lower(), candidates)
+    return (_profile_block(ratings), mood.strip().lower(), candidates)
 
 
 def _get_cached_refine(cache_key: tuple[str, tuple]) -> dict | None:
@@ -345,6 +358,14 @@ def _title_key(title: str) -> str:
     return _NON_ALNUM_RE.sub("", text)
 
 
+def _pick_match_score(pick: dict, fallback: int) -> int:
+    try:
+        score = int(pick.get("match_score"))
+    except (TypeError, ValueError):
+        return fallback
+    return score if 1 <= score <= 99 else fallback
+
+
 def refine_recommendations(
     ratings: list[RatedItem], mood: str, heuristic: RecommendResponse
 ) -> RecommendResponse:
@@ -354,7 +375,7 @@ def refine_recommendations(
     if not heuristic.recommendations:
         raise LlmError("No hay candidatos para refinar.")
 
-    cache_key = _refine_cache_key(mood, heuristic)
+    cache_key = _refine_cache_key(ratings, mood, heuristic)
     result = _get_cached_refine(cache_key)
     cache_hit = result is not None
     if result is None:
@@ -362,15 +383,30 @@ def refine_recommendations(
 
     by_title = {_title_key(rec.title): rec for rec in heuristic.recommendations}
     reordered = []
+    selected_keys = set()
     unmatched = []
     for pick in result.get("picks", []):
         raw_title = str(pick.get("title", ""))
-        rec = by_title.get(_title_key(raw_title))
+        key = _title_key(raw_title)
+        rec = by_title.get(key)
         if rec is None:
             unmatched.append(raw_title)
             continue
+        if key in selected_keys:
+            continue
         why = capitalize_sentence(str(pick.get("why", "")).strip())
-        reordered.append(rec.model_copy(update={"why": why or rec.why}))
+        match_score = _pick_match_score(pick, rec.match_score)
+        if match_score <= 50:
+            continue
+        reordered.append(
+            rec.model_copy(
+                update={
+                    "why": why or rec.why,
+                    "match_score": match_score,
+                }
+            )
+        )
+        selected_keys.add(key)
 
     if unmatched:
         logger.warning(
@@ -381,6 +417,14 @@ def refine_recommendations(
 
     if not reordered:
         raise LlmError("NVIDIA no devolvió picks válidos de la lista de candidatos.")
+
+    if len(heuristic.recommendations) >= 6:
+        for rec in heuristic.recommendations:
+            if len(reordered) >= 6:
+                break
+            if _title_key(rec.title) not in selected_keys:
+                reordered.append(rec)
+                selected_keys.add(_title_key(rec.title))
 
     # Recién acá: cachear antes de validar dejaba una respuesta inservible
     # pegada 15 minutos, así que cada reintento en esa ventana fallaba igual
@@ -414,8 +458,9 @@ def _build_verdict_prompt(ratings: list[RatedItem], heuristic: RecommendResponse
         f"Para cada uno, 1-2 frases con tu veredicto.\n\n"
         f"{WRITING_RULES}\n\n"
         f"{SCORE_RULE}\n\n"
+        f"{MATCH_SCORE_RULE}\n\n"
         "Respondé ÚNICAMENTE con un JSON válido, sin texto ni markdown alrededor, con esta forma "
-        'exacta: {"picks": [{"title": "...", "why": "..."}, ...]}'
+        'exacta: {"picks": [{"title": "...", "why": "...", "match_score": 85}, ...]}'
         + (f" — un elemento por cada uno de los {count}, nunca menos." if plural else ".")
     )
 
@@ -484,19 +529,27 @@ def predict_fit(
                 _VERDICT_CACHE.popitem(last=False)
 
     by_title = {_title_key(rec.title): rec for rec in heuristic.recommendations}
-    why_by_key: dict[str, str] = {}
+    updates_by_key: dict[str, dict] = {}
     for pick in (result or {}).get("picks", []):
         key = _title_key(str(pick.get("title", "")))
         if key not in by_title:
             continue
         why = capitalize_sentence(str(pick.get("why", "")).strip())
         if why:
-            why_by_key[key] = why
+            rec = by_title[key]
+            updates_by_key[key] = {
+                "why": why,
+                "match_score": _pick_match_score(pick, rec.match_score),
+            }
 
     recommendations = []
     for rec in heuristic.recommendations:
         key = _title_key(rec.title)
         seen_item = seen_by_key.get(key)
-        why = f"Ya la viste — {_rating_label(seen_item.rating)}." if seen_item else why_by_key.get(key, rec.why)
-        recommendations.append(rec.model_copy(update={"why": why}))
+        updates = (
+            {"why": f"Ya la viste — {_rating_label(seen_item.rating)}."}
+            if seen_item
+            else updates_by_key.get(key, {})
+        )
+        recommendations.append(rec.model_copy(update=updates))
     return RecommendResponse(taste_summary=heuristic.taste_summary, recommendations=recommendations)

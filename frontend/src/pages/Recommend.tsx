@@ -449,7 +449,6 @@ export default function Recommend() {
   // en esta página necesita re-renderizar cuando cambia
   const seenWhysRef = useRef<Map<number, string>>(new Map());
   const [loading, setLoading] = useState(false);
-  const [refining, setRefining] = useState(false);
   const [error, setError] = useState("");
   const [feedbackState, setFeedbackState] = useState<Record<number, FeedbackStatus>>({});
   const [selectedRec, setSelectedRec] = useState<Recommendation | null>(null);
@@ -586,9 +585,6 @@ export default function Recommend() {
     setLoading(true);
     setError("");
 
-    // fast first render everywhere: get the heuristic picks now (refine off),
-    // swap in the LLM-written reasons afterward via the refine endpoint so the
-    // user isn't waiting on the ~5-15s model call to see anything
     try {
       let response: Response;
       if (importMethod === "manual") {
@@ -601,7 +597,7 @@ export default function Recommend() {
             mode,
             kind_filter: kindFilter,
             genres: mode === "genres" ? selectedGenres.join(",") : "",
-            refine: false,
+            refine: true,
           }),
         });
       } else {
@@ -609,7 +605,7 @@ export default function Recommend() {
         formData.append("mode", mode);
         formData.append("kind_filter", kindFilter);
         formData.append("genres", mode === "genres" ? selectedGenres.join(",") : "");
-        formData.append("refine", "0");
+        formData.append("refine", "1");
 
         let endpoint = `${API_BASE_URL}/recommend/zip`;
         if (importMethod === "zip") {
@@ -645,54 +641,12 @@ export default function Recommend() {
       setResult(data);
       setFeedbackState({});
       toast.success("Tus picks están listos.");
-      if (data.session_id != null) void refineSession(data.session_id);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Falló la recomendación.";
       setError(message);
       toast.error(message);
     } finally {
       setLoading(false);
-    }
-  }
-
-  async function refineSession(sessionId: number) {
-    if (!token) return;
-    setRefining(true);
-    try {
-      const response = await fetch(`${API_BASE_URL}/recommend/sessions/${sessionId}/refine`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!response.ok) return;
-
-      const refined = (await response.json()) as RecommendResponse;
-      if (!refined.refined) return;
-
-      const whyById = new Map(refined.recommendations.map((r) => [r.id, r.why]));
-      setResult((prev) => {
-        // guard against a stale refine landing after the user regenerated:
-        // only patch the result this refine actually belongs to
-        if (!prev || prev.session_id !== refined.session_id) return prev;
-        return {
-          ...prev,
-          taste_summary: refined.taste_summary,
-          recommendations: prev.recommendations.map((rec) => ({
-            ...rec,
-            why: whyById.get(rec.id) ?? rec.why,
-          })),
-        };
-      });
-      // si el modal está abierto en este pick cuando llega el refine, el "why"
-      // que tiene (copiado de result al abrirse) se quedaba viejo para
-      // siempre — result se actualiza arriba pero selectedRec es un state
-      // aparte que no deriva de result
-      setSelectedRec((prev) =>
-        prev && whyById.has(prev.id) ? { ...prev, why: whyById.get(prev.id) ?? prev.why } : prev
-      );
-    } catch {
-      // refine is best-effort; on any failure the heuristic picks just stay
-    } finally {
-      setRefining(false);
     }
   }
 
@@ -1192,11 +1146,6 @@ export default function Recommend() {
               </div>
               <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mt-3">
                 {result.taste_summary}
-                {refining && (
-                  <span className="ml-2 inline-flex items-center gap-1 text-accent normal-case">
-                    <Loader2 className="w-3 h-3 animate-spin" /> puliendo las razones…
-                  </span>
-                )}
               </p>
             </div>
 

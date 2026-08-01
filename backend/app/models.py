@@ -39,7 +39,6 @@ class ManualRecommendRequest(BaseModel):
     mode: str = "profile"
     kind_filter: str = "both"
     genres: str = ""
-    # False for the fast first render; frontend then calls the refine endpoint
     refine: bool = True
 
 
