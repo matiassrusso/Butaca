@@ -518,6 +518,15 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
 
 ## Done
 
+- [x] **[star-ratings-2026-08-01] Ratings de Butaca con estrellas**
+      | owner: codex | selector SVG compartido de 0.5 a 5 con hover/click en
+      onboarding, vista de a una, modal y panel de desacuerdo; ratings nuevos
+      persistidos como `star`, históricos `manual` preservados como sintéticos,
+      bitácora y prompts actualizados | archivos: `frontend/src/components/StarRating.tsx`,
+      `MovieModal.tsx`, `Recommend.tsx`, `History.tsx`, `useSwipeCard.ts`,
+      `backend/app/{models,main,llm_client}.py`, tests | verificación: 303 tests
+      backend, build Vite/TypeScript y Playwright desktop/mobile/modal
+
 - [x] **[recommend-regression-2026-08-01] 4 picks + S/D + why negativo corregidos**
       | owner: codex | `/recommend` completa a seis cuando las exclusiones
       recientes dejan un pool parcial, pasa 12 candidatos al LLM para que

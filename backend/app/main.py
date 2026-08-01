@@ -934,7 +934,10 @@ def onboarding_titles_endpoint(
     (poster_path=None)."""
     seeds = onboarding_titles.ONBOARDING_TITLES
     watched = db.get_watched_items(user["id"])
-    rating_by_title = {item["title"].strip().lower(): item["rating"] for item in watched}
+    rating_by_title = {
+        item["title"].strip().lower(): (item["rating"], item.get("source", "import"))
+        for item in watched
+    }
 
     seed_keys = {seed["title"].strip().lower() for seed in seeds}
     # títulos puntuados que no están en la lista semilla (sumados a mano en
@@ -968,7 +971,8 @@ def onboarding_titles_endpoint(
             kind=(matches.get(entry["title"]) or {}).get("kind") or "movie",
             tmdb_id=(matches.get(entry["title"]) or {}).get("tmdb_id"),
             poster_path=(matches.get(entry["title"]) or {}).get("poster_path"),
-            rating=rating_by_title.get(entry["title"].strip().lower()),
+            rating=(rating_by_title.get(entry["title"].strip().lower()) or (None, None))[0],
+            rating_source=(rating_by_title.get(entry["title"].strip().lower()) or (None, None))[1],
         )
         for entry in entries
     ]
@@ -1009,7 +1013,7 @@ def recommend_titles_manual(
         )
 
     ratings = [
-        RatedItem(title=item.title, rating=item.rating, source="manual") for item in payload.ratings
+        RatedItem(title=item.title, rating=item.rating, source="star") for item in payload.ratings
     ]
     # every rated title is one the user has seen — never recommend it back
     extra_seen = {item.title for item in ratings}
@@ -1169,13 +1173,8 @@ def submit_feedback(
 def rate_title(
     payload: RateTitleRequest, user: sqlite3.Row = Depends(auth.get_current_user)
 ) -> dict[str, str]:
-    """Puntuar un título suelto (pedido de Matías, 2026-07-31): "Ya la vi" en
-    el modal ahora ofrece un mini-menú (me encantó/bien/no me gustó) en vez
-    de solo marcarla vista, y el rating queda en rated_items para
-    recomendaciones futuras. source="manual" — mismo criterio que el modo
-    "Sin cuenta": un rating sintético elegido de un menú, no un puntaje
-    preciso, así que el "why" no debe citarlo como si lo fuera."""
+    """Guarda un rating explícito de Butaca, en pasos de media estrella."""
     db.save_rated_items(
-        user["id"], [(payload.title, payload.rating, "", "", "manual", payload.tmdb_id)]
+        user["id"], [(payload.title, payload.rating, "", "", "star", payload.tmdb_id)]
     )
     return {"status": "ok"}

@@ -1,11 +1,8 @@
 import {
   AlertCircle,
   CheckCircle,
-  Eye,
   Film,
   Loader2,
-  ThumbsDown,
-  ThumbsUp,
 } from "lucide-react";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -14,8 +11,9 @@ import { useLocation } from "wouter";
 import { MovieModal, type FeedbackStatus, type Recommendation } from "@/components/MovieModal";
 import { PageTransition } from "@/components/PageTransition";
 import { PosterCard } from "@/components/PosterCard";
+import { StarRating } from "@/components/StarRating";
 import { API_BASE_URL, useAuth } from "@/hooks/useAuth";
-import { useSwipeCard, type SwipeDirection } from "@/hooks/useSwipeCard";
+import { useSwipeCard } from "@/hooks/useSwipeCard";
 import { useTiltCard } from "@/hooks/useTiltCard";
 
 type RecommendResponse = {
@@ -89,16 +87,10 @@ type OnboardingTitle = {
   // solo viene seteado si el usuario ya puntuó este título antes — precarga
   // la grilla en vez de forzar a re-puntuar lo mismo cada sesión
   rating?: number | null;
+  rating_source?: "import" | "manual" | "like" | "star" | null;
 };
 
 const MIN_MANUAL_RATINGS = 10; // keep in sync with backend/app/main.py::MIN_MANUAL_RATINGS
-// each button maps to a synthetic rating; "No la vi" removes the title (skip)
-const manualRatingOptions: { label: string; value: number }[] = [
-  { label: "Me encantó", value: 4.5 },
-  { label: "Bien", value: 3.5 },
-  { label: "No me gustó", value: 1.5 },
-];
-
 function formatFileSize(bytes: number): string {
   return bytes < 1024 * 1024 ? `${Math.round(bytes / 1024)} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
@@ -181,27 +173,11 @@ function ManualRatingCard({
       </div>
       <div className="font-black uppercase text-xs tracking-tighter leading-none mb-0.5">{item.title}</div>
       <div className="font-mono text-[10px] text-muted-foreground mb-2">{item.year || ""}</div>
-      <div className="mt-auto grid grid-cols-2 gap-1">
-        {manualRatingOptions.map((option) => (
-          <button
-            key={option.value}
-            onClick={() => onRate(item.title, current === option.value ? null : option.value)}
-            className={`px-1.5 py-1.5 font-mono text-[9px] uppercase tracking-wider border transition-colors ${
-              current === option.value
-                ? "bg-accent text-accent-foreground border-accent"
-                : "border-foreground/20 hover:border-foreground"
-            }`}
-          >
-            {option.label}
-          </button>
-        ))}
+      <div className="mt-auto">
+        <StarRating value={current} onChange={(rating) => onRate(item.title, rating)} size="sm" />
         <button
           onClick={() => onRate(item.title, null)}
-          className={`px-1.5 py-1.5 font-mono text-[9px] uppercase tracking-wider border transition-colors ${
-            current === undefined
-              ? "bg-foreground text-background border-foreground"
-              : "border-foreground/20 hover:border-foreground"
-          }`}
+          className="mt-1 w-full py-1 font-mono text-[9px] uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
         >
           No la vi
         </button>
@@ -244,20 +220,8 @@ const swipeActionBtn =
 const LETTERBOXD_USERNAMES_KEY = "butaca.letterboxdUsernames";
 const MAX_REMEMBERED_USERNAMES = 5;
 
-const SWIPE_HINTS: Record<SwipeDirection, string> = {
-  right: "Me encantó",
-  up: "Bien",
-  left: "No me gustó",
-  down: "No la vi",
-};
-
-// pedido de Matías: alternativa "estilo swipe/Tinder" al modo manual, una
-// peli a la vez en vez de la grilla completa — arrastrar el poster (derecha
-// = me encantó, izquierda = no me gustó) o los botones de abajo (que además
-// cubren Bien/No la vi, que un swipe de solo 2 direcciones no puede
-// expresar). "No la vi" no llama a onRate (mismo significado que nunca
-// tocarla) — un Set local de "salteadas" es lo único que la saca de la pila,
-// porque manualRatings no cambia para ese caso
+// Vista de a una. Las estrellas reemplazan los tres gestos sintéticos; el
+// swipe hacia abajo queda como atajo de "No la vi".
 function SwipeRating({
   titles,
   ratings,
@@ -282,9 +246,6 @@ function SwipeRating({
   }
 
   const { cardRef, hint, onPointerDown, onPointerMove, onPointerUp } = useSwipeCard({
-    right: () => rate(4.5),
-    left: () => rate(1.5),
-    up: () => rate(3.5),
     down: () => rate(null),
   });
 
@@ -316,7 +277,7 @@ function SwipeRating({
           {hint && (
             <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-background/70">
               <span className="font-mono text-xs uppercase tracking-widest px-3 py-2 border-2 border-foreground bg-background">
-                {SWIPE_HINTS[hint]}
+                No la vi
               </span>
             </div>
           )}
@@ -339,23 +300,14 @@ function SwipeRating({
         </div>
       </div>
 
-      <div className="flex gap-2 max-w-xs mx-auto mt-6">
-        <button onClick={() => rate(1.5)} className={swipeActionBtn}>
-          No me gustó
-        </button>
-        <button onClick={() => rate(3.5)} className={swipeActionBtn}>
-          Bien
-        </button>
-        <button onClick={() => rate(null)} className={swipeActionBtn}>
+      <div className="max-w-xs mx-auto mt-6">
+        <StarRating onChange={rate} size="lg" />
+        <button onClick={() => rate(null)} className={`${swipeActionBtn} w-full mt-2`}>
           No la vi
-        </button>
-        <button onClick={() => rate(4.5)} className={`${swipeActionBtn} hover:border-accent hover:text-accent`}>
-          Me encantó
         </button>
       </div>
       <p className="text-center font-mono text-[9px] text-muted-foreground/60 mt-3">
-        Deslizá el poster — derecha: me encantó · arriba: bien · izquierda: no me gustó ·
-        abajo: no la vi
+        Elegí las estrellas o deslizá hacia abajo si no la viste.
       </p>
     </div>
   );
@@ -484,7 +436,9 @@ export default function Recommend() {
         if (!body) return;
         setOnboardingTitles(body.titles);
         const prefilled = Object.fromEntries(
-          body.titles.filter((t) => t.rating != null).map((t) => [t.title, t.rating as number])
+          body.titles
+            .filter((t) => t.rating != null && (t.rating_source === "import" || t.rating_source === "star"))
+            .map((t) => [t.title, t.rating as number])
         );
         if (Object.keys(prefilled).length) {
           setManualRatings((prev) => ({ ...prefilled, ...prev }));
@@ -882,7 +836,7 @@ export default function Recommend() {
                               : "border-foreground/20 hover:border-foreground"
                           }`}
                         >
-                          Swipe
+                          Una por una
                         </button>
                       </div>
                     </div>

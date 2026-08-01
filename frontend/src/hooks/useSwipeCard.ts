@@ -9,11 +9,9 @@ export type SwipeDirection = "right" | "left" | "up" | "down";
 // patrón que useTiltCard) para que el poster siga al dedo/mouse sin esperar un
 // re-render de React en cada pointermove.
 //
-// Cuatro direcciones (pedido de Matías, 2026-07-31: "todas las funciones dentro
-// del swipe"): antes solo eran derecha/izquierda y las otras dos opciones
-// existían únicamente como botones. El eje dominante decide: se compara |dx|
-// contra |dy| para que un gesto en diagonal no dispare las dos.
-export function useSwipeCard(handlers: Record<SwipeDirection, () => void>) {
+// El eje dominante decide la dirección; cada pantalla habilita solo los
+// handlers que necesita y el resto de los gestos vuelve a su lugar.
+export function useSwipeCard(handlers: Partial<Record<SwipeDirection, () => void>>) {
   const cardRef = useRef<HTMLDivElement>(null);
   const startRef = useRef<{ x: number; y: number } | null>(null);
   // solo para el cartel de feedback ("me encantó" / "no la vi") mientras
@@ -53,7 +51,8 @@ export function useSwipeCard(handlers: Record<SwipeDirection, () => void>) {
     const dx = e.clientX - start.x;
     const dy = e.clientY - start.y;
     setTransform(dx, dy, false);
-    setHint(directionOf(dx, dy));
+    const direction = directionOf(dx, dy);
+    setHint(direction && handlers[direction] ? direction : null);
   }
 
   function onPointerUp(e: React.PointerEvent<HTMLDivElement>) {
@@ -65,7 +64,7 @@ export function useSwipeCard(handlers: Record<SwipeDirection, () => void>) {
     setHint(null);
 
     const direction = directionOf(dx, dy);
-    if (!direction) {
+    if (!direction || !handlers[direction]) {
       setTransform(0, 0, true);
       return;
     }
@@ -76,7 +75,7 @@ export function useSwipeCard(handlers: Record<SwipeDirection, () => void>) {
       down: [0, FLY_OUT_DISTANCE],
     };
     setTransform(...flyOut[direction], true);
-    handlers[direction]();
+    handlers[direction]?.();
   }
 
   return { cardRef, hint, onPointerDown, onPointerMove, onPointerUp };

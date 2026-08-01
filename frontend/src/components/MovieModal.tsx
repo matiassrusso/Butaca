@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 
 import { API_BASE_URL } from "@/hooks/useAuth";
 import { isUnknownMatch } from "@/lib/match";
+import { StarRating } from "@/components/StarRating";
 
 export type FeedbackStatus = "interested" | "not_interested" | "seen";
 
@@ -83,15 +84,6 @@ function useTypewriterWhy(
   return displayed;
 }
 
-// mismo vocabulario que el modo manual "Sin cuenta" (Recommend.tsx) — un
-// rating sintético elegido de un menú, no un puntaje preciso que el usuario
-// haya tipeado
-const RATE_OPTIONS: { label: string; value: number }[] = [
-  { label: "Me encantó", value: 4.5 },
-  { label: "Bien", value: 3.5 },
-  { label: "No me gustó", value: 1.5 },
-];
-
 type SimilarTitle = { title: string; year: number; kind: string; tmdb_id: number | null; poster_path: string | null };
 
 // cuántas opiniones hacen falta para recalcular el match (pedido de Matías,
@@ -118,6 +110,7 @@ function DisagreePanel({
   const [votes, setVotes] = useState(0);
   const [step, setStep] = useState<"seen" | "rating">("seen");
   const [saving, setSaving] = useState(false);
+  const [ratingDraft, setRatingDraft] = useState<number | null>(null);
 
   useEffect(() => {
     if (rec.tmdb_id == null || !token) {
@@ -145,14 +138,19 @@ function DisagreePanel({
   function next() {
     setIndex((i) => i + 1);
     setStep("seen");
+    setRatingDraft(null);
   }
 
   async function vote(rating: number) {
     if (!current) return;
+    setRatingDraft(rating);
     setSaving(true);
     const saved = await onRate(rating, current.title, current.tmdb_id);
     setSaving(false);
-    if (!saved) return;
+    if (!saved) {
+      setRatingDraft(null);
+      return;
+    }
     const total = votes + 1;
     setVotes(total);
     if (total >= VOTES_NEEDED) {
@@ -251,18 +249,7 @@ function DisagreePanel({
           <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
             ¿Qué te pareció?
           </p>
-          <div className="flex gap-2">
-            {RATE_OPTIONS.map((opt) => (
-              <button
-                key={opt.label}
-                onClick={() => vote(opt.value)}
-                disabled={saving}
-                className="flex-1 py-2 px-1 font-mono text-[9px] uppercase tracking-widest border border-foreground/30 hover:border-accent hover:text-accent transition-colors"
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
+          <StarRating value={ratingDraft} onChange={vote} disabled={saving} size="sm" />
         </>
       )}
     </div>
@@ -288,8 +275,7 @@ export function MovieModal({
   seenWhys?: MutableRefObject<Map<number, string>>;
   onClose: () => void;
   onFeedback: (status: FeedbackStatus) => void;
-  // pedido de Matías (2026-07-31): "Ya la vi" ahora ofrece puntuar directo
-  // (me encantó/bien/no me gustó) en vez de solo marcarla vista, así queda
+  // "Ya la vi" ofrece puntuar directo con estrellas, así queda
   // en el perfil para futuras recomendaciones. title/tmdbId opcionales: el
   // botón "no estoy de acuerdo" reusa este mismo callback para votar
   // similares, que no son rec — sin ellos, puntúa rec.title.
@@ -298,6 +284,8 @@ export function MovieModal({
 }) {
   const [details, setDetails] = useState<MovieDetails | null>(null);
   const [showRateMenu, setShowRateMenu] = useState(false);
+  const [ratingDraft, setRatingDraft] = useState<number | null>(null);
+  const [ratingSaving, setRatingSaving] = useState(false);
   const [loadingDetails, setLoadingDetails] = useState(false);
 
   // "no estoy de acuerdo con el match": después de juntar VOTES_NEEDED
@@ -324,6 +312,19 @@ export function MovieModal({
       })
       .catch(() => setShowDisagree(false))
       .finally(() => setRecalculating(false));
+  }
+
+  async function saveRating(rating: number) {
+    setRatingDraft(rating);
+    setRatingSaving(true);
+    const saved = await onRate(rating);
+    setRatingSaving(false);
+    if (saved) {
+      onFeedback("seen");
+      setShowRateMenu(false);
+    } else {
+      setRatingDraft(null);
+    }
   }
 
   useEffect(() => {
@@ -566,22 +567,7 @@ export function MovieModal({
                   <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-2">
                     ¿Qué te pareció?
                   </p>
-                  <div className="flex gap-2">
-                    {RATE_OPTIONS.map((opt) => (
-                      <button
-                        key={opt.label}
-                        onClick={async () => {
-                          if (await onRate(opt.value)) {
-                            onFeedback("seen");
-                            setShowRateMenu(false);
-                          }
-                        }}
-                        className={`${btn} border-foreground/30 hover:border-accent hover:text-accent`}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
+                  <StarRating value={ratingDraft} onChange={saveRating} disabled={ratingSaving} />
                 </div>
               )}
             </div>}

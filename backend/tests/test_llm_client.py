@@ -357,6 +357,14 @@ def test_build_prompt_does_not_cite_a_numeric_score_for_manual_ratings() -> None
     assert "Manual Movie (te encantó, sin puntaje numérico)" in prompt
 
 
+def test_build_prompt_cites_precise_butaca_star_rating() -> None:
+    ratings = [RatedItem(title="Star Movie", rating=3.5, review="", source="star")]
+
+    prompt = llm_client._build_prompt(ratings, "", HEURISTIC)
+
+    assert "Star Movie (3.5/5)" in prompt
+
+
 def test_build_prompt_does_not_cite_a_numeric_score_for_letterboxd_likes() -> None:
     # bug reportado por Matías (2026-07-31): los likes/favoritos de
     # Letterboxd sin estrellas puestas (source="like") son un rating

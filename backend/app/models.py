@@ -9,12 +9,13 @@ class RatedItem(BaseModel):
     review: str = ""
     watched_date: str = ""
     tags: list[str] = Field(default_factory=list)
-    # 'import' = rating numerico real de Letterboxd (zip/username). 'manual'
-    # = click de boton en el modo "Sin cuenta" (Me encantó/Bien/No me
-    # gustó). 'like' = like/favorito de Letterboxd sin estrellas puestas.
+    # 'import' = rating numerico real de Letterboxd (zip/username). 'star' =
+    # rating preciso del selector actual de Butaca. 'manual' = rating sintético
+    # histórico de los tres botones viejos. 'like' = like/favorito de
+    # Letterboxd sin estrellas puestas.
     # 'manual' y 'like' llevan un rating sintetico — el llm_client usa esto
     # para no citarlo con una precisión de "(4.5/5)" que el usuario nunca dio.
-    source: Literal["import", "manual", "like"] = "import"
+    source: Literal["import", "manual", "like", "star"] = "import"
     # id de TMDb ya resuelto, cuando la fuente lo trae (tmdb:movieId del feed
     # RSS de username) — evita una búsqueda por texto (más rápido, sin
     # riesgo de matchear un remake con el mismo nombre) en
@@ -29,7 +30,7 @@ class RecommendRequest(BaseModel):
 
 class ManualRating(BaseModel):
     title: str = Field(min_length=1, max_length=300)
-    rating: float = Field(ge=0.5, le=5)
+    rating: float = Field(ge=0.5, le=5, multiple_of=0.5)
 
 
 class ManualRecommendRequest(BaseModel):
@@ -62,6 +63,7 @@ class OnboardingTitle(BaseModel):
     # puntuó antes (de cualquier fuente) — precarga la grilla manual en vez
     # de forzar a re-puntuar lo mismo cada sesión
     rating: float | None = None
+    rating_source: Literal["import", "manual", "like", "star"] | None = None
 
 
 class OnboardingTitlesResponse(BaseModel):
@@ -122,8 +124,8 @@ class WatchedItem(BaseModel):
     # pedido de Matías (2026-07-31): la bitácora (/history) mostraba estrellas
     # 1-5 para todo, aunque los ratings de "manual"/"like" son sintéticos (ver
     # RatedItem.source) — el frontend usa esto para mostrar "te encantó"/
-    # "te gustó"/"no te gustó" en vez de estrellas cuando no vino de Letterboxd
-    source: Literal["import", "manual", "like"] = "import"
+    # "te gustó"/"no te gustó" en vez de estrellas cuando no fue preciso
+    source: Literal["import", "manual", "like", "star"] = "import"
 
 
 class WatchedHistoryResponse(BaseModel):
@@ -191,7 +193,7 @@ class RateTitleRequest(BaseModel):
     # también para picks de /weekly, que no tienen fila en
     # recommendations_served (pedido de Matías, 2026-07-31)
     title: str = Field(min_length=1, max_length=300)
-    rating: float = Field(ge=0.5, le=5)
+    rating: float = Field(ge=0.5, le=5, multiple_of=0.5)
     tmdb_id: int | None = None
 
 

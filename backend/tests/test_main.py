@@ -405,7 +405,7 @@ def test_rate_title_persists_to_watched_history() -> None:
     assert any(
         item["title"] == "Spider-Man: Brand New Day"
         and item["rating"] == 4.5
-        and item["source"] == "manual"
+        and item["source"] == "star"
         for item in watched
     )
 
@@ -415,6 +415,16 @@ def test_rate_title_rejects_out_of_range_rating() -> None:
 
     response = client.post(
         "/profile/rate", headers=headers, json={"title": "X", "rating": 6}
+    )
+
+    assert response.status_code == 422
+
+
+def test_rate_title_rejects_non_half_star_rating() -> None:
+    headers = _auth_headers("ratebadstep")
+
+    response = client.post(
+        "/profile/rate", headers=headers, json={"title": "X", "rating": 3.25}
     )
 
     assert response.status_code == 422
@@ -676,7 +686,15 @@ def test_similar_titles_returns_onboarding_title_shape(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert response.json()["titles"] == [
-        {"title": "Similar Movie", "year": 2010, "kind": "movie", "tmdb_id": 2, "poster_path": None, "rating": None}
+        {
+            "title": "Similar Movie",
+            "year": 2010,
+            "kind": "movie",
+            "tmdb_id": 2,
+            "poster_path": None,
+            "rating": None,
+            "rating_source": None,
+        }
     ]
 
 
@@ -893,10 +911,9 @@ def test_watched_history_returns_items_from_uploaded_zip() -> None:
     assert items[0]["source"] == "import"
 
 
-def test_watched_history_distinguishes_import_from_manual_source() -> None:
-    # pedido de Matías (2026-07-31): la bitácora necesita saber si un rating
-    # vino de Letterboxd (estrellas reales) o de un botón de Butaca (rating
-    # sintético) para no mostrar ambos como si fueran el mismo tipo de dato
+def test_watched_history_distinguishes_precise_sources() -> None:
+    # Tanto Letterboxd como el nuevo selector de Butaca guardan estrellas
+    # precisas, pero conservan su fuente para mostrarla en la bitácora.
     headers = _auth_headers("watchedsource")
     _post_zip(headers, ratings_csv="Name,Rating,Review\nWhiplash,4.5,great")
     client.post(
@@ -907,7 +924,7 @@ def test_watched_history_distinguishes_import_from_manual_source() -> None:
 
     by_title = {item["title"]: item["source"] for item in items}
     assert by_title["Whiplash"] == "import"
-    assert by_title["Manual Movie"] == "manual"
+    assert by_title["Manual Movie"] == "star"
 
 
 def test_watched_history_returns_date_from_diary() -> None:
@@ -1385,10 +1402,12 @@ def test_onboarding_titles_merges_previously_rated_titles(monkeypatch) -> None:
 
     # seed que el usuario también puntuó: aparece con su rating
     assert titles["The Godfather"]["rating"] == 4.5
+    assert titles["The Godfather"]["rating_source"] == "star"
     # título puntuado que NO está en la lista semilla: también aparece,
     # resuelto contra TMDb best-effort (sin año curado)
     extra = titles["Nunca Sabrás Que Vi Esto"]
     assert extra["rating"] == 4.0
+    assert extra["rating_source"] == "star"
     assert extra["tmdb_id"] == 999
     assert extra["poster_path"] == "https://img/extra.jpg"
     # seed que el usuario NO puntuó: sin rating
@@ -1512,10 +1531,7 @@ def test_recommend_manual_excludes_titles_rated_in_a_different_session() -> None
     assert "Before Sunrise" not in titles
 
 
-def test_recommend_manual_persists_source_as_manual() -> None:
-    # el "source" es lo que despues usa llm_client para NO citar un puntaje
-    # numerico preciso ("4.5/5") en el why de algo que fue un click de boton,
-    # no un rating real que el usuario haya dado
+def test_recommend_manual_persists_source_as_star() -> None:
     headers = _auth_headers("manualsource")
     client.post("/recommend/manual", headers=headers, json={"ratings": _MANUAL_RATINGS})
 
@@ -1523,7 +1539,7 @@ def test_recommend_manual_persists_source_as_manual() -> None:
     watched = db.get_watched_items(user_id)
 
     assert watched
-    assert all(item["source"] == "manual" for item in watched)
+    assert all(item["source"] == "star" for item in watched)
 
 
 def test_recommend_profile_reuses_saved_ratings_without_duplicating() -> None:

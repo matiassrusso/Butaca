@@ -22,7 +22,7 @@ type WatchedItem = {
   review: string;
   created_at: string;
   watched_date: string;
-  source: "import" | "manual" | "like";
+  source: "import" | "manual" | "like" | "star";
 };
 
 function formatSessionDate(value: string): string {
@@ -48,8 +48,8 @@ function stars(rating: number): string {
   return "★".repeat(Math.floor(rating)) + (rating % 1 ? "½" : "");
 }
 
-// los ratings "manual"/"like" son sintéticos (botón de Butaca, no estrellas
-// puestas en Letterboxd) — mostrarlos como estrellas 1-5 sería un dato
+// los ratings históricos "manual" y los "like" son sintéticos — mostrarlos
+// como estrellas 1-5 sería un dato
 // inventado, mismo criterio que ya se usa en el "why" del LLM (ver
 // llm_client._rating_label en el backend)
 function ratingLabel(rating: number): string {
@@ -263,7 +263,9 @@ export default function History() {
                       {sourceLabel(item.source)}
                     </td>
                     <td className="py-4 text-right font-mono text-sm text-accent">
-                      {item.source === "import" ? stars(item.rating) : ratingLabel(item.rating)}
+                      {item.source === "import" || item.source === "star"
+                        ? stars(item.rating)
+                        : ratingLabel(item.rating)}
                     </td>
                   </tr>
                 );
