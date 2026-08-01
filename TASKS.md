@@ -33,11 +33,6 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
 
 ## Pending
 
-- [ ] **[deploy-preflight-2026-07-31] Destrabar deploy de Vercel y cerrar la auditoría preflight**
-      — auditar `4c52f1e...HEAD`, corregir los bugs encontrados, correr build +
-      tests reales, pushear `main` y verificar el deployment | owner: codex |
-      **In Progress**
-
 - [x] **Rediseño del flujo de "no estoy de acuerdo" (2026-07-31 sesión 5,
       pedido de Matías con captura)** — detalle en `CLAUDE.md`
       (`SESSION_STATE`). Era una lista plana sin "no la vi" que trababa el
@@ -522,6 +517,14 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
 (vacío)
 
 ## Done
+
+- [x] **[deploy-preflight-2026-07-31] Deploy de Vercel destrabado + auditoría cerrada**
+      | owner: codex | Se arregló el sexto voto que recalculaba antes de
+      persistirse, la caché de veredictos que ignoraba cambios del perfil y el
+      import ajeno de Letterboxd que mezclaba/guardaba datos del dueño. CI real
+      verde (297 tests + build) y bundle nuevo verificado en `butaca.xyz`.
+      Archivos: `.github/workflows/ci.yml`, `backend/app/{llm_client,main,models}.py`,
+      tests de backend, `MovieModal`, `SearchBox`, `Home`, `History`, `Recommend`.
 
 - [x] [account-i-001] **Ola 4 · Tarea I — Verificación de email + borrar cuenta**
       | owner: claude | Higiene mínima para usuarios desconocidos. Todo calcado
