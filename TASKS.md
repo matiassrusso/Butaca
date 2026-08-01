@@ -518,6 +518,11 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
 
 ## Done
 
+- [x] **[weekly-cta-2026-07-31] CTA anónimo semanal consolidado**
+      | owner: codex | `frontend/src/pages/Home.tsx`: se eliminó “Iniciá sesión”
+      de cada card y quedó un único link en la introducción de la sección.
+      Build verde y verificado visualmente a 1368 px (1 CTA nuevo, 0 viejos).
+
 - [x] **[deploy-preflight-2026-07-31] Deploy de Vercel destrabado + auditoría cerrada**
       | owner: codex | Se arregló el sexto voto que recalculaba antes de
       persistirse, la caché de veredictos que ignoraba cambios del perfil y el

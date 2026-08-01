@@ -1,5 +1,5 @@
 import { motion, useScroll, useTransform } from "framer-motion";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Link } from "wouter";
 
@@ -66,7 +66,7 @@ const MARQUEE_NAMES = [
 // título, año y match; el veredicto se lee al abrir el detalle, con el
 // typewriter. De paso empareja las cards — un why de 2 líneas contra uno de 5
 // dejaba la grilla del weekly visiblemente despareja.
-function PickText({ rec, why }: { rec: Recommendation; why?: ReactNode }) {
+function PickText({ rec }: { rec: Recommendation }) {
   return (
     <>
       <h3 className="text-lg font-black uppercase tracking-tighter leading-none mb-1 group-hover:text-accent transition-colors">
@@ -76,7 +76,6 @@ function PickText({ rec, why }: { rec: Recommendation; why?: ReactNode }) {
         {rec.year}
         {rec.kind === "series" ? " · Serie" : ""}
       </p>
-      {why}
     </>
   );
 }
@@ -304,7 +303,17 @@ export default function Home() {
           <p className="font-serif italic text-lg text-muted-foreground mb-10 max-w-2xl">
             3 de tendencia esta semana + 2 de otras épocas, todo TMDb real — las mismas para
             todo el mundo —
-            {isAuthenticated ? " esto es lo que tu perfil dice sobre cada una." : " logueate para ver si van con vos."}
+            {isAuthenticated ? (
+              " esto es lo que tu perfil dice sobre cada una."
+            ) : (
+              <>
+                {" "}
+                <Link href="/login" className="text-accent underline decoration-dotted hover:text-foreground">
+                  Iniciá sesión
+                </Link>{" "}
+                para ver qué tan bien va cada una con vos.
+              </>
+            )}
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
             {weeklyPicks.map((rec, i) => (
@@ -318,16 +327,7 @@ export default function Home() {
                 showScore={isAuthenticated}
                 onSelect={() => setSelectedRec(rec)}
               >
-                <PickText
-                  rec={rec}
-                  why={
-                    isAuthenticated ? undefined : (
-                      <p className="font-mono text-[10px] uppercase tracking-widest text-accent">
-                        Iniciá sesión para saber si te va a gustar →
-                      </p>
-                    )
-                  }
-                />
+                <PickText rec={rec} />
               </PosterCard>
             ))}
           </div>
