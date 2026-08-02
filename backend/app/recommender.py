@@ -32,6 +32,12 @@ POSITIVE_HINTS = {
     "revisionist western": ["revisionist-western"],
 }
 
+# invariante de Matías (TASKS.md, 2026-08-02): un match < 60 no es una
+# recomendación real y nunca se muestra como tal, ni siquiera para completar
+# una tanda de 6 — _finish_recommend en main.py amplía el pool de candidatos
+# antes de resignarse a devolver menos de 6.
+MIN_MATCH_SCORE = 60
+
 NEGATIVE_HINTS = {
     "boring": ["slow", "quiet"],
     "empty": ["slow", "melancholic"],
@@ -271,6 +277,7 @@ def recommend(
     rejected_tags: Counter | None = None,
     exclude_seen: bool = True,
     limit: int = 6,
+    min_score: int = MIN_MATCH_SCORE,
 ) -> RecommendResponse:
     taste_ratings = ratings if preference_ratings is None else preference_ratings
     positive_tags, negative_tags = _collect_preference_tags(taste_ratings)
@@ -344,9 +351,12 @@ def recommend(
         # in the 70s-80s, a near-perfect stack is needed to graze 99.
         match_score = round(50 + 49 * math.tanh(points / 40))
 
-        # no score floor here on purpose — we always want a full set of picks
-        # when the catalog has that many unseen candidates, even if some are
-        # weak matches; the displayed match_score already tells the user how weak.
+        if match_score < min_score:
+            # un match débil (o "sin evidencia", =50) no es una recomendación
+            # real — antes se dejaba pasar para siempre completar 6 picks, lo
+            # que mezclaba un 88% fuerte con 45%/55%/S/D en la misma tanda.
+            continue
+
         # reasons name the actual matched tags (and, when possible, the
         # specific title from the user's own history behind the match)
         # instead of a single fixed sentence, so two movies with different

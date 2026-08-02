@@ -3,7 +3,7 @@ import zipfile
 
 from fastapi.testclient import TestClient
 
-from backend.app import catalog, db, letterboxd_scrape, onboarding_titles
+from backend.app import db, letterboxd_scrape, onboarding_titles
 from backend.app.llm_client import LlmError
 from backend.app.main import TASTE_TAG_LOOKUP_CAP, _enrich_loved_ratings_with_genre_tags, app
 from backend.app.models import RatedItem
@@ -11,7 +11,10 @@ from backend.app.tmdb_client import TmdbError
 
 client = TestClient(app)
 
-VALID_RATINGS_CSV = "Name,Rating,Review\nMad Max: Fury Road,1.5,too loud and empty"
+VALID_RATINGS_CSV = (
+    "Name,Rating,Review\n"
+    "An Old Favorite,5,slow psychological action romance and funny all mixed together"
+)
 
 
 def _zip_bytes(files: dict[str, str]) -> bytes:
@@ -110,7 +113,14 @@ def test_recommend_letterboxd_returns_picks_for_valid_username(monkeypatch) -> N
         letterboxd_scrape,
         "fetch_letterboxd_diary",
         lambda username: (
-            [RatedItem(title="Mad Max: Fury Road", rating=1.5, review="", watched_date="2024-01-01")],
+            [
+                RatedItem(
+                    title="An Old Favorite",
+                    rating=5,
+                    review="slow psychological action romance and funny all mixed together",
+                    watched_date="2024-01-01",
+                )
+            ],
             set(),
         ),
     )
@@ -498,6 +508,37 @@ def test_recommend_zip_falls_back_to_mock_catalog_when_tmdb_fails(monkeypatch) -
     assert len(response.json()["recommendations"]) == 6
 
 
+def test_recommend_zip_expands_pool_when_initial_matches_are_weak(monkeypatch) -> None:
+    # invariante de Matías (TASKS.md, 2026-08-02): si el pool inicial no
+    # llega a 6 picks fuertes, _finish_recommend pide un pool más grande a
+    # TMDb (fetch_candidates con más páginas) antes de resignarse a mostrar
+    # menos — nunca rellena con lo débil que ya había descartado.
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        "backend.app.taste_profile.tmdb_client.search_title",
+        lambda title: (_ for _ in ()).throw(TmdbError("sin perfil en este test")),
+    )
+
+    def fake_fetch_candidates(mood: str, pages: int = 2):
+        if pages == 4:
+            return [
+                {"title": "Strong Late Arrival", "year": 2021, "kind": "movie", "tags": ["psychological", "dark"]},
+            ]
+        return [{"title": "Weak Only", "year": 2021, "kind": "movie", "tags": ["quiet"]}]
+
+    monkeypatch.setattr("backend.app.main.tmdb_client.fetch_candidates", fake_fetch_candidates)
+
+    headers = _auth_headers("expandpool")
+    response = _post_zip(
+        headers, ratings_csv="Name,Rating,Review\nAn Old Favorite,5,psychological and intense"
+    )
+
+    assert response.status_code == 200
+    titles = {item["title"] for item in response.json()["recommendations"]}
+    assert "Strong Late Arrival" in titles
+    assert "Weak Only" not in titles
+
+
 def test_recommend_zip_carries_poster_and_overview_fields(monkeypatch) -> None:
     monkeypatch.setenv("TMDB_API_KEY", "fake-key")
 
@@ -569,9 +610,24 @@ def test_recommend_zip_falls_back_to_heuristic_when_llm_fails(monkeypatch) -> No
 
 def test_recommend_zip_prioritizes_new_titles_then_fills_to_six() -> None:
     headers = _auth_headers("nuevospicks")
+    # tags directos (columna Tags real de Letterboxd) que cubren TODO el
+    # vocabulario del catálogo mock, para que las 8 películas/series crucen
+    # el piso de match y "Nuevos picks" tenga de dónde sacar títulos nuevos
+    # en la segunda tanda — con señal débil, ninguna cruzaría el piso.
+    broad_tags_csv = (
+        "Name,Rating,Review,Tags\n"
+        'An Old Favorite,5,,"dialogue-heavy,romantic,intimate,walking,'
+        "psychological,dark,stylized,thriller,quiet,architectural,"
+        "melancholic,slow,kinetic,action,loud,blockbuster,mysterious,drama,"
+        'light,indie,restless,character,existential,sad,prestige,mystery,'
+        'funny,sharp,messy"'
+    )
 
-    first = _post_zip(headers).json()["recommendations"]
-    second = _post_zip(headers).json()["recommendations"]
+    # el Tags de Letterboxd solo se lee de reviews.csv/diary.csv, no de
+    # ratings.csv (letterboxd_zip.parse_letterboxd_zip) — reviews.csv sirve
+    # además como base (Name/Rating/Review) porque RATINGS_FILES lo prefiere.
+    first = _post_zip(headers, zip_files={"reviews.csv": broad_tags_csv}).json()["recommendations"]
+    second = _post_zip(headers, zip_files={"reviews.csv": broad_tags_csv}).json()["recommendations"]
 
     first_titles = {item["title"] for item in first}
     second_titles = {item["title"] for item in second}
@@ -1387,6 +1443,38 @@ _MANUAL_RATINGS = [
 ]
 
 
+def _mock_strong_profile_match(monkeypatch) -> None:
+    # el modo manual no tiene reseñas (solo título + estrellas), así que en
+    # el catálogo mock nunca hay señal de tags — en producción el match real
+    # sale del perfil de TMDb (director/actor/década), no del texto. Estos
+    # mocks simulan esa señal para que /recommend/manual tenga al menos un
+    # candidato que cruce el piso de match, igual que haría TMDb real.
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        "backend.app.taste_profile.tmdb_client.search_title",
+        lambda title: {
+            "tmdb_id": 1, "title": title, "year": 2015, "kind": "movie", "genres": ["Acción"], "tags": [],
+        },
+    )
+    monkeypatch.setattr(
+        "backend.app.taste_profile.tmdb_client.fetch_taste_credits",
+        lambda tmdb_id, kind: {"director": "Fave Director", "actors": []},
+    )
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.fetch_personalized_candidates",
+        lambda profile, mood, kind_filter: [
+            {
+                "title": "Directed By Fave",
+                "year": 2020,
+                "kind": "movie",
+                "tags": [],
+                "director": "Fave Director",
+                "actors": [],
+            }
+        ],
+    )
+
+
 def test_onboarding_titles_returns_seeds_without_tmdb_key(monkeypatch) -> None:
     monkeypatch.delenv("TMDB_API_KEY", raising=False)
     headers = _auth_headers("onbnokey")
@@ -1507,7 +1595,8 @@ def test_onboarding_search_returns_empty_without_tmdb_key(monkeypatch) -> None:
     assert response.json()["titles"] == []
 
 
-def test_recommend_manual_returns_picks_for_enough_ratings() -> None:
+def test_recommend_manual_returns_picks_for_enough_ratings(monkeypatch) -> None:
+    _mock_strong_profile_match(monkeypatch)
     headers = _auth_headers("manualok")
 
     response = client.post("/recommend/manual", headers=headers, json={"ratings": _MANUAL_RATINGS})
@@ -1595,7 +1684,8 @@ def test_recommend_manual_persists_source_as_star() -> None:
     assert all(item["source"] == "star" for item in watched)
 
 
-def test_recommend_profile_reuses_saved_ratings_without_duplicating() -> None:
+def test_recommend_profile_reuses_saved_ratings_without_duplicating(monkeypatch) -> None:
+    _mock_strong_profile_match(monkeypatch)
     headers = _auth_headers("profileshortcut")
     client.post("/recommend/manual", headers=headers, json={"ratings": _MANUAL_RATINGS})
     user_id = db.get_user_by_username("profileshortcut")["id"]
@@ -1612,6 +1702,28 @@ def test_recommend_profile_reuses_saved_ratings_without_duplicating() -> None:
 
 def test_new_picks_keeps_available_unseen_titles_with_llm_enabled(monkeypatch) -> None:
     monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
+    # el modo manual no tiene reseñas, así que sin señal de TMDb (director)
+    # ningún candidato cruzaría el piso de match — 8 candidatos "dirigidos
+    # por" el mismo director simulan un pool con más de 6 picks fuertes,
+    # para poder probar que "Nuevos picks" saca los que faltaron la vez
+    # anterior en vez de repetir siempre los mismos 6.
+    _mock_strong_profile_match(monkeypatch)
+    strong_pool = [
+        {
+            "title": f"Directed By Fave {i}",
+            "year": 2020,
+            "kind": "movie",
+            "tags": [],
+            "director": "Fave Director",
+            "actors": [],
+        }
+        for i in range(8)
+    ]
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.fetch_personalized_candidates",
+        lambda profile, mood, kind_filter: strong_pool,
+    )
+    monkeypatch.setattr("backend.app.main.tmdb_client.fetch_candidates", lambda mood, pages=2: [])
 
     def rank_by_match(ratings, mood, response):
         return response.model_copy(
@@ -1644,7 +1756,7 @@ def test_new_picks_keeps_available_unseen_titles_with_llm_enabled(monkeypatch) -
 
     first_titles = {item["title"] for item in first}
     second_titles = {item["title"] for item in second}
-    unseen_available = {item["title"] for item in catalog.CATALOG} - first_titles
+    unseen_available = {item["title"] for item in strong_pool} - first_titles
     assert unseen_available
     assert unseen_available <= second_titles
 
@@ -1685,7 +1797,11 @@ def test_profile_summary_counts_activity() -> None:
     headers = _auth_headers("summaryactive")
     picks = _post_zip(
         headers,
-        ratings_csv="Name,Rating,Review\nWhiplash,4.5,intense\nMad Max: Fury Road,1.5,too loud",
+        ratings_csv=(
+            "Name,Rating,Review\n"
+            "Whiplash,4.5,psychological and intense\n"
+            "Mad Max: Fury Road,1.5,too loud"
+        ),
     ).json()["recommendations"]
     client.post(
         "/feedback",

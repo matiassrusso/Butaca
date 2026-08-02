@@ -33,7 +33,7 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
 
 ## Pending
 
-- [ ] **[/recommend debe devolver los mejores matches reales, no completar con películas flojas (feedback 2026-07-31)]** — Matías mostró una tanda base con 45%, 55%, 60% y S/D junto a un 88%: contradice la promesa central de Butaca. Diagnosticar el ranking completo en `_finish_recommend` y el efecto de `llm_client.refine_recommendations`; dejar un test de regresión que pruebe que salen los títulos de mayor match del pool elegible, que `<=50` nunca se presenta como recomendación y que no se rellena una grilla con picks que el propio sistema predice que probablemente no gusten. Definir durante el diagnóstico cómo tratar 51–60 y qué devolver si no existen seis candidatos suficientemente fuertes.
+- [x] **[/recommend debe devolver los mejores matches reales, no completar con películas flojas (feedback 2026-07-31)]** — resuelto 2026-08-02. Causa raíz: `recommender.recommend()` no tenía piso de score a propósito ("we always want a full set of picks... even if some are weak matches"), así que rellenaba hasta 6 con lo que hubiera. Decisión de Matías: piso real en 60 (no solo descartar ≤50), y si eso deja el pool corto, `_finish_recommend` primero pide un pool más grande a TMDb (`fetch_candidates(mood, pages=4)`) antes de resignarse a mostrar menos de 6 — nunca rellena con picks flojos. `/weekly` y `/titles/{id}/verdict` quedan afuera (`min_score=0`): ahí el catálogo es fijo (las semanales de la semana, o el título que el usuario buscó), no hay pool del que elegir. 308 tests (33 nuevos/reescritos en `test_recommender.py`/`test_main.py`).
 
 - [x] **Rediseño del flujo de "no estoy de acuerdo" (2026-07-31 sesión 5,
       pedido de Matías con captura)** — detalle en `CLAUDE.md`

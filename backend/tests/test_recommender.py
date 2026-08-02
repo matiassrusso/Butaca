@@ -1,7 +1,7 @@
 from collections import Counter
 
 from backend.app.models import RatedItem
-from backend.app.recommender import GENRE_OPTIONS, TAG_PHRASES, capitalize_sentence, recommend
+from backend.app.recommender import GENRE_OPTIONS, MIN_MATCH_SCORE, TAG_PHRASES, capitalize_sentence, recommend
 
 
 def test_recommend_filters_seen_titles_and_prefers_matching_mood() -> None:
@@ -78,7 +78,7 @@ def test_recommend_carries_tmdb_id_when_present_and_none_otherwise() -> None:
         {"title": "Mock Only", "year": 2020, "kind": "movie", "tags": ["psychological", "dark"]},
     ]
 
-    response = recommend(ratings=[], mood="", catalog=custom_catalog)
+    response = recommend(ratings=[], mood="", catalog=custom_catalog, min_score=0)
 
     by_title = {item.title: item.tmdb_id for item in response.recommendations}
     assert by_title["Has Tmdb Id"] == 999
@@ -111,10 +111,10 @@ def test_recommend_ranks_by_score_not_catalog_order() -> None:
     ]
 
 
-def test_recommend_backfills_weak_matches_instead_of_returning_too_few() -> None:
-    # none of these share a single tag with the user's taste or mood, so
-    # under the old "score < 40: continue" cutoff every one of them would
-    # get dropped and the response would come back empty
+def test_recommend_discards_matches_below_min_score_instead_of_backfilling() -> None:
+    # invariante de Matías (TASKS.md, 2026-08-02): un match débil no es una
+    # recomendación real, ni siquiera para completar el cupo — antes se
+    # rellenaba con lo que sea para nunca devolver menos de N.
     catalog = [
         {"title": f"Unrelated Movie {i}", "year": 2000 + i, "kind": "movie", "tags": ["quiet"]}
         for i in range(3)
@@ -126,13 +126,26 @@ def test_recommend_backfills_weak_matches_instead_of_returning_too_few() -> None
         catalog=catalog,
     )
 
-    assert len(response.recommendations) == 3
+    assert response.recommendations == []
+
+
+def test_recommend_keeps_matches_at_or_above_min_score() -> None:
+    catalog = [{"title": "Strong Match", "year": 2020, "kind": "movie", "tags": ["action"]}]
+
+    response = recommend(
+        ratings=[RatedItem(title="Old Movie", rating=5, review="action packed")],
+        mood="",
+        catalog=catalog,
+    )
+
+    assert [item.title for item in response.recommendations] == ["Strong Match"]
+    assert response.recommendations[0].match_score >= MIN_MATCH_SCORE
 
 
 def test_recommend_capitalizes_why() -> None:
     catalog = [{"title": "Some Movie", "year": 2020, "kind": "movie", "tags": ["dark"]}]
 
-    response = recommend(ratings=[], mood="", catalog=catalog)
+    response = recommend(ratings=[], mood="", catalog=catalog, min_score=0)
 
     assert response.recommendations[0].why[0].isupper()
 
@@ -149,7 +162,7 @@ def test_recommend_kind_filter_excludes_other_kind() -> None:
         {"title": "A Series", "year": 2020, "kind": "series", "tags": ["dark"]},
     ]
 
-    response = recommend(ratings=[], mood="", catalog=catalog, kind_filter="series")
+    response = recommend(ratings=[], mood="", catalog=catalog, kind_filter="series", min_score=0)
 
     assert [item.title for item in response.recommendations] == ["A Series"]
 
@@ -162,7 +175,7 @@ def test_recommend_required_any_tags_filters_by_or_logic() -> None:
     ]
     required = frozenset(GENRE_OPTIONS["action"]) | frozenset(GENRE_OPTIONS["romance"])
 
-    response = recommend(ratings=[], mood="", catalog=catalog, required_any_tags=required)
+    response = recommend(ratings=[], mood="", catalog=catalog, required_any_tags=required, min_score=0)
 
     titles = {item.title for item in response.recommendations}
     assert titles == {"Only Action", "Only Romance"}
@@ -177,7 +190,7 @@ def test_recommend_required_any_tags_guarantees_genre_coverage() -> None:
     ] + [{"title": "The Only Romance", "year": 2020, "kind": "movie", "tags": ["romantic"]}]
     required = frozenset(GENRE_OPTIONS["action"]) | frozenset(GENRE_OPTIONS["romance"])
 
-    response = recommend(ratings=[], mood="", catalog=catalog, required_any_tags=required)
+    response = recommend(ratings=[], mood="", catalog=catalog, required_any_tags=required, min_score=0)
 
     titles = {item.title for item in response.recommendations}
     assert "The Only Romance" in titles
@@ -227,7 +240,7 @@ def test_recommend_why_fallback_varies_by_movies_own_tags() -> None:
         {"title": "Unrelated B", "year": 2020, "kind": "movie", "tags": ["stylized"]},
     ]
 
-    response = recommend(ratings=[], mood="", catalog=catalog)
+    response = recommend(ratings=[], mood="", catalog=catalog, min_score=0)
 
     why_by_title = {item.title: item.why for item in response.recommendations}
     assert why_by_title["Unrelated A"] != why_by_title["Unrelated B"]
@@ -297,6 +310,7 @@ def test_recommend_ignores_user_tags_outside_internal_vocabulary() -> None:
         ratings=[RatedItem(title="Tagged Movie", rating=3, tags=["personal favorite"])],
         mood="",
         catalog=[{"title": "Dark Pick", "year": 2020, "kind": "movie", "tags": ["dark"]}],
+        min_score=0,
     )
 
     assert response.recommendations[0].match_score == 50
@@ -316,7 +330,7 @@ def test_recommend_scores_and_names_director_match_from_profile() -> None:
     ]
     profile = {"top_directors": [{"name": "Fave Director", "count": 3}], "top_actors": [], "decade_breakdown": []}
 
-    response = recommend(ratings=[], mood="", catalog=catalog, profile=profile)
+    response = recommend(ratings=[], mood="", catalog=catalog, profile=profile, min_score=0)
 
     by_title = {item.title: item for item in response.recommendations}
     assert by_title["By Fave Director"].match_score > by_title["Unrelated"].match_score
@@ -330,7 +344,7 @@ def test_recommend_scores_and_names_actor_match_from_profile() -> None:
     ]
     profile = {"top_directors": [], "top_actors": [{"name": "Fave Actor", "count": 2}], "decade_breakdown": []}
 
-    response = recommend(ratings=[], mood="", catalog=catalog, profile=profile)
+    response = recommend(ratings=[], mood="", catalog=catalog, profile=profile, min_score=0)
 
     by_title = {item.title: item for item in response.recommendations}
     assert by_title["With Fave Actor"].match_score > by_title["Unrelated"].match_score
@@ -344,7 +358,7 @@ def test_recommend_scores_and_names_decade_match_from_profile() -> None:
     ]
     profile = {"top_directors": [], "top_actors": [], "decade_breakdown": [{"decade": 2010, "count": 5}]}
 
-    response = recommend(ratings=[], mood="", catalog=catalog, profile=profile)
+    response = recommend(ratings=[], mood="", catalog=catalog, profile=profile, min_score=0)
 
     by_title = {item.title: item for item in response.recommendations}
     assert by_title["Right Decade"].match_score > by_title["Wrong Decade"].match_score
@@ -404,7 +418,7 @@ def test_recommend_without_profile_ignores_director_actor_decade_fields() -> Non
         {"title": "Some Movie", "year": 2020, "kind": "movie", "tags": [], "director": "Anyone", "actors": ["X"]}
     ]
 
-    response = recommend(ratings=[], mood="", catalog=catalog)
+    response = recommend(ratings=[], mood="", catalog=catalog, min_score=0)
 
     assert response.recommendations[0].match_score == 50
 
@@ -416,7 +430,7 @@ def test_recommend_reserves_one_exploration_slot_even_when_outscored_by_profile_
     ] + [{"title": "Exploration Pick", "year": 2020, "kind": "movie", "tags": [], "_source": "exploration"}]
     ratings = [RatedItem(title="Old", rating=5, review="action packed")]
 
-    response = recommend(ratings=ratings, mood="", catalog=catalog)
+    response = recommend(ratings=ratings, mood="", catalog=catalog, min_score=0)
 
     titles = {item.title for item in response.recommendations}
     assert "Exploration Pick" in titles
@@ -429,7 +443,7 @@ def test_recommend_penalizes_tags_rejected_twice() -> None:
         {"title": "Light Pick", "year": 2020, "kind": "movie", "tags": ["light"]},
     ]
 
-    response = recommend(ratings=[], mood="", catalog=catalog, rejected_tags=Counter({"dark": 2}))
+    response = recommend(ratings=[], mood="", catalog=catalog, rejected_tags=Counter({"dark": 2}), min_score=0)
 
     by_title = {item.title: item for item in response.recommendations}
     assert by_title["Light Pick"].match_score > by_title["Dark Pick"].match_score
@@ -442,7 +456,7 @@ def test_recommend_ignores_tag_rejected_only_once() -> None:
         {"title": "Light Pick", "year": 2020, "kind": "movie", "tags": ["light"]},
     ]
 
-    response = recommend(ratings=[], mood="", catalog=catalog, rejected_tags=Counter({"dark": 1}))
+    response = recommend(ratings=[], mood="", catalog=catalog, rejected_tags=Counter({"dark": 1}), min_score=0)
 
     by_title = {item.title: item for item in response.recommendations}
     assert by_title["Dark Pick"].match_score == by_title["Light Pick"].match_score == 50

@@ -45,28 +45,33 @@ Solo yo (Matías), con posible coordinación multi-agente (Claude, Codex) docume
 
 <!-- SESSION_STATE:START -->
 ## Estado actual
-_Última actualización: 2026-07-31_
+_Última actualización: 2026-08-02_
 
 **Qué se hizo:**
-- Se reparó el build que impedía desplegar `DisagreePanel`, se agregó CI real y Vercel volvió a quedar operativo.
-- Los ratings de Butaca ahora usan estrellas de 0.5 a 5, se precargan al reabrir una película y pueden editarse.
-- `Nuevos picks` conserva los títulos realmente nuevos; los ratings importados de Letterboxd tienen prioridad sobre los de Butaca y muestran un aviso.
-- Estado final: commit `aad2436` en `main`, Vercel y Render actualizados, CI verde y 306 tests pasando.
+- Diagnosticado y arreglado el bug de `/recommend` mezclando 45%/55%/60%/S/D con picks fuertes: `recommender.recommend()` no tenía piso de score a propósito ("siempre queremos 6 picks, aunque sean flojos") y rellenaba con lo que hubiera.
+- Piso real en 60 (decisión de Matías, no solo descartar ≤50): `recommender.MIN_MATCH_SCORE`, parámetro `min_score` en `recommend()`.
+- Si el piso deja el pool corto, `_finish_recommend` primero pide un pool más grande a TMDb (`fetch_candidates(mood, pages=4)`) antes de resignarse a mostrar menos de 6 — nunca rellena con lo flojo.
+- `/weekly` y `/titles/{id}/verdict` quedan afuera del piso (`min_score=0`): ahí el catálogo es fijo (las semanales de la semana, o el título buscado), no hay pool del que elegir.
+- 308 tests backend (33 nuevos/reescritos), sin cambios de frontend.
 
-**Dónde retomar:** Primero diagnosticar por qué `/recommend` incluyó 45%, 55%, 60% y S/D en una tanda base: trazar `_finish_recommend` y `llm_client.refine_recommendations`, y escribir un test donde convivan candidatos fuertes y flojos que exija elegir los mejores matches reales. Después probar en producción `Nuevos picks` y la persistencia de ratings.
+**Dónde retomar:** Probar en producción con datos reales (perfil de Letterboxd real) que las tandas de `/recommend` ya no mezclan matches débiles con fuertes, y que "Nuevos picks"/el modo manual siguen devolviendo resultados razonables. Si el modo manual ("Ya la vi", sin reseña) devuelve vacío seguido en producción, revisar: sin texto de reseña el único camino a un match fuerte es el perfil de TMDb (director/actor/década vía `fetch_personalized_candidates`), no hay señal de texto.
 
-**Evidencia:** captura real de la tanda que motivó el bug:
-![Recomendaciones con matches de 45%, 55%, 60% y S/D](<02 Attachments/(C) 2026-07-31 recommend-low-match.png>)
+**Bloqueos / decisiones pendientes:** Ninguno. `docs/architecture.md` sigue figurando modificado en git status — es solo ruido de line endings (CRLF/LF), no cambio real.
 
-**Bloqueos / decisiones pendientes:** Invariante definida: un match `<=50` no es una recomendación y se descarta; tampoco hay que forzar seis resultados con películas que el sistema predice flojas. Falta decidir, con el scoring delante, el piso para la franja 51–60 y si ante menos de seis picks fuertes se amplía la búsqueda o se muestran menos. `docs/architecture.md` tiene un cambio local previo de Matías que no se tocó ni se commiteó.
-
-**Contexto que no es obvio del código:** `npx tsc --noEmit` no chequea archivos por la configuración con project references; el gate real es `npm run build` (`tsc -b`). Para una misma película, `source="import"` de Letterboxd gana aunque exista un rating `star` posterior de Butaca.
+**Contexto que no es obvio del código:** El modo manual (`ManualRating`) solo tiene título+rating, nunca reseña — en el catálogo mock (sin TMDB_API_KEY) nunca hay señal de tags, así que con el piso nuevo siempre devuelve vacío ahí; en producción con TMDb real, `fetch_personalized_candidates` ya sesga el pool hacia el perfil (director/actor/género), así que sí hay señal real. `npx tsc --noEmit` no chequea archivos por la configuración con project references; el gate real es `npm run build` (`tsc -b`).
 <!-- SESSION_STATE:END -->
 
 <details>
 <summary>Estado detallado anterior</summary>
 
 > <!-- SESSION_STATE_ARCHIVE:START -->
+> **Last updated:** 2026-07-31 (deploy, estrellas y renovación de picks) — se
+> reparó el build que impedía desplegar `DisagreePanel`, se agregó CI real,
+> los ratings pasaron a estrellas de 0.5 a 5, y `Nuevos picks` dejó de
+> repetir títulos ya vistos. Estado final de esa sesión: commit `aad2436`,
+> 306 tests. Cerró detectando el bug de match_score mezclado que esta sesión
+> (2026-08-02) resolvió — ver "Estado actual" arriba.
+>
 > **Last updated:** 2026-07-31 (sesión larga, 14 commits `c0d0931`..`5b65581`,
 > 263→294 tests: cuatro rondas de bugs de `/weekly` reportados desde
 > producción, tres features pedidas, y al final la unificación grande — una
@@ -367,6 +372,19 @@ _Última actualización: 2026-07-31_
 </details>
 
 ## Historial de sesiones
+
+### 2026-08-02 — piso de match real en /recommend
+Retomé el bug que Matías detectó al cerrar la sesión anterior (picks de 88%
+mezclados con 45%, 55%, 60% y S/D). Causa raíz en `recommender.recommend()`:
+no había piso de score a propósito, así que si el pool elegible no llegaba a
+6, se rellenaba con lo que hubiera. Con Matías definimos el piso real en 60
+(no solo descartar ≤50) y que, si eso deja el pool corto, primero se pide un
+pool más grande a TMDb antes de resignarse a mostrar menos de 6 — nunca se
+rellena con lo flojo. `/weekly` y el veredicto de un título buscado quedan
+afuera del piso a propósito: ahí no hay pool del que elegir. 308 tests (33
+nuevos/reescritos, sin cambios de frontend). Antes de esto, Codex había
+dejado el bug diagnosticado y documentado en `TASKS.md` pero sin tocar
+código — ver commit `3f5fac0`.
 
 ### 2026-07-31 — deploy, estrellas y renovación de picks
 Se destrabó el deploy roto por TypeScript, se agregó CI y se verificó el nuevo `DisagreePanel`. Después se reemplazaron los tres ratings por estrellas de 0.5 a 5 y se corrigieron persistencia/edición, precedencia de Letterboxd y repetición de `Nuevos picks`. Todo terminó desplegado con 306 tests, build y CI verdes. Al cerrar, Matías detectó el siguiente bug prioritario: `/recommend` mezcla picks fuertes con 45%, 55%, 60% y S/D; la próxima sesión arranca diagnosticando el ranking para devolver solo recomendaciones realmente fuertes.

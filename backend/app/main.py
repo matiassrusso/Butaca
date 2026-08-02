@@ -232,8 +232,13 @@ def weekly_picks(user: sqlite3.Row | None = Depends(auth.get_optional_user)) -> 
     # pese a que el "why" del LLM sí sabía que lo había amado).
     _enrich_loved_ratings_with_genre_tags(ratings)
 
+    # min_score=0: acá el catálogo es un set fijo (las mismas 5 de la semana),
+    # no un pool para elegir — el piso de recommender.MIN_MATCH_SCORE es para
+    # /recommend, donde SÍ hay de dónde elegir. Un match débil en /weekly se
+    # muestra igual, con su score bajo/S/D.
     heuristic = recommend(
-        ratings, mood="", catalog=trending, also_seen=frozenset(), profile=profile, exclude_seen=False
+        ratings, mood="", catalog=trending, also_seen=frozenset(), profile=profile,
+        exclude_seen=False, min_score=0,
     )
     heuristic = _adjust_match_scores(heuristic)
 
@@ -294,8 +299,11 @@ def title_verdict(
     profile = db.get_taste_profile(user["id"])
     _enrich_loved_ratings_with_genre_tags(ratings)
 
+    # min_score=0: acá se opina sobre EL título que el usuario buscó, no se
+    # elige de un pool — el veredicto tiene que salir aunque sea un mal match.
     heuristic = recommend(
-        ratings, mood="", catalog=[item], also_seen=frozenset(), profile=profile, exclude_seen=False
+        ratings, mood="", catalog=[item], also_seen=frozenset(), profile=profile,
+        exclude_seen=False, min_score=0,
     )
     if not heuristic.recommendations:
         raise HTTPException(status_code=502, detail="No pude analizar ese título.")
@@ -756,20 +764,46 @@ def _finish_recommend(
             status_code=400, detail="Elegí al menos un género para este modo."
         )
 
+    def _score(pool: list[dict], seen: frozenset[str], limit: int) -> RecommendResponse:
+        return recommend(
+            ratings,
+            mood,
+            catalog=pool,
+            also_seen=seen,
+            kind_filter=kind_filter,
+            required_any_tags=required_any_tags or None,
+            preference_ratings=preference_ratings,
+            profile=profile,
+            rejected_tags=rejected_tags or None,
+            limit=limit,
+        )
+
     use_llm = refine and llm_client.is_configured()
     candidate_limit = 12 if use_llm else 6
-    response = recommend(
-        ratings,
-        mood,
-        catalog=candidates,
-        also_seen=also_seen,
-        kind_filter=kind_filter,
-        required_any_tags=required_any_tags or None,
-        preference_ratings=preference_ratings,
-        profile=profile,
-        rejected_tags=rejected_tags or None,
-        limit=candidate_limit,
-    )
+    response = _score(candidates, also_seen, candidate_limit)
+
+    # un match < recommender.MIN_MATCH_SCORE ya viene descartado de response
+    # (invariante de Matías, TASKS.md 2026-08-02) — si eso deja el pool corto,
+    # se pide un pool más grande a TMDb antes de resignarse a mostrar menos
+    # de 6. No aplica a watchlist: ese catálogo es un set cerrado del import,
+    # no hay "más" para pedir.
+    if mode != "watchlist" and len(response.recommendations) < 6 and tmdb_client.is_configured():
+        # guardado ancho a propósito, igual que el resto de los
+        # enriquecimientos best-effort de esta función: esto es un intento
+        # extra por conseguir más picks fuertes, nunca debe tumbar un
+        # /recommend que ya tiene una respuesta válida (aunque corta).
+        try:
+            broader = tmdb_client.fetch_candidates(mood, pages=4)
+        except Exception:
+            logger.warning("Broader TMDb candidate fetch failed, keeping the shorter pool", exc_info=True)
+            broader = []
+        if broader:
+            logger.info("Strong-match pool too small (%d), fetching a broader TMDb pool", len(response.recommendations))
+            existing_titles = {item["title"].casefold() for item in candidates}
+            candidates = candidates + [
+                item for item in broader if item["title"].casefold() not in existing_titles
+            ]
+            response = _score(candidates, also_seen, candidate_limit)
 
     # Only reintroduce old picks when there aren't six genuinely new ones.
     # Filling the LLM's 12-candidate shortlist with old high-scoring titles
@@ -780,17 +814,10 @@ def _finish_recommend(
         # solo se relaja already_recommended (soft, "no lo repitas de vuelta
         # tan rápido") — extra_seen/watched siguen siendo hard exclusions,
         # nunca hay que recomendar algo que el usuario ya vio de verdad
-        relaxed = recommend(
-            ratings,
-            mood,
-            catalog=candidates,
-            also_seen=frozenset(extra_seen) | frozenset(item["title"] for item in watched),
-            kind_filter=kind_filter,
-            required_any_tags=required_any_tags or None,
-            preference_ratings=preference_ratings,
-            profile=profile,
-            rejected_tags=rejected_tags or None,
-            limit=6,
+        relaxed = _score(
+            candidates,
+            frozenset(extra_seen) | frozenset(item["title"] for item in watched),
+            6,
         )
 
         existing = {item.title.casefold() for item in response.recommendations}
