@@ -6,10 +6,11 @@ import time
 import urllib.parse
 import urllib.request
 from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.error import URLError
 
-from .recommender import positive_tags_from_text
+from .recommender import PICK_OPTIONS, positive_tags_from_text
 
 logger = logging.getLogger(__name__)
 
@@ -207,6 +208,11 @@ _PERSONALIZED_CACHE: OrderedDict[tuple, tuple[float, list[dict]]] = OrderedDict(
 _WATCH_PROVIDERS_CACHE: OrderedDict[tuple[str, int, str], tuple[float, dict]] = OrderedDict()
 _KEYWORDS_CACHE: OrderedDict[tuple[str, int], tuple[float, list[str]]] = OrderedDict()
 _TITLE_BY_ID_CACHE: OrderedDict[tuple[str, int], tuple[float, dict | None]] = OrderedDict()
+# picker "a tu elección" (recommender.PICK_OPTIONS) — id de una keyword de
+# búsqueda no cambia, mismo TTL que _PERSON_CACHE; páginas de /discover por
+# opción, mismo TTL que _DISCOVER_CACHE (compartida entre selecciones)
+_KEYWORD_ID_CACHE: OrderedDict[str, tuple[float, int | None]] = OrderedDict()
+_OPTION_CACHE: OrderedDict[tuple[str, str, int], tuple[float, list[dict]]] = OrderedDict()
 # single entry, not keyed — there's only one "the catalog" to count
 _CATALOG_STATS_CACHE_TTL_SECONDS = 24 * 60 * 60
 _catalog_stats_cache: tuple[float, dict] | None = None
@@ -253,7 +259,10 @@ def _image_url(path: str | None, size: str) -> str | None:
 
 
 def _map_result(
-    raw: dict, kind: str = "movie", genre_tag_map: dict[int, list[str]] = GENRE_ID_TAG_MAP
+    raw: dict,
+    kind: str = "movie",
+    genre_tag_map: dict[int, list[str]] = GENRE_ID_TAG_MAP,
+    require_tags: bool = True,
 ) -> dict | None:
     title_field = "title" if kind == "movie" else "name"
     date_field = "release_date" if kind == "movie" else "first_air_date"
@@ -273,7 +282,7 @@ def _map_result(
         tags.update(genre_tag_map.get(genre_id, []))
     tags.update(positive_tags_from_text(overview))
 
-    if not tags:
+    if require_tags and not tags:
         return None
 
     return {
@@ -384,6 +393,166 @@ def fetch_candidates(mood: str, pages: int = 2) -> list[dict]:
         DISCOVER_TV_URL, "series", TV_GENRE_ID_TAG_MAP, MOOD_TV_GENRE_ID_MAP, mood, api_key, pages
     )
     return movies + series
+
+
+def _resolve_keyword_id(name: str) -> int | None:
+    """Resuelve un string de keyword (recommender.PICK_OPTIONS) a su id
+    numérico de TMDb, para el filtro with_keywords de /discover. Match
+    exacto sobre el nombre en minúsculas -- /search/keyword devuelve
+    variantes parecidas (p.ej. "hip hop" trae "hip-hop", "hip hop culture",
+    etc.), así que tomar resultados[0] a ciegas matchearía la keyword
+    equivocada. Un miss no rompe nada, solo esa keyword no aporta candidatos
+    (mismo criterio que _enrich_with_keyword_tags). Cacheado 24h como
+    _resolve_person_id: el id de una keyword no cambia."""
+    api_key = os.environ.get("TMDB_API_KEY")
+    if not api_key:
+        raise TmdbError("TMDB_API_KEY no configurada.")
+
+    cache_key = name.strip().lower()
+    cached = _KEYWORD_ID_CACHE.get(cache_key)
+    if cached is not None:
+        expires_at, result = cached
+        if expires_at > _now_monotonic():
+            _KEYWORD_ID_CACHE.move_to_end(cache_key)
+            return result
+        _KEYWORD_ID_CACHE.pop(cache_key, None)
+
+    params = {"api_key": api_key, "query": name, "language": "en-US"}
+    data = _get_json(f"https://api.themoviedb.org/3/search/keyword?{urllib.parse.urlencode(params)}")
+    keyword_id = next(
+        (r["id"] for r in data.get("results", []) if (r.get("name") or "").strip().lower() == cache_key),
+        None,
+    )
+
+    _KEYWORD_ID_CACHE[cache_key] = (_now_monotonic() + TITLE_CACHE_TTL_SECONDS, keyword_id)
+    _KEYWORD_ID_CACHE.move_to_end(cache_key)
+    while len(_KEYWORD_ID_CACHE) > TITLE_CACHE_MAX_ENTRIES:
+        _KEYWORD_ID_CACHE.popitem(last=False)
+    return keyword_id
+
+
+def _get_cached_option_page(cache_key: tuple[str, str, int]) -> list[dict] | None:
+    cached = _OPTION_CACHE.get(cache_key)
+    if cached is None:
+        return None
+    expires_at, items = cached
+    if expires_at <= _now_monotonic():
+        _OPTION_CACHE.pop(cache_key, None)
+        return None
+    _OPTION_CACHE.move_to_end(cache_key)
+    return _clone_items(items)
+
+
+def _store_cached_option_page(cache_key: tuple[str, str, int], items: list[dict]) -> None:
+    _OPTION_CACHE[cache_key] = (_now_monotonic() + CACHE_TTL_SECONDS, _clone_items(items))
+    _OPTION_CACHE.move_to_end(cache_key)
+    while len(_OPTION_CACHE) > CACHE_MAX_ENTRIES:
+        _OPTION_CACHE.popitem(last=False)
+
+
+def _fetch_option_for_kind(option: dict, kind: str, pages: int, api_key: str) -> list[dict]:
+    """Un request a /discover por opción y por kind -- nunca combinar
+    géneros/keywords de opciones DISTINTAS en un mismo request: TMDb hace
+    AND entre with_genres y with_keywords, así que juntar dos opciones en
+    un solo llamado significaría "opción A Y opción B", no la semántica OR
+    que promete recommender.required_any_groups."""
+    genre_ids = option["movie_genres"] if kind == "movie" else option["tv_genres"]
+    keyword_ids = [
+        kid for name in option["keywords"] if (kid := _resolve_keyword_id(name)) is not None
+    ]
+    if not genre_ids and not keyword_ids:
+        # esta opción no tiene query para este kind (ej. "Terror" no tiene
+        # género de TV equivalente) -- no aporta nada, no es un error
+        return []
+
+    url = DISCOVER_URL if kind == "movie" else DISCOVER_TV_URL
+    genre_tag_map = GENRE_ID_TAG_MAP if kind == "movie" else TV_GENRE_ID_TAG_MAP
+
+    results: list[dict] = []
+    for page in range(1, pages + 1):
+        cache_key = (kind, option["key"], page)
+        cached_page = _get_cached_option_page(cache_key)
+        if cached_page is not None:
+            results.extend(cached_page)
+            continue
+
+        params = {
+            "api_key": api_key,
+            "language": "en-US",
+            "sort_by": "vote_average.desc",
+            "vote_count.gte": 200,
+            "include_adult": "false",
+            "page": page,
+        }
+        if genre_ids:
+            params["with_genres"] = "|".join(str(gid) for gid in genre_ids)
+        if keyword_ids:
+            params["with_keywords"] = "|".join(str(kid) for kid in keyword_ids)
+
+        data = _get_json(f"{url}?{urllib.parse.urlencode(params)}")
+        mapped_page: list[dict] = []
+        for raw in data.get("results", []):
+            # require_tags=False: sabemos que este candidato matchea la
+            # opción porque TMDb lo filtró por nosotros (with_genres/
+            # with_keywords), no depende de que _map_result haya inferido
+            # algún tag desde genre_ids/overview -- géneros como
+            # "documental" mapean a [] en GENRE_ID_TAG_MAP y perderían casi
+            # todo si dependieran de eso.
+            mapped = _map_result(raw, kind, genre_tag_map, require_tags=False)
+            if mapped is None:
+                continue
+            # estampar el tag de la opción encima de lo que haya inferido
+            # _map_result -- este es el paso que reemplaza al post-filtro
+            mapped["tags"] = sorted(set(mapped["tags"]) | set(option["tags"]))
+            mapped_page.append(mapped)
+
+        _store_cached_option_page(cache_key, mapped_page)
+        results.extend(mapped_page)
+
+    return results
+
+
+def fetch_candidates_for_options(keys: list[str], kind_filter: str = "both", pages: int = 1) -> list[dict]:
+    """El picker "a tu elección" (recommender.PICK_OPTIONS) maneja su propio
+    fetch en vez de post-filtrar el pool de perfil/mood que main.py trae por
+    otra razón -- con opciones angostas (una keyword puntual) ese pool nunca
+    traía señal suficiente para que el post-filtro encontrara algo (bug
+    reportado 2026-08-02). Un request por opción elegida y por kind,
+    paralelizado; deduplicado por (kind, título)."""
+    api_key = os.environ.get("TMDB_API_KEY")
+    if not api_key:
+        raise TmdbError("TMDB_API_KEY no configurada.")
+
+    options_by_key = {o["key"]: o for o in PICK_OPTIONS}
+    kinds = ["movie", "series"] if kind_filter == "both" else [kind_filter]
+    jobs = [
+        (option, kind)
+        for key in keys
+        if (option := options_by_key.get(key)) is not None
+        for kind in kinds
+    ]
+    if not jobs:
+        return []
+
+    def _run(job: tuple[dict, str]) -> list[dict]:
+        option, kind = job
+        return _fetch_option_for_kind(option, kind, pages, api_key)
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        pages_per_job = pool.map(_run, jobs)
+
+    combined: list[dict] = [item for page_items in pages_per_job for item in page_items]
+
+    seen: set[tuple[str, str]] = set()
+    deduped: list[dict] = []
+    for item in combined:
+        key = (item["kind"], item["title"].strip().lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+
+    return deduped
 
 
 WEEKLY_TRENDING_URL = "https://api.themoviedb.org/3/trending/movie/week"

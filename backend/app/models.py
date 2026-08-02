@@ -76,6 +76,16 @@ class CatalogStatsResponse(BaseModel):
     genres: int
 
 
+class PickOption(BaseModel):
+    key: str
+    label: str
+    group: str
+
+
+class PickOptionsResponse(BaseModel):
+    options: list[PickOption]
+
+
 class Recommendation(BaseModel):
     id: int | None = None
     tmdb_id: int | None = None

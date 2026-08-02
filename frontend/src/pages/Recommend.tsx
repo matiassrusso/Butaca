@@ -43,8 +43,8 @@ const modeOptions: { mode: RecommendMode; label: string; desc: string }[] = [
   },
   {
     mode: "genres",
-    label: "Selección de géneros",
-    desc: "Vos elegís los géneros, nosotros buscamos lo mejor adentro de eso.",
+    label: "A tu elección",
+    desc: "Elegís vos: géneros clásicos o vibras más específicas, y buscamos ahí adentro.",
   },
   {
     mode: "watchlist",
@@ -64,16 +64,15 @@ const kindFilterOptions: { value: KindFilter; label: string }[] = [
   { value: "both", label: "Ambas" },
 ];
 
-// misma clave que backend/app/recommender.py::GENRE_OPTIONS
-const genreOptions: { key: string; label: string }[] = [
-  { key: "action", label: "Acción" },
-  { key: "romance", label: "Romance" },
-  { key: "comedy", label: "Comedia" },
-  { key: "horror", label: "Terror / oscuro" },
-  { key: "drama", label: "Drama" },
-  { key: "psychological", label: "Psicológico / misterio" },
-  { key: "scifi", label: "Ciencia ficción / fantástico" },
-];
+// cargadas desde GET /recommend/options (backend/app/recommender.py::PICK_OPTIONS)
+// -- ya no hardcodeadas acá, con 7 opciones duplicarlas a mano era tolerable,
+// con 25+ garantiza que se desincronicen.
+type PickOption = { key: string; label: string; group: string };
+const PICK_GROUP_LABELS: Record<string, string> = {
+  generos: "Géneros",
+  vibras: "Vibras",
+};
+const MAX_SELECTED_OPTIONS = 5; // mismo tope que backend/app/main.py::MAX_SELECTED_OPTIONS
 
 type ImportMethod = "zip" | "username" | "manual";
 
@@ -335,6 +334,19 @@ export default function Recommend() {
   const [mode, setMode] = useState<RecommendMode>("profile");
   const [kindFilter, setKindFilter] = useState<KindFilter>("movie");
   const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
+  const [pickOptions, setPickOptions] = useState<PickOption[]>([]);
+
+  // picker "a tu elección" — público, sin auth, se carga una sola vez al
+  // montar (no depende de sesión ni de mode)
+  useEffect(() => {
+    fetch(`${API_BASE_URL}/recommend/options`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((body: { options: PickOption[] } | null) => {
+        if (body) setPickOptions(body.options);
+      })
+      .catch(() => {});
+  }, []);
+
   const [importMethod, setImportMethod] = useState<ImportMethod>("zip");
   const [zipFile, setZipFile] = useState<File | null>(null);
   const [letterboxdUsername, setLetterboxdUsername] = useState("");
@@ -526,7 +538,11 @@ export default function Recommend() {
   }
 
   function toggleGenre(key: string) {
-    setSelectedGenres((prev) => (prev.includes(key) ? prev.filter((g) => g !== key) : [...prev, key]));
+    setSelectedGenres((prev) => {
+      if (prev.includes(key)) return prev.filter((g) => g !== key);
+      if (prev.length >= MAX_SELECTED_OPTIONS) return prev; // mismo tope que el backend
+      return [...prev, key];
+    });
   }
 
   const hasSource =
@@ -954,24 +970,48 @@ export default function Recommend() {
                 </div>
 
                 {mode === "genres" && (
-                  <div className="mt-6 flex flex-wrap gap-2 max-w-2xl">
-                    {genreOptions.map((genre) => (
-                      <button
-                        key={genre.key}
-                        onClick={() => toggleGenre(genre.key)}
-                        className={`px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest border transition-colors ${
-                          selectedGenres.includes(genre.key)
-                            ? "bg-accent text-accent-foreground border-accent"
-                            : "border-foreground/20 hover:border-foreground"
-                        }`}
-                      >
-                        {genre.label}
-                      </button>
+                  <div className="mt-6 max-w-2xl">
+                    <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-3">
+                      {selectedGenres.length}/{MAX_SELECTED_OPTIONS} elegidas
+                    </p>
+                    {Object.entries(
+                      // agrupar preservando el orden en que llegan del backend,
+                      // no un orden fijo a mano acá
+                      pickOptions.reduce<Record<string, PickOption[]>>((groups, option) => {
+                        (groups[option.group] ??= []).push(option);
+                        return groups;
+                      }, {}),
+                    ).map(([group, options]) => (
+                      <div key={group} className="mb-5">
+                        <h3 className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-2">
+                          {PICK_GROUP_LABELS[group] ?? group}
+                        </h3>
+                        <div className="flex flex-wrap gap-2">
+                          {options.map((option) => {
+                            const selected = selectedGenres.includes(option.key);
+                            const atCap = !selected && selectedGenres.length >= MAX_SELECTED_OPTIONS;
+                            return (
+                              <button
+                                key={option.key}
+                                onClick={() => toggleGenre(option.key)}
+                                disabled={atCap}
+                                className={`px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest border transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
+                                  selected
+                                    ? "bg-accent text-accent-foreground border-accent"
+                                    : "border-foreground/20 hover:border-foreground"
+                                }`}
+                              >
+                                {option.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
                     ))}
                   </div>
                 )}
                 {mode === "genres" && selectedGenres.length === 0 && (
-                  <p className="font-mono text-[10px] text-destructive mt-3">Elegí al menos un género.</p>
+                  <p className="font-mono text-[10px] text-destructive mt-3">Elegí al menos una opción.</p>
                 )}
               </section>
             )}
@@ -1003,7 +1043,7 @@ export default function Recommend() {
                   · Modo: {modeOptions.find((o) => o.mode === mode)?.label}
                   {mode === "genres" &&
                     ` (${selectedGenres
-                      .map((k) => genreOptions.find((g) => g.key === k)?.label)
+                      .map((k) => pickOptions.find((g) => g.key === k)?.label)
                       .filter(Boolean)
                       .join(", ")})`}
                 </p>

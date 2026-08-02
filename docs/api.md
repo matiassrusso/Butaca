@@ -115,6 +115,24 @@ invalida todas las sesiones activas de ese usuario.
 Requiere `Authorization: Bearer <token>`. Borra la sesión. `204` siempre
 (idempotente).
 
+## `GET /recommend/options`
+
+Opciones del picker "a tu elección" (`mode=genres` en los endpoints de
+abajo). Sin auth, público como `/catalog/stats` — es metadata del picker,
+no datos de usuario.
+
+```json
+{
+  "options": [
+    {"key": "action", "label": "Acción", "group": "generos"},
+    {"key": "mindbender", "label": "MindBender", "group": "vibras"}
+  ]
+}
+```
+
+Fuente de verdad: `PICK_OPTIONS` en `backend/app/recommender.py`. El
+frontend reemplaza acá el array `genreOptions` que antes tenía hardcodeado.
+
 ## `POST /recommend`
 
 Endpoint viejo para mandar ratings ya parseados. No requiere auth, no
@@ -167,13 +185,20 @@ file: <el .zip como binario>
   `diary.csv`, o `Date` de `ratings.csv`/`reviews.csv` si no hay diary). La
   exclusión de ya vistos sigue cubriendo todo el historial, no solo la
   ventana reciente.
-- `genres`: ignora el historial como filtro obligatorio y en cambio exige
-  que cada recomendación tenga al menos una etiqueta de los géneros
-  seleccionados en `genres` (lógica OR, no AND). Si hay más de un género
-  seleccionado, el resultado intenta cubrir al menos un pick por género
-  antes de completar el resto por score. Claves válidas: `action`,
-  `romance`, `comedy`, `horror`, `drama`, `psychological`, `scifi` (ver
-  `GENRE_OPTIONS` en `backend/app/recommender.py`).
+- `genres` ("a tu elección" desde 2026-08-02): ignora el historial como
+  filtro obligatorio y en cambio pide su propio pool a TMDb, dirigido a las
+  opciones elegidas en `genres` (`tmdb_client.fetch_candidates_for_options`
+  — un request a `/discover` por opción y por `kind_filter`, nunca combina
+  géneros/keywords de opciones distintas en un mismo request). Lógica OR
+  entre opciones, no AND; si hay más de una seleccionada, el resultado
+  intenta cubrir al menos un pick por opción (en el orden en que se
+  eligieron) antes de completar el resto por score. Máximo 5 opciones por
+  request (`MAX_SELECTED_OPTIONS` en `backend/app/main.py`, 400 si se
+  pasa). Claves válidas y sus grupos ("generos" / "vibras", las de "vibras"
+  son categorías tipo Flick armadas con keywords de TMDb en vez de
+  clustering — ver `docs/build-log.md` 2026-08-02): `GET /recommend/options`
+  las lista dinámicamente, fuente de verdad es `PICK_OPTIONS` en
+  `backend/app/recommender.py`.
 
 `kind_filter` filtra el catálogo de candidatos por `movie`, `series`, o
 ambos (`both`).

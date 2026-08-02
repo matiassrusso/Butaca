@@ -44,17 +44,88 @@ NEGATIVE_HINTS = {
     "loud": ["loud", "action", "kinetic"],
 }
 
-# genre picker for the "por géneros" mode — label lives in the frontend,
-# this just maps a stable key to our internal tag vocabulary
-GENRE_OPTIONS: dict[str, list[str]] = {
-    "action": ["action", "kinetic", "blockbuster"],
-    "romance": ["romantic", "intimate"],
-    "comedy": ["funny", "light"],
-    "horror": ["dark"],
-    "drama": ["character", "melancholic"],
-    "psychological": ["psychological", "mysterious"],
-    "scifi": ["stylized"],
-}
+# picker de "a tu elección" (2026-08-02, pedido de Matías: más variedad que
+# los 7 géneros de antes, más categorías tipo "vibe"). Cada opción maneja su
+# propio fetch dirigido a TMDb (tmdb_client.fetch_candidates_for_options) en
+# vez de post-filtrar un pool que se trajo por otra razón — con opciones
+# angostas (una keyword puntual) el pool nunca traía suficiente señal para
+# que el post-filtro encontrara algo. "movie_genres"/"tv_genres" son ids de
+# género de TMDb (con_genres, OR entre sí); "keywords" son nombres exactos
+# verificados contra /search/keyword (con_keywords, resueltos a id por
+# tmdb_client._resolve_keyword_id). Ambas listas pueden estar vacías si el
+# tipo (movie/tv) no tiene esa categoría — la opción simplemente no aporta
+# nada para ese kind_filter.
+PICK_OPTIONS: list[dict] = [
+    # --- géneros clásicos ---
+    {"key": "action", "label": "Acción", "group": "generos",
+     "tags": ["action", "kinetic", "blockbuster"], "movie_genres": [28], "tv_genres": [10759], "keywords": []},
+    {"key": "adventure", "label": "Aventura", "group": "generos",
+     "tags": ["kinetic", "blockbuster"], "movie_genres": [12], "tv_genres": [10759], "keywords": []},
+    {"key": "animation", "label": "Animación", "group": "generos",
+     "tags": ["stylized"], "movie_genres": [16], "tv_genres": [16], "keywords": []},
+    {"key": "comedy", "label": "Comedia", "group": "generos",
+     "tags": ["funny", "light"], "movie_genres": [35], "tv_genres": [35], "keywords": []},
+    {"key": "crime", "label": "Crimen", "group": "generos",
+     "tags": ["dark", "psychological"], "movie_genres": [80], "tv_genres": [80], "keywords": []},
+    {"key": "documentary", "label": "Documental", "group": "generos",
+     "tags": ["documentary"], "movie_genres": [99], "tv_genres": [99], "keywords": []},
+    {"key": "drama", "label": "Drama", "group": "generos",
+     "tags": ["character", "melancholic"], "movie_genres": [18], "tv_genres": [18], "keywords": []},
+    {"key": "family", "label": "Familia", "group": "generos",
+     "tags": ["light"], "movie_genres": [10751], "tv_genres": [10751], "keywords": []},
+    {"key": "fantasy", "label": "Fantasía", "group": "generos",
+     "tags": ["stylized"], "movie_genres": [14], "tv_genres": [10765], "keywords": []},
+    {"key": "history", "label": "Historia", "group": "generos",
+     "tags": ["character"], "movie_genres": [36], "tv_genres": [], "keywords": []},
+    {"key": "horror", "label": "Terror / oscuro", "group": "generos",
+     "tags": ["dark"], "movie_genres": [27], "tv_genres": [], "keywords": []},
+    {"key": "music", "label": "Música", "group": "generos",
+     "tags": ["light"], "movie_genres": [10402], "tv_genres": [], "keywords": []},
+    {"key": "psychological", "label": "Psicológico / misterio", "group": "generos",
+     "tags": ["psychological", "mysterious"], "movie_genres": [9648, 53], "tv_genres": [9648], "keywords": []},
+    {"key": "romance", "label": "Romance", "group": "generos",
+     "tags": ["romantic", "intimate"], "movie_genres": [10749], "tv_genres": [10766], "keywords": []},
+    {"key": "scifi", "label": "Ciencia ficción / fantástico", "group": "generos",
+     "tags": ["stylized", "mysterious"], "movie_genres": [878], "tv_genres": [10765], "keywords": []},
+    {"key": "thriller", "label": "Thriller", "group": "generos",
+     "tags": ["psychological", "dark"], "movie_genres": [53], "tv_genres": [], "keywords": []},
+    {"key": "war", "label": "Bélica", "group": "generos",
+     "tags": ["dark"], "movie_genres": [10752], "tv_genres": [10768], "keywords": []},
+    {"key": "western", "label": "Western", "group": "generos",
+     "tags": ["character"], "movie_genres": [37], "tv_genres": [37], "keywords": []},
+    # --- vibras (curadas a mano, espíritu Flick — ver docs/build-log.md
+    # 2026-08-02: las vibes "de verdad" de Flick salen de clusterizar
+    # reseñas de usuarios, algo que Butaca no tiene a esa escala; esto es
+    # un proxy honesto armado con keywords reales de TMDb, no clustering) ---
+    {"key": "mindbender", "label": "MindBender", "group": "vibras",
+     "tags": ["mind-bending"], "movie_genres": [], "tv_genres": [],
+     "keywords": ["mind-bending", "nonlinear timeline", "surrealism", "psychedelic"]},
+    {"key": "feelgood", "label": "Feel-Good", "group": "vibras",
+     "tags": ["heartwarming"], "movie_genres": [], "tv_genres": [],
+     "keywords": ["feelgood", "friendship", "heartwarming"]},
+    {"key": "gothic", "label": "Gothic", "group": "vibras",
+     "tags": ["gothic"], "movie_genres": [], "tv_genres": [],
+     "keywords": ["gothic horror", "haunted house"]},
+    {"key": "lowbrow", "label": "Lowbrow", "group": "vibras",
+     "tags": ["lowbrow"], "movie_genres": [], "tv_genres": [],
+     "keywords": ["spoof", "parody", "slapstick comedy"]},
+    {"key": "harrowing", "label": "Harrowing / Dread", "group": "vibras",
+     "tags": ["harrowing"], "movie_genres": [], "tv_genres": [],
+     "keywords": ["psychological horror", "slow burn"]},
+    {"key": "schlock", "label": "Schlock / Bargain Bin", "group": "vibras",
+     "tags": ["schlock"], "movie_genres": [], "tv_genres": [],
+     "keywords": ["b movie"]},
+    {"key": "urban", "label": "Urbanas", "group": "vibras",
+     "tags": ["urban"], "movie_genres": [], "tv_genres": [],
+     "keywords": ["gangster", "hip-hop", "inner city"]},
+    {"key": "tween", "label": "Tween", "group": "vibras",
+     "tags": ["tween", "coming-of-age"], "movie_genres": [], "tv_genres": [],
+     "keywords": ["teen movie", "coming of age"]},
+]
+
+# vista derivada — mantiene el nombre/forma vieja para no tocar callers ni
+# tests que ya usan GENRE_OPTIONS[key] -> list[str]
+GENRE_OPTIONS: dict[str, list[str]] = {o["key"]: o["tags"] for o in PICK_OPTIONS}
 
 # human-readable phrase per internal tag, used to build a "why" that names
 # what actually matched instead of a single fixed template sentence — this
@@ -107,6 +178,18 @@ TAG_PHRASES: dict[str, str] = {
     "survival": "la supervivencia",
     "on-the-run": "la fuga constante",
     "revisionist-western": "el western revisionista",
+    # tags del picker "a tu elección" (PICK_OPTIONS) sin equivalente en
+    # géneros ni keywords de arriba — género "documental" y las vibras
+    # curadas a mano (2026-08-02)
+    "documentary": "lo documental",
+    "mind-bending": "lo que te da vuelta la cabeza",
+    "heartwarming": "lo entrañable",
+    "gothic": "el tono gótico",
+    "lowbrow": "el humor bruto",
+    "harrowing": "la angustia sostenida",
+    "schlock": "el desparpajo serie B",
+    "urban": "el pulso urbano",
+    "tween": "la mirada adolescente",
 }
 
 
@@ -201,30 +284,32 @@ def _collect_preference_tags(ratings: list[RatedItem]) -> tuple[set[str], set[st
 
 def _pick_with_genre_coverage(
     scored: list[tuple[float, Recommendation, set[str], str]],
-    required_any_tags: frozenset[str],
+    required_any_groups: tuple[frozenset[str], ...],
     limit: int = 6,
 ) -> list[Recommendation]:
-    # "quiero seleccionar varios géneros, y que el resultado tenga al menos
-    # una película de cada uno" — a plain top-N by score can easily starve
-    # out a selected genre entirely, so we force one representative per
-    # genre first (best-scoring candidate for that genre), then fill the
-    # rest by score.
+    # "quiero seleccionar varias opciones, y que el resultado tenga al menos
+    # una película de cada una" — a plain top-N by score can easily starve
+    # out a selected option entirely, so we force one representative per
+    # opción first (best-scoring candidate for that option), then fill the
+    # rest by score. Itera sobre `required_any_groups` (una tupla, orden de
+    # selección del usuario) en vez de un frozenset de tags aplanado — antes
+    # cubría tags sueltos, no las opciones elegidas, y el orden de iteración
+    # de un frozenset de strings varía con PYTHONHASHSEED (bug reportado
+    # 2026-08-02: qué opción quedaba afuera cambiaba entre corridas).
     chosen: list[tuple[float, Recommendation]] = []
     chosen_ids: set[int] = set()
-    covered: set[str] = set()
 
-    for tag in required_any_tags:
-        if len(chosen) >= limit or tag in covered:
+    for group in required_any_groups:
+        if len(chosen) >= limit:
             continue
         match = next(
-            (triple for triple in scored if id(triple[1]) not in chosen_ids and tag in triple[2]),
+            (triple for triple in scored if id(triple[1]) not in chosen_ids and triple[2] & group),
             None,
         )
         if match:
-            score, rec, tags, _source = match
+            score, rec, _tags, _source = match
             chosen.append((score, rec))
             chosen_ids.add(id(rec))
-            covered.update(tags & required_any_tags)
 
     for score, rec, _tags, _source in scored:
         if len(chosen) >= limit:
@@ -271,7 +356,7 @@ def recommend(
     catalog: list[dict] = CATALOG,
     also_seen: frozenset[str] = frozenset(),
     kind_filter: str = "both",
-    required_any_tags: frozenset[str] | None = None,
+    required_any_groups: tuple[frozenset[str], ...] | None = None,
     preference_ratings: list[RatedItem] | None = None,
     profile: dict | None = None,
     rejected_tags: Counter | None = None,
@@ -281,6 +366,11 @@ def recommend(
 ) -> RecommendResponse:
     taste_ratings = ratings if preference_ratings is None else preference_ratings
     positive_tags, negative_tags = _collect_preference_tags(taste_ratings)
+    # aplanado solo para el filtro duro y el "why" — el conteo de evidencia y
+    # la cobertura de picks usan required_any_groups (abajo), no esto.
+    required_any_tags = (
+        frozenset().union(*required_any_groups) if required_any_groups else None
+    )
     # exclude_seen=False para /weekly: ese catálogo es un set fijo ("las
     # mismas 5 para todo el mundo") — si se excluyera lo que el usuario ya
     # puntuó/marcó visto, perdería películas de esa semana en silencio
@@ -333,8 +423,14 @@ def recommend(
         points -= 15 * len(tags & effective_rejected) / tag_count
         if mood_tags:
             points += 20 * len(tags & set(mood_tags)) / len(mood_tags)
-        if required_any_tags:
-            points += 15 * min(len(tags & required_any_tags), 2) / 2
+        if required_any_groups:
+            # por OPCIÓN matcheada, no por tag suelto (bug reportado
+            # 2026-08-02): con el viejo `15 * len(tags & required_any_tags)`,
+            # una sola opción de un tag daba 7.5 puntos -> match_score 59,
+            # justo abajo de MIN_MATCH_SCORE=60 -> se descartaba siempre.
+            # 1 opción -> 62, 2 -> 73 (verificado con la fórmula de abajo).
+            matched_options = sum(1 for group in required_any_groups if tags & group)
+            points += 20 * min(matched_options, 2) / 2
         if item["kind"] == "series":
             points -= 4
         if matched_director:
@@ -427,8 +523,8 @@ def recommend(
     # out of the top picks even when they scored just as well.
     scored.sort(key=lambda quad: quad[0], reverse=True)
 
-    if required_any_tags:
-        picks = _pick_with_genre_coverage(scored, required_any_tags, limit=limit)
+    if required_any_groups:
+        picks = _pick_with_genre_coverage(scored, required_any_groups, limit=limit)
     else:
         picks = _pick_with_exploration(scored, limit=limit)
 

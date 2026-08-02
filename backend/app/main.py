@@ -34,6 +34,8 @@ from .models import (
     OnboardingTitlesResponse,
     PasswordResetConfirmRequest,
     PasswordResetRequest,
+    PickOption,
+    PickOptionsResponse,
     ProfileRecommendRequest,
     RatedItem,
     LetterboxdUsernameRequest,
@@ -49,12 +51,16 @@ from .models import (
     UserCredentials,
     WatchedHistoryResponse,
 )
-from .recommender import GENRE_OPTIONS, recommend
+from .recommender import GENRE_OPTIONS, PICK_OPTIONS, recommend
 
 MAX_ZIP_SIZE = 20 * 1024 * 1024  # 20MB — real Letterboxd exports run in the tens of KB
 VALID_MODES = {"profile", "recent", "genres", "watchlist"}
 VALID_KIND_FILTERS = {"movie", "series", "both"}
 RECENT_WINDOW = 10  # how many of the user's most-recently-watched titles count as "lo último que vi"
+# picker "a tu elección": cada opción elegida es un request aparte a TMDb
+# (tmdb_client.fetch_candidates_for_options) — sin tope, elegir 25 opciones
+# dispara 50 requests en un solo /recommend.
+MAX_SELECTED_OPTIONS = 5
 MIN_MANUAL_RATINGS = 10  # onboarding without Letterboxd needs at least this many rated seed titles
 DEFAULT_RECOMMEND_DAILY_LIMIT = 20  # per user; protects TMDb/NIM quotas. 0 = off.
 WATCHLIST_MATCH_CAP = 60  # how many watchlist titles to resolve against TMDb per request
@@ -162,6 +168,20 @@ def health() -> dict[str, str]:
     # default, and GET-only would 405 every check — a false "down" alert on
     # a backend that's actually fine.
     return {"status": "ok"}
+
+
+@app.get("/recommend/options", response_model=PickOptionsResponse)
+def recommend_options() -> PickOptionsResponse:
+    """Opciones del picker "a tu elección" (modo genres) — reemplaza el
+    array `genreOptions` que el frontend tenía hardcodeado y duplicado a
+    mano (a 7 opciones tolerable, a 25+ garantiza que se desincronice).
+    Sin auth, como /catalog/stats: es metadata pública del picker, no datos
+    de usuario."""
+    return PickOptionsResponse(
+        options=[
+            PickOption(key=o["key"], label=o["label"], group=o["group"]) for o in PICK_OPTIONS
+        ]
+    )
 
 
 @app.get("/catalog/stats", response_model=CatalogStatsResponse)
@@ -683,6 +703,27 @@ def _finish_recommend(
             logger.warning("Taste profile computation failed, falling back to unpersonalized candidates", exc_info=True)
             profile = None
 
+    # parseo de "a tu elección" ANTES del fetch de candidatos — el picker
+    # maneja su propio pedido a TMDb (fetch_candidates_for_options), no
+    # post-filtra el pool de perfil/mood como antes (bug reportado
+    # 2026-08-02: opciones angostas nunca traían señal suficiente).
+    selected_genres = [key.strip() for key in genres.split(",") if key.strip()]
+    if len(selected_genres) > MAX_SELECTED_OPTIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Elegí como mucho {MAX_SELECTED_OPTIONS} opciones.",
+        )
+    # tupla ordenada (orden de selección), una entrada por opción elegida —
+    # no un frozenset aplanado (bug reportado 2026-08-02: cobertura por tag
+    # suelto, no por opción, con orden de iteración no determinístico).
+    required_any_groups = tuple(
+        frozenset(GENRE_OPTIONS[key]) for key in selected_genres if key in GENRE_OPTIONS
+    )
+    if mode == "genres" and not required_any_groups:
+        raise HTTPException(
+            status_code=400, detail="Elegí al menos un género para este modo."
+        )
+
     if mode == "watchlist":
         # recommend FROM the user's Letterboxd watchlist instead of discover.
         # The list is persisted per import; username imports don't carry one,
@@ -699,6 +740,14 @@ def _finish_recommend(
                 status_code=400,
                 detail="No pude matchear tu watchlist contra el catálogo de TMDb.",
             )
+    elif mode == "genres":
+        candidates = catalog.CATALOG
+        if tmdb_client.is_configured():
+            try:
+                candidates = tmdb_client.fetch_candidates_for_options(selected_genres, kind_filter)
+            except tmdb_client.TmdbError as exc:
+                logger.warning("TMDb options fetch failed, falling back to mock catalog: %s", exc)
+                candidates = catalog.CATALOG
     else:
         candidates = catalog.CATALOG
         if tmdb_client.is_configured():
@@ -755,15 +804,6 @@ def _finish_recommend(
             ratings, key=lambda item: item.watched_date, reverse=True
         )[:RECENT_WINDOW]
 
-    selected_genres = [key.strip() for key in genres.split(",") if key.strip()]
-    required_any_tags = frozenset(
-        tag for key in selected_genres for tag in GENRE_OPTIONS.get(key, [])
-    )
-    if mode == "genres" and not required_any_tags:
-        raise HTTPException(
-            status_code=400, detail="Elegí al menos un género para este modo."
-        )
-
     def _score(pool: list[dict], seen: frozenset[str], limit: int) -> RecommendResponse:
         return recommend(
             ratings,
@@ -771,7 +811,7 @@ def _finish_recommend(
             catalog=pool,
             also_seen=seen,
             kind_filter=kind_filter,
-            required_any_tags=required_any_tags or None,
+            required_any_groups=required_any_groups or None,
             preference_ratings=preference_ratings,
             profile=profile,
             rejected_tags=rejected_tags or None,
@@ -793,7 +833,15 @@ def _finish_recommend(
         # extra por conseguir más picks fuertes, nunca debe tumbar un
         # /recommend que ya tiene una respuesta válida (aunque corta).
         try:
-            broader = tmdb_client.fetch_candidates(mood, pages=4)
+            # mode="genres" con fetch_candidates(mood, pages=4) desperdiciaba
+            # 4 páginas enteras: esos ítems no llevan tag de ninguna opción
+            # elegida, así que el filtro duro de recommend() los descartaba a
+            # todos (bug encontrado 2026-08-02 diseñando este picker).
+            broader = (
+                tmdb_client.fetch_candidates_for_options(selected_genres, kind_filter, pages=3)
+                if mode == "genres"
+                else tmdb_client.fetch_candidates(mood, pages=4)
+            )
         except Exception:
             logger.warning("Broader TMDb candidate fetch failed, keeping the shorter pool", exc_info=True)
             broader = []

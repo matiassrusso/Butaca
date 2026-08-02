@@ -13,6 +13,8 @@ def clear_tmdb_cache() -> None:
     tmdb_client._WATCH_PROVIDERS_CACHE.clear()
     tmdb_client._KEYWORDS_CACHE.clear()
     tmdb_client._TITLE_BY_ID_CACHE.clear()
+    tmdb_client._KEYWORD_ID_CACHE.clear()
+    tmdb_client._OPTION_CACHE.clear()
 
 
 def test_fetch_candidates_requires_api_key(monkeypatch) -> None:
@@ -187,6 +189,126 @@ def test_fetch_candidates_refreshes_after_ttl(monkeypatch) -> None:
 
     assert len(calls) == 4
     assert first != second
+
+
+def _fake_option_get_json(genre_calls: list[str], keyword_calls: list[str], discover_results: dict):
+    # url router para las 3 clases de request que emite
+    # fetch_candidates_for_options: /search/keyword (resuelve nombre -> id),
+    # /discover/movie y /discover/tv (una por opción y por kind).
+    def fake_get_json(url: str) -> dict:
+        if "search/keyword" in url:
+            keyword_calls.append(url)
+            # el nombre de la keyword viaja como "query=..." en la url
+            query = url.split("query=")[1].split("&")[0]
+            return {"results": [{"id": abs(hash(query)) % 10_000, "name": urllib_unquote(query)}]}
+        genre_calls.append(url)
+        return discover_results.get(url.split("?")[0], {"results": []})
+
+    return fake_get_json
+
+
+def urllib_unquote(text: str) -> str:
+    import urllib.parse
+
+    return urllib.parse.unquote_plus(text)
+
+
+def test_fetch_candidates_for_options_stamps_option_tags(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    genre_calls: list[str] = []
+    keyword_calls: list[str] = []
+    discover_results = {
+        "https://api.themoviedb.org/3/discover/movie": {
+            "results": [
+                {
+                    "id": 1,
+                    "title": "Tenet",
+                    "release_date": "2020-08-26",
+                    "genre_ids": [],
+                    "overview": "",
+                }
+            ]
+        }
+    }
+    monkeypatch.setattr(
+        tmdb_client, "_get_json", _fake_option_get_json(genre_calls, keyword_calls, discover_results)
+    )
+
+    candidates = tmdb_client.fetch_candidates_for_options(["mindbender"], kind_filter="movie")
+
+    assert len(candidates) == 1
+    assert candidates[0]["title"] == "Tenet"
+    # sin esto el candidato se hubiera descartado en _map_result: género y
+    # overview vacíos no aportan ningún tag por su cuenta
+    assert "mind-bending" in candidates[0]["tags"]
+    assert any("with_keywords=" in url for url in genre_calls)
+    assert "with_genres=" not in genre_calls[0]
+
+
+def test_fetch_candidates_for_options_never_combines_options_in_one_request(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    genre_calls: list[str] = []
+    keyword_calls: list[str] = []
+    monkeypatch.setattr(
+        tmdb_client, "_get_json", _fake_option_get_json(genre_calls, keyword_calls, {})
+    )
+
+    tmdb_client.fetch_candidates_for_options(["action", "romance"], kind_filter="movie")
+
+    # 2 opciones elegidas, kind_filter="movie" -> exactamente 2 requests a
+    # discover/movie, nunca with_genres=28|10749 combinando las dos
+    movie_calls = [url for url in genre_calls if "discover/movie" in url]
+    assert len(movie_calls) == 2
+    for url in movie_calls:
+        assert "with_genres=28" in url or "with_genres=10749" in url
+        assert not ("with_genres=28" in url and "with_genres=10749" in url)
+
+
+def test_fetch_candidates_for_options_one_request_per_option_and_kind(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    genre_calls: list[str] = []
+    keyword_calls: list[str] = []
+    monkeypatch.setattr(
+        tmdb_client, "_get_json", _fake_option_get_json(genre_calls, keyword_calls, {})
+    )
+
+    tmdb_client.fetch_candidates_for_options(["action"], kind_filter="both")
+
+    # "action" tiene movie_genres Y tv_genres -> 1 request a cada discover
+    assert sum("discover/movie" in url for url in genre_calls) == 1
+    assert sum("discover/tv" in url for url in genre_calls) == 1
+
+
+def test_fetch_candidates_for_options_skips_unknown_keys(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setattr(tmdb_client, "_get_json", lambda url: {"results": []})
+
+    assert tmdb_client.fetch_candidates_for_options(["not-a-real-option"]) == []
+
+
+def test_resolve_keyword_id_caches(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    calls: list[str] = []
+
+    def fake_get_json(url: str) -> dict:
+        calls.append(url)
+        return {"results": [{"id": 42, "name": "heist"}]}
+
+    monkeypatch.setattr(tmdb_client, "_get_json", fake_get_json)
+
+    first = tmdb_client._resolve_keyword_id("heist")
+    second = tmdb_client._resolve_keyword_id("heist")
+
+    assert first == 42
+    assert second == 42
+    assert len(calls) == 1
+
+
+def test_resolve_keyword_id_returns_none_on_miss(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setattr(tmdb_client, "_get_json", lambda url: {"results": []})
+
+    assert tmdb_client._resolve_keyword_id("not a real keyword") is None
 
 
 def test_map_result_reads_tv_fields_when_kind_is_series() -> None:

@@ -1,7 +1,14 @@
 from collections import Counter
 
 from backend.app.models import RatedItem
-from backend.app.recommender import GENRE_OPTIONS, MIN_MATCH_SCORE, TAG_PHRASES, capitalize_sentence, recommend
+from backend.app.recommender import (
+    GENRE_OPTIONS,
+    MIN_MATCH_SCORE,
+    PICK_OPTIONS,
+    TAG_PHRASES,
+    capitalize_sentence,
+    recommend,
+)
 
 
 def test_recommend_filters_seen_titles_and_prefers_matching_mood() -> None:
@@ -167,34 +174,64 @@ def test_recommend_kind_filter_excludes_other_kind() -> None:
     assert [item.title for item in response.recommendations] == ["A Series"]
 
 
-def test_recommend_required_any_tags_filters_by_or_logic() -> None:
+def test_recommend_required_any_groups_filters_by_or_logic() -> None:
     catalog = [
         {"title": "Only Action", "year": 2020, "kind": "movie", "tags": ["action"]},
         {"title": "Only Romance", "year": 2020, "kind": "movie", "tags": ["romantic"]},
         {"title": "Neither", "year": 2020, "kind": "movie", "tags": ["quiet"]},
     ]
-    required = frozenset(GENRE_OPTIONS["action"]) | frozenset(GENRE_OPTIONS["romance"])
+    groups = (frozenset(GENRE_OPTIONS["action"]), frozenset(GENRE_OPTIONS["romance"]))
 
-    response = recommend(ratings=[], mood="", catalog=catalog, required_any_tags=required, min_score=0)
+    response = recommend(ratings=[], mood="", catalog=catalog, required_any_groups=groups, min_score=0)
 
     titles = {item.title for item in response.recommendations}
     assert titles == {"Only Action", "Only Romance"}
 
 
-def test_recommend_required_any_tags_guarantees_genre_coverage() -> None:
+def test_recommend_required_any_groups_guarantees_coverage_per_option() -> None:
     # 5 strong action matches would normally fill every slot and starve the
-    # romance genre out entirely — coverage should force at least one in.
+    # romance option out entirely — coverage should force at least one in.
     catalog = [
         {"title": f"Action {i}", "year": 2020, "kind": "movie", "tags": ["action", "kinetic"]}
         for i in range(5)
     ] + [{"title": "The Only Romance", "year": 2020, "kind": "movie", "tags": ["romantic"]}]
-    required = frozenset(GENRE_OPTIONS["action"]) | frozenset(GENRE_OPTIONS["romance"])
+    groups = (frozenset(GENRE_OPTIONS["action"]), frozenset(GENRE_OPTIONS["romance"]))
 
-    response = recommend(ratings=[], mood="", catalog=catalog, required_any_tags=required, min_score=0)
+    response = recommend(ratings=[], mood="", catalog=catalog, required_any_groups=groups, min_score=0)
 
     titles = {item.title for item in response.recommendations}
     assert "The Only Romance" in titles
     assert len(response.recommendations) == 6
+
+
+def test_recommend_single_option_match_clears_min_score() -> None:
+    # bug reportado 2026-08-02: con el bonus viejo (15 * tags matcheados),
+    # una sola opción de un tag daba match_score=59, un punto abajo del
+    # piso — se descartaba siempre. Ahora se cuenta por opción matcheada.
+    catalog = [{"title": "Only Horror", "year": 2020, "kind": "movie", "tags": ["dark"]}]
+    groups = (frozenset(GENRE_OPTIONS["horror"]),)
+
+    response = recommend(ratings=[], mood="", catalog=catalog, required_any_groups=groups)
+
+    assert [item.title for item in response.recommendations] == ["Only Horror"]
+    assert response.recommendations[0].match_score >= MIN_MATCH_SCORE
+
+
+def test_pick_coverage_is_per_option_in_selection_order() -> None:
+    # 4 opciones elegidas, 3 candidatos fuertes cada una: debe salir un pick
+    # de cada opción, no que 2 opciones se coman los 6 lugares.
+    groups = tuple(frozenset({f"tag{i}"}) for i in range(4))
+    catalog = [
+        {"title": f"Opt{i}-{j}", "year": 2020, "kind": "movie", "tags": [f"tag{i}"]}
+        for i in range(4)
+        for j in range(3)
+    ]
+
+    response = recommend(ratings=[], mood="", catalog=catalog, required_any_groups=groups, min_score=0)
+
+    titles = {item.title for item in response.recommendations}
+    for i in range(4):
+        assert any(title.startswith(f"Opt{i}-") for title in titles), f"opción {i} sin representante"
 
 
 def test_recommend_why_cites_specific_matched_tags_not_a_fixed_template() -> None:
@@ -303,6 +340,19 @@ def test_every_keyword_tag_has_a_spanish_phrase() -> None:
     for tags in KEYWORD_TAG_MAP.values():
         for tag in tags:
             assert tag in TAG_PHRASES, f"falta la frase en español para el tag {tag!r}"
+
+
+def test_pick_options_have_phrases_and_unique_keys() -> None:
+    # mismo guard que arriba, pero para el picker "a tu elección" — evita
+    # sumar una opción nueva a PICK_OPTIONS y olvidarse la frase en español,
+    # y una key duplicada que pisaría silenciosamente a la anterior en la
+    # vista derivada GENRE_OPTIONS.
+    keys = [option["key"] for option in PICK_OPTIONS]
+    assert len(keys) == len(set(keys)), "hay keys duplicadas en PICK_OPTIONS"
+
+    for option in PICK_OPTIONS:
+        for tag in option["tags"]:
+            assert tag in TAG_PHRASES, f"falta la frase en español para el tag {tag!r} ({option['key']})"
 
 
 def test_recommend_ignores_user_tags_outside_internal_vocabulary() -> None:

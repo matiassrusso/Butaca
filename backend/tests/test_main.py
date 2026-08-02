@@ -657,15 +657,18 @@ def test_recommend_zip_genres_mode_requires_at_least_one_genre() -> None:
 
 
 def test_recommend_zip_genres_mode_filters_by_selected_genres(monkeypatch) -> None:
+    # mode="genres" pide su propio pool a TMDb (fetch_candidates_for_options)
+    # en vez de post-filtrar fetch_candidates (bug arreglado 2026-08-02).
     monkeypatch.setenv("TMDB_API_KEY", "fake-key")
 
-    def fake_fetch_candidates(mood: str):
+    def fake_fetch_for_options(keys, kind_filter, pages=1):
         return [
             {"title": "Romance Pick", "year": 2021, "kind": "movie", "tags": ["romantic"]},
-            {"title": "Unrelated Pick", "year": 2021, "kind": "movie", "tags": ["quiet"]},
         ]
 
-    monkeypatch.setattr("backend.app.main.tmdb_client.fetch_candidates", fake_fetch_candidates)
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.fetch_candidates_for_options", fake_fetch_for_options
+    )
 
     headers = _auth_headers("genremode")
     response = _post_zip(headers, mode="genres", genres="romance")
@@ -673,6 +676,61 @@ def test_recommend_zip_genres_mode_filters_by_selected_genres(monkeypatch) -> No
     assert response.status_code == 200
     titles = {item["title"] for item in response.json()["recommendations"]}
     assert titles == {"Romance Pick"}
+
+
+def test_recommend_options_endpoint_lists_groups() -> None:
+    from backend.app.recommender import GENRE_OPTIONS
+
+    response = client.get("/recommend/options")
+
+    assert response.status_code == 200
+    options = response.json()["options"]
+    keys = {o["key"] for o in options}
+    assert keys == set(GENRE_OPTIONS.keys())
+    groups = {o["group"] for o in options}
+    assert "generos" in groups and "vibras" in groups
+
+
+def test_recommend_genres_mode_uses_targeted_fetch_not_profile_pool(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    calls: list[str] = []
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.fetch_candidates_for_options",
+        lambda keys, kind_filter, pages=1: calls.append("options") or [
+            {"title": "Romance Pick", "year": 2021, "kind": "movie", "tags": ["romantic"]}
+        ],
+    )
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.fetch_candidates",
+        lambda mood, pages=2: (_ for _ in ()).throw(AssertionError("no debería llamarse en mode=genres")),
+    )
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.fetch_personalized_candidates",
+        lambda profile, mood, kind_filter: (_ for _ in ()).throw(
+            AssertionError("no debería llamarse en mode=genres")
+        ),
+    )
+
+    headers = _auth_headers("targetedfetch")
+    response = _post_zip(headers, mode="genres", genres="romance")
+
+    assert response.status_code == 200
+    # 1 (o 2, si el pool corto de 1 pick dispara el refetch más amplio) --
+    # lo que importa es que NUNCA pasa por fetch_candidates/
+    # fetch_personalized_candidates (esos mocks tiran AssertionError si se
+    # llaman, y no se propagó ninguna acá).
+    assert calls and all(c == "options" for c in calls)
+
+
+def test_recommend_genres_mode_rejects_too_many_options() -> None:
+    from backend.app.recommender import GENRE_OPTIONS
+
+    headers = _auth_headers("toomanyoptions")
+    too_many = ",".join(list(GENRE_OPTIONS)[:6])
+
+    response = _post_zip(headers, mode="genres", genres=too_many)
+
+    assert response.status_code == 400
 
 
 def test_recommend_zip_kind_filter_only_returns_series(monkeypatch) -> None:
