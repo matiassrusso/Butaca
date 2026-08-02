@@ -33,6 +33,21 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
 
 ## Pending
 
+- [ ] **[Fase 4: vibes por clustering real (embeddings + Leiden), 2026-08-02]**
+      — owner: Codex. Spec completa y autocontenida en
+      `docs/(C) plan-fase4-vibes-embeddings.md` — leerlo entero antes de
+      arrancar, tiene el diseño, lo ya verificado (GEMINI_API_KEY real y
+      probada, `gemini-embedding-2` confirmado con requests reales,
+      `batchEmbedContents` confirmado que da un embedding distinto por
+      texto), el riesgo a resolver primero (Python 3.14 + `python-igraph`/
+      `leidenalg` sin garantía de wheel — fallback a `networkx` +
+      `python-louvain` si hace falta), y un checklist de retomada al final.
+      Contexto de negocio (por qué esto y no el otro sistema de Flick) en
+      `CLAUDE.md`, "Historial de sesiones" 2026-08-02. Fases 1/2/3/5 de ese
+      mismo trabajo (géneros ampliados + vibras curadas a mano + frontend)
+      ya están en `main`, commit `5af2817` — no las toques, esto es la
+      pieza que falta arriba de eso.
+
 - [x] **[/recommend debe devolver los mejores matches reales, no completar con películas flojas (feedback 2026-07-31)]** — resuelto 2026-08-02. Causa raíz: `recommender.recommend()` no tenía piso de score a propósito ("we always want a full set of picks... even if some are weak matches"), así que rellenaba hasta 6 con lo que hubiera. Decisión de Matías: piso real en 60 (no solo descartar ≤50), y si eso deja el pool corto, `_finish_recommend` primero pide un pool más grande a TMDb (`fetch_candidates(mood, pages=4)`) antes de resignarse a mostrar menos de 6 — nunca rellena con picks flojos. `/weekly` y `/titles/{id}/verdict` quedan afuera (`min_score=0`): ahí el catálogo es fijo (las semanales de la semana, o el título que el usuario buscó), no hay pool del que elegir. 308 tests (33 nuevos/reescritos en `test_recommender.py`/`test_main.py`).
 
 - [x] **Rediseño del flujo de "no estoy de acuerdo" (2026-07-31 sesión 5,

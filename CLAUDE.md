@@ -47,18 +47,20 @@ Solo yo (Matías), con posible coordinación multi-agente (Claude, Codex) docume
 ## Estado actual
 _Última actualización: 2026-08-02_
 
-**Qué se hizo:**
-- Diagnosticado y arreglado el bug de `/recommend` mezclando 45%/55%/60%/S/D con picks fuertes: `recommender.recommend()` no tenía piso de score a propósito ("siempre queremos 6 picks, aunque sean flojos") y rellenaba con lo que hubiera.
-- Piso real en 60 (decisión de Matías, no solo descartar ≤50): `recommender.MIN_MATCH_SCORE`, parámetro `min_score` en `recommend()`.
-- Si el piso deja el pool corto, `_finish_recommend` primero pide un pool más grande a TMDb (`fetch_candidates(mood, pages=4)`) antes de resignarse a mostrar menos de 6 — nunca rellena con lo flojo.
-- `/weekly` y `/titles/{id}/verdict` quedan afuera del piso (`min_score=0`): ahí el catálogo es fijo (las semanales de la semana, o el título buscado), no hay pool del que elegir.
-- 308 tests backend (33 nuevos/reescritos), sin cambios de frontend.
+**Qué se hizo (sesión larga, 2 commits — `3f5fac0` docs, `5af2817` código):**
+- Arreglado el bug de `/recommend` mezclando 45%/55%/60%/S/D con picks fuertes: piso real de match en 60 (`recommender.MIN_MATCH_SCORE`), y si eso deja el pool corto, `_finish_recommend` amplía el pool a TMDb antes de resignarse a mostrar menos de 6.
+- Picker "a tu elección" (pedido de Matías, inspirado en un video sobre Flick): `GENRE_OPTIONS` (7 fijas) → `PICK_OPTIONS` (26: 18 géneros + 8 vibras), cada opción con su propio fetch dirigido a TMDb (`fetch_candidates_for_options`) en vez de post-filtrar un pool ajeno. `GET /recommend/options` nuevo. Vibras (MindBender, Feel-Good, Gothic, Lowbrow, Harrowing/Dread, Schlock, Urbanas, Tween) armadas con keywords de TMDb verificadas a mano, no clustering.
+- 2 bugs reales de scoring encontrados y arreglados en el camino: piso de 60 nunca se cruzaba con 1 sola opción matcheada (bonus por tag suelto daba 59), y la cobertura "1 pick por opción" iteraba en orden no determinístico (`PYTHONHASHSEED`).
+- Frontend: picker agrupado por sección, contador, tope de 5, verificado a mano en el browser.
+- 320 tests backend, build de frontend limpio.
 
-**Dónde retomar:** Probar en producción con datos reales (perfil de Letterboxd real) que las tandas de `/recommend` ya no mezclan matches débiles con fuertes, y que "Nuevos picks"/el modo manual siguen devolviendo resultados razonables. Si el modo manual ("Ya la vi", sin reseña) devuelve vacío seguido en producción, revisar: sin texto de reseña el único camino a un match fuerte es el perfil de TMDb (director/actor/década vía `fetch_personalized_candidates`), no hay señal de texto.
+**Dónde retomar:** Fase 4 (vibes por clustering real: Gemini embeddings + Leiden) queda para Codex — spec completa en `docs/(C) plan-fase4-vibes-embeddings.md`, entrada en `TASKS.md`. Ya verificado con requests reales: `GEMINI_API_KEY` anda, `gemini-embedding-2` responde 200 con vector de 3072-d, `batchEmbedContents` da un embedding distinto por texto (no combinado). Falta confirmar si `python-igraph`/`leidenalg` instalan limpio en Python 3.14 (riesgo real, fallback documentado a `networkx`+`python-louvain`).
 
-**Bloqueos / decisiones pendientes:** Ninguno. `docs/architecture.md` sigue figurando modificado en git status — es solo ruido de line endings (CRLF/LF), no cambio real.
+Aparte, sigue pendiente probar en producción que `/recommend` ya no mezcla matches débiles con fuertes (bug de la primera mitad de esta sesión, deployado pero no verificado en producción todavía).
 
-**Contexto que no es obvio del código:** El modo manual (`ManualRating`) solo tiene título+rating, nunca reseña — en el catálogo mock (sin TMDB_API_KEY) nunca hay señal de tags, así que con el piso nuevo siempre devuelve vacío ahí; en producción con TMDb real, `fetch_personalized_candidates` ya sesga el pool hacia el perfil (director/actor/género), así que sí hay señal real. `npx tsc --noEmit` no chequea archivos por la configuración con project references; el gate real es `npm run build` (`tsc -b`).
+**Bloqueos / decisiones pendientes:** Ninguno propio. `docs/architecture.md` sigue figurando modificado en git status — solo ruido de line endings.
+
+**Contexto que no es obvio del código:** El modo manual (`ManualRating`) solo tiene título+rating, nunca reseña — sin TMDB_API_KEY el catálogo mock nunca tiene señal de tags, así que con el piso de score siempre devuelve vacío ahí en local; en producción con TMDb real hay señal vía perfil (director/actor/género). El otro sistema de Flick (clusterizar reseñas de usuarios, el que da las vibes "de verdad" tipo MindBender) es inviable en Butaca: solo 68 títulos con reseña real en toda la base — por eso la Fase 4 clusteriza metadata (Sistema 1 de Flick), no reseñas, y las vibes "MindBender"-style de la Fase 3 son curadas a mano con keywords, no descubiertas. `npx tsc --noEmit` no chequea nada por la config de project references; el gate real es `npm run build` (`tsc -b`).
 <!-- SESSION_STATE:END -->
 
 <details>
@@ -385,6 +387,27 @@ afuera del piso a propósito: ahí no hay pool del que elegir. 308 tests (33
 nuevos/reescritos, sin cambios de frontend). Antes de esto, Codex había
 dejado el bug diagnosticado y documentado en `TASKS.md` pero sin tocar
 código — ver commit `3f5fac0`.
+
+### 2026-08-02 (sesión 2) — picker "a tu elección" + vibras estilo Flick
+Matías me contó de un video sobre Flick (app que categoriza pelis por
+"vibes" con embeddings) y pidió meter esa idea en Butaca, arrancando por
+ampliar el picker de género. Investigué el video a fondo (pidió el
+transcript completo) antes de diseñar nada: Flick corre DOS sistemas
+separados — metadata→embeddings→Leiden da categorías históricas/de
+movimiento de cine, pero las vibes "de verdad" (MindBender, Feel-Good)
+salen de clusterizar reseñas de usuarios, algo que Butaca no puede replicar
+(68 títulos con reseña real en toda la base). Con Matías acordamos un mix:
+Sistema 1 real (embeddings+Leiden, pieza grande, quedó documentada para
+Codex en `docs/(C) plan-fase4-vibes-embeddings.md`) más vibras curadas a
+mano con keywords de TMDb como proxy honesto (Fase 3, ya hecha). De paso
+rediseñé el picker de género completo (`GENRE_OPTIONS` estático de 7 →
+`PICK_OPTIONS` de 26 con fetch dirigido a TMDb por opción) porque la
+arquitectura vieja post-filtraba un pool ajeno y nunca iba a servir para
+opciones angostas — encontré 2 bugs reales de scoring en el camino (piso
+de 60 que un solo tag nunca cruzaba, cobertura no determinística). Verifiqué
+la `GEMINI_API_KEY` nueva de Matías con requests reales (embedding y
+batchEmbedContents confirmados) antes de dejarlo documentado. 320 tests,
+frontend probado a mano en el browser. Commit `5af2817`.
 
 ### 2026-07-31 — deploy, estrellas y renovación de picks
 Se destrabó el deploy roto por TypeScript, se agregó CI y se verificó el nuevo `DisagreePanel`. Después se reemplazaron los tres ratings por estrellas de 0.5 a 5 y se corrigieron persistencia/edición, precedencia de Letterboxd y repetición de `Nuevos picks`. Todo terminó desplegado con 306 tests, build y CI verdes. Al cerrar, Matías detectó el siguiente bug prioritario: `/recommend` mezcla picks fuertes con 45%, 55%, 60% y S/D; la próxima sesión arranca diagnosticando el ranking para devolver solo recomendaciones realmente fuertes.
