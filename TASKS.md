@@ -33,6 +33,8 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
 
 ## Pending
 
+- [ ] **[/recommend debe devolver los mejores matches reales, no completar con películas flojas (feedback 2026-07-31)]** — Matías mostró una tanda base con 45%, 55%, 60% y S/D junto a un 88%: contradice la promesa central de Butaca. Diagnosticar el ranking completo en `_finish_recommend` y el efecto de `llm_client.refine_recommendations`; dejar un test de regresión que pruebe que salen los títulos de mayor match del pool elegible, que `<=50` nunca se presenta como recomendación y que no se rellena una grilla con picks que el propio sistema predice que probablemente no gusten. Definir durante el diagnóstico cómo tratar 51–60 y qué devolver si no existen seis candidatos suficientemente fuertes.
+
 - [x] **Rediseño del flujo de "no estoy de acuerdo" (2026-07-31 sesión 5,
       pedido de Matías con captura)** — detalle en `CLAUDE.md`
       (`SESSION_STATE`). Era una lista plana sin "no la vi" que trababa el

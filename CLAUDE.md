@@ -43,7 +43,30 @@ Solo yo (Matías), con posible coordinación multi-agente (Claude, Codex) docume
 
 ## Current Status
 
-> <!-- SESSION_STATE:START -->
+<!-- SESSION_STATE:START -->
+## Estado actual
+_Última actualización: 2026-07-31_
+
+**Qué se hizo:**
+- Se reparó el build que impedía desplegar `DisagreePanel`, se agregó CI real y Vercel volvió a quedar operativo.
+- Los ratings de Butaca ahora usan estrellas de 0.5 a 5, se precargan al reabrir una película y pueden editarse.
+- `Nuevos picks` conserva los títulos realmente nuevos; los ratings importados de Letterboxd tienen prioridad sobre los de Butaca y muestran un aviso.
+- Estado final: commit `aad2436` en `main`, Vercel y Render actualizados, CI verde y 306 tests pasando.
+
+**Dónde retomar:** Primero diagnosticar por qué `/recommend` incluyó 45%, 55%, 60% y S/D en una tanda base: trazar `_finish_recommend` y `llm_client.refine_recommendations`, y escribir un test donde convivan candidatos fuertes y flojos que exija elegir los mejores matches reales. Después probar en producción `Nuevos picks` y la persistencia de ratings.
+
+**Evidencia:** captura real de la tanda que motivó el bug:
+![Recomendaciones con matches de 45%, 55%, 60% y S/D](<02 Attachments/(C) 2026-07-31 recommend-low-match.png>)
+
+**Bloqueos / decisiones pendientes:** Invariante definida: un match `<=50` no es una recomendación y se descarta; tampoco hay que forzar seis resultados con películas que el sistema predice flojas. Falta decidir, con el scoring delante, el piso para la franja 51–60 y si ante menos de seis picks fuertes se amplía la búsqueda o se muestran menos. `docs/architecture.md` tiene un cambio local previo de Matías que no se tocó ni se commiteó.
+
+**Contexto que no es obvio del código:** `npx tsc --noEmit` no chequea archivos por la configuración con project references; el gate real es `npm run build` (`tsc -b`). Para una misma película, `source="import"` de Letterboxd gana aunque exista un rating `star` posterior de Butaca.
+<!-- SESSION_STATE:END -->
+
+<details>
+<summary>Estado detallado anterior</summary>
+
+> <!-- SESSION_STATE_ARCHIVE:START -->
 > **Last updated:** 2026-07-31 (sesión larga, 14 commits `c0d0931`..`5b65581`,
 > 263→294 tests: cuatro rondas de bugs de `/weekly` reportados desde
 > producción, tres features pedidas, y al final la unificación grande — una
@@ -339,7 +362,14 @@ Solo yo (Matías), con posible coordinación multi-agente (Claude, Codex) docume
 >   usa `/recommend` sin TMDb key **no trae `tmdb_id`** — así que desde
 >   `/history` o `/recommend` nunca se ve. Para probarlo hay que entrar por
 >   el buscador de la navbar, que sí devuelve `tmdb_id`.
-> <!-- SESSION_STATE:END -->
+> <!-- SESSION_STATE_ARCHIVE:END -->
+
+</details>
+
+## Historial de sesiones
+
+### 2026-07-31 — deploy, estrellas y renovación de picks
+Se destrabó el deploy roto por TypeScript, se agregó CI y se verificó el nuevo `DisagreePanel`. Después se reemplazaron los tres ratings por estrellas de 0.5 a 5 y se corrigieron persistencia/edición, precedencia de Letterboxd y repetición de `Nuevos picks`. Todo terminó desplegado con 306 tests, build y CI verdes. Al cerrar, Matías detectó el siguiente bug prioritario: `/recommend` mezcla picks fuertes con 45%, 55%, 60% y S/D; la próxima sesión arranca diagnosticando el ranking para devolver solo recomendaciones realmente fuertes.
 >
 > **2026-07-31 (sesión 5) — 1 commit (`5b65581`), 293→294 tests:** Matías
 > probó el buscador (anda bien) y mandó captura del flujo de "no estoy de
