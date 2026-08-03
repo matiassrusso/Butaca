@@ -216,6 +216,39 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
       ganador con rating 3.5/source "game" (confirmado contra
       `/history/watched`), y avanzó a un par nuevo.
 
+- [x] **Bug grave en "¿cuál te gustó más?": marcaba pelis SIN VER como
+      vistas y "te gustó" en la bitácora** (reportado por Matías 2026-08-03,
+      probando el juego recién shippeado). El diseño original tenía dos
+      problemas de fondo, no uno: (1) el par salía del pool de **no vistas**
+      (`_unwatched_candidate_pool`), así que comparar "cuál te gustó más"
+      entre dos películas que el usuario nunca vio no tiene sentido lógico —
+      no hay forma honesta de preferir algo que no conocés; y (2) elegir
+      cualquiera de las dos igual escribía un rating inferido (3.5,
+      `source="game"`) en `rated_items`, que la bitácora mostraba como
+      "vista" y "te gustó" sin que el usuario la hubiera visto nunca.
+      **Rediseño completo, no un parche:** el par ahora sale de dos títulos
+      que el usuario **ya vio y puntuó con el mismo rating**
+      (`_pairwise_tied_pair`, agrupa `get_watched_items` por `rating` y
+      elige un grupo con 2+) — arregla los dos problemas a la vez: ya no
+      hay forma de que aparezca algo sin ver, y comparar entre empates es
+      justo donde una preferencia relativa aporta algo real. Elegir un
+      ganador **ya no escribe ningún rating**: se guarda en una tabla
+      nueva, `pairwise_preferences` (winner_title/loser_title), consumida
+      por `recommender._find_reference_title` — cuando dos "amados"
+      empatan en rating al elegir a cuál citar en el "why", ahora desempata
+      por victorias pairwise en vez de por orden de inserción arbitrario.
+      `recommend()` recibe el nuevo parámetro `pairwise_win_counts`
+      (poblado desde `db.get_pairwise_win_counts` en `_finish_recommend`).
+      2 tests nuevos en `test_recommender.py` (desempate con y sin señal
+      pairwise) + tests de `main.py` reescritos, 366 tests en total.
+      **Verificado end-to-end en el dev server local:** elegir un ganador
+      entre dos películas ya puntuadas con 5 estrellas dejó los dos
+      ratings intactos (confirmado contra `/history/watched`), sin
+      ninguna fila nueva fantasma.
+      **Nada de esto llegó nunca a producción** — el bug vivió solo en
+      commits locales sin pushear, confirmado con `git status` antes de
+      arreglar nada.
+
 - [x] **Trivia de cine** (segundo juego pedido junto con "¿cuál te gustó
       más?", 2026-08-03) — puro entretenimiento, Matías lo pidió sabiendo
       que no genera señal de gusto.

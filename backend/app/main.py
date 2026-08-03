@@ -76,11 +76,6 @@ SWIPE_BATCH_SIZE = 20  # cuántos títulos sin puntuar se ofrecen por tanda en l
 SWIPE_CLUSTER_OVERSAMPLE = 3  # margen para sobrevivir el filtro de "ya puntuado"
 TRIVIA_OPTION_COUNT = 4  # una correcta + 3 distractores
 TRIVIA_ATTEMPTS = 4  # cuántos pools random se prueban antes de rendirse (ver _build_trivia_question)
-# rating inferido para el ganador del juego "¿cuál te gustó más?": elegir A
-# sobre B es preferencia relativa, no un puntaje que el usuario haya dado —
-# 3.5 cae en el rango "te gustó" de _rating_label (ni "te encantó" ni "no te
-# gustó"), la lectura más honesta de "lo preferiste, sin más detalle".
-GAME_PAIRWISE_RATING = 3.5
 _VIBE_RECOMPUTE_LOCK = threading.Lock()
 
 # ponytail: uvicorn only wires handlers for its own "uvicorn.*" loggers, not
@@ -943,6 +938,8 @@ def _finish_recommend(
             ratings, key=lambda item: item.watched_date, reverse=True
         )[:RECENT_WINDOW]
 
+    pairwise_win_counts = db.get_pairwise_win_counts(user["id"])
+
     def _score(pool: list[dict], seen: frozenset[str], limit: int) -> RecommendResponse:
         return recommend(
             ratings,
@@ -956,6 +953,7 @@ def _finish_recommend(
             rejected_tags=rejected_tags or None,
             limit=limit,
             extra_phrases=vibe_labels,
+            pairwise_win_counts=pairwise_win_counts,
         )
 
     use_llm = refine and llm_client.is_configured()
@@ -1305,46 +1303,76 @@ def swipe_batch(user: sqlite3.Row = Depends(auth.get_current_user)) -> Onboardin
     return OnboardingTitlesResponse(titles=titles)
 
 
+def _resolve_watched_title(row: dict) -> dict | None:
+    """rated_items solo guarda title/tmdb_id -- year/poster se resuelven
+    contra TMDb al vuelo (mismo patrón que /onboarding/titles). tmdb_id sin
+    "kind" en el schema viene del tmdb:movieId del feed de username, así que
+    asumir "movie" ahí es consistente con el resto del proyecto."""
+    try:
+        if row.get("tmdb_id"):
+            return tmdb_client.fetch_title_by_id(row["tmdb_id"], kind="movie")
+        return tmdb_client.search_title(row["title"])
+    except tmdb_client.TmdbError:
+        return None
+
+
+def _pairwise_tied_pair(user_id: int) -> tuple[dict, dict] | tuple[None, None]:
+    """Dos títulos que el usuario YA vio y puntuó IGUAL -- comparar
+    preferencia sobre algo no visto no tiene sentido (bug real reportado por
+    Matías, 2026-08-03: el juego venía de un pool de títulos sin ver, y
+    elegir cualquiera de los dos los marcaba como vistos+gustados en la
+    bitácora sin que el usuario los hubiera visto nunca). Empatar en rating
+    además hace que la comparación sirva de desempate real más adelante
+    (ver recommender._find_reference_title)."""
+    watched = db.get_watched_items(user_id)
+    by_rating: dict[float, list[dict]] = {}
+    for item in watched:
+        by_rating.setdefault(item["rating"], []).append(item)
+    tied_groups = [group for group in by_rating.values() if len(group) >= 2]
+    if not tied_groups:
+        return None, None
+    a, b = random.sample(random.choice(tied_groups), 2)
+    return a, b
+
+
 @app.get("/games/pairwise", response_model=PairwiseMatchResponse)
 def pairwise_match(user: sqlite3.Row = Depends(auth.get_current_user)) -> PairwiseMatchResponse:
-    """Un par de títulos sin puntuar para el juego "¿cuál te gustó más?"
-    (idea de Matías, 2026-08-02: un juego que además genere señal de gusto,
-    no solo entretenga). Mismo pool que /titles/swipe-batch."""
-    picked = _unwatched_candidate_pool(user["id"], 2)
-    options = [
-        OnboardingTitle(
-            title=item["title"],
-            year=item.get("year") or 0,
-            kind=item.get("kind") or "movie",
-            tmdb_id=item.get("tmdb_id"),
-            poster_path=item.get("poster_path"),
+    """Un par de títulos que el usuario YA vio y puntuó igual, para el juego
+    "¿cuál te gustó más?". None en cualquiera de los dos lados si no hay dos
+    títulos empatados en rating (historial muy chico, o todos con ratings
+    distintos) -- el frontend lo trata igual que un pool agotado."""
+    if not tmdb_client.is_configured():
+        return PairwiseMatchResponse()
+    row_a, row_b = _pairwise_tied_pair(user["id"])
+    if row_a is None or row_b is None:
+        return PairwiseMatchResponse()
+    resolved_a, resolved_b = _resolve_watched_title(row_a), _resolve_watched_title(row_b)
+    if not resolved_a or not resolved_b:
+        return PairwiseMatchResponse()
+
+    def _to_option(row: dict, resolved: dict) -> OnboardingTitle:
+        return OnboardingTitle(
+            title=row["title"],
+            year=resolved.get("year") or 0,
+            kind=resolved.get("kind") or "movie",
+            tmdb_id=resolved.get("tmdb_id") or row.get("tmdb_id"),
+            poster_path=resolved.get("poster_path"),
         )
-        for item in picked
-    ]
-    return PairwiseMatchResponse(
-        left=options[0] if len(options) > 0 else None,
-        right=options[1] if len(options) > 1 else None,
-    )
+
+    return PairwiseMatchResponse(left=_to_option(row_a, resolved_a), right=_to_option(row_b, resolved_b))
 
 
 @app.post("/games/pairwise/choose", status_code=201)
 def pairwise_choose(
     payload: PairwiseChoiceRequest, user: sqlite3.Row = Depends(auth.get_current_user)
 ) -> dict[str, str]:
-    """Persiste al ganador de una ronda del juego pairwise con un rating
-    inferido (GAME_PAIRWISE_RATING) y source="game" -- mismo eje "rating
-    preciso sí/no" que ya distingue import/star (preciso) de manual/like
-    (sintético), reusado acá en vez de agregar uno nuevo."""
-    existing = db.get_preferred_rated_item(user["id"], payload.winner_title, payload.winner_tmdb_id)
-    if existing and existing["source"] in {"import", "star"}:
-        # ya tiene un rating preciso propio -- no lo pisa un rating inferido
-        return {"status": "preserved"}
-    db.save_rated_items(
-        user["id"],
-        [(payload.winner_title, GAME_PAIRWISE_RATING, "", "", "game", payload.winner_tmdb_id)],
-    )
-    db.invalidate_taste_profile(user["id"])
-    return {"status": "saved"}
+    """El ganador ya tiene un rating real -- los dos títulos vienen del
+    propio historial del usuario, no se inventa un rating nuevo. Se guarda
+    como preferencia relativa (pairwise_preferences), que
+    recommender._find_reference_title usa para desempatar entre "amados"
+    con el mismo rating al elegir a cuál citar en el "why"."""
+    db.record_pairwise_preference(user["id"], payload.winner_title, payload.loser_title)
+    return {"status": "recorded"}
 
 
 def _year_trivia_question(subject: dict, others: list[dict]) -> TriviaQuestion | None:

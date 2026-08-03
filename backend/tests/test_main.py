@@ -1707,80 +1707,74 @@ def test_pairwise_match_requires_auth() -> None:
     assert client.get("/games/pairwise").status_code == 401
 
 
-def test_pairwise_match_returns_two_distinct_titles(monkeypatch) -> None:
+def test_pairwise_match_pairs_two_watched_titles_with_the_same_rating(monkeypatch) -> None:
+    # bug real (2026-08-03): el par salía de títulos SIN VER, y elegir
+    # cualquiera los marcaba como vistos+gustados en la bitácora aunque el
+    # usuario nunca los hubiera visto. Ahora sale de dos títulos que el
+    # usuario ya vio y puntuó IGUAL -- comparar preferencia entre algo no
+    # visto no tiene sentido.
     monkeypatch.setenv("TMDB_API_KEY", "fake-key")
-    monkeypatch.setattr(
-        "backend.app.main.db.get_random_cluster_keys",
-        lambda limit: [(1, "movie"), (2, "movie")],
-    )
-    monkeypatch.setattr(
-        "backend.app.main.tmdb_client.fetch_title_by_id",
-        lambda tmdb_id, kind="movie": {
-            "tmdb_id": tmdb_id, "title": f"Cluster Movie {tmdb_id}", "year": 2010, "kind": "movie",
-            "poster_path": None,
-        },
-    )
-    headers = _auth_headers("pairwisematch")
-
-    response = client.get("/games/pairwise", headers=headers)
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["left"]["title"] != body["right"]["title"]
-
-
-def test_pairwise_match_degrades_to_partial_pair_when_pool_is_thin(monkeypatch) -> None:
-    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
-    monkeypatch.setattr("backend.app.main.db.get_random_cluster_keys", lambda limit: [])
-    monkeypatch.setattr(
-        "backend.app.main.onboarding_titles.ONBOARDING_TITLES", [{"title": "Solo Seed", "year": 2000}]
-    )
     monkeypatch.setattr(
         "backend.app.main.tmdb_client.search_title",
-        lambda title, year=None: {"tmdb_id": 1, "title": title, "year": year, "kind": "movie", "poster_path": None},
+        lambda title, year=None: {"tmdb_id": 1, "title": title, "year": 2010, "kind": "movie", "poster_path": None},
     )
-    headers = _auth_headers("pairwisethin")
+    headers = _auth_headers("pairwisematch")
+    user_id = db.get_user_by_username("pairwisematch")["id"]
+    db.save_rated_items(
+        user_id,
+        [
+            ("Tied A", 4.5, "", "", "import", None),
+            ("Tied B", 4.5, "", "", "import", None),
+            ("Untied C", 3.0, "", "", "import", None),
+        ],
+    )
 
     response = client.get("/games/pairwise", headers=headers)
 
     assert response.status_code == 200
     body = response.json()
-    assert body["left"] is not None
+    assert body["left"] is not None and body["right"] is not None
+    titles = {body["left"]["title"], body["right"]["title"]}
+    assert titles == {"Tied A", "Tied B"}
+
+
+def test_pairwise_match_degrades_to_empty_pair_without_a_rating_tie(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    headers = _auth_headers("pairwisenotie")
+    user_id = db.get_user_by_username("pairwisenotie")["id"]
+    db.save_rated_items(
+        user_id, [("Solo A", 4.5, "", "", "import", None), ("Solo B", 3.0, "", "", "import", None)]
+    )
+
+    response = client.get("/games/pairwise", headers=headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["left"] is None
     assert body["right"] is None
 
 
-def test_pairwise_choose_persists_the_winner_with_a_synthetic_rating() -> None:
-    headers = _auth_headers("pairwisewin")
+def test_pairwise_choose_records_preference_without_touching_ratings() -> None:
+    headers = _auth_headers("pairwisechoose")
+    user_id = db.get_user_by_username("pairwisechoose")["id"]
+    db.save_rated_items(
+        user_id, [("Winner Movie", 4.5, "", "", "import", None), ("Loser Movie", 4.5, "", "", "import", None)]
+    )
 
     response = client.post(
         "/games/pairwise/choose",
         headers=headers,
-        json={"winner_title": "Aliens", "winner_tmdb_id": 679},
+        json={"winner_title": "Winner Movie", "loser_title": "Loser Movie"},
     )
 
     assert response.status_code == 201
+    assert response.json() == {"status": "recorded"}
+    # ninguno de los dos ratings originales se tocó -- el juego no inventa
+    # ni pisa un puntaje, solo guarda la preferencia relativa
     watched = client.get("/history/watched", headers=headers).json()["items"]
-    assert any(
-        item["title"] == "Aliens" and item["rating"] == 3.5 and item["source"] == "game"
-        for item in watched
-    )
-
-
-def test_pairwise_choose_does_not_override_a_precise_rating() -> None:
-    headers = _auth_headers("pairwisepreserve")
-    user_id = db.get_user_by_username("pairwisepreserve")["id"]
-    db.save_rated_items(user_id, [("Aliens", 2.0, "", "", "star", 679)])
-
-    response = client.post(
-        "/games/pairwise/choose",
-        headers=headers,
-        json={"winner_title": "Aliens", "winner_tmdb_id": 679},
-    )
-
-    assert response.status_code == 201
-    assert response.json() == {"status": "preserved"}
-    watched = client.get("/history/watched", headers=headers).json()["items"]
-    assert any(item["title"] == "Aliens" and item["rating"] == 2.0 for item in watched)
+    ratings_by_title = {item["title"]: item["rating"] for item in watched}
+    assert ratings_by_title == {"Winner Movie": 4.5, "Loser Movie": 4.5}
+    assert db.get_pairwise_win_counts(user_id) == {"winner movie": 1}
 
 
 def test_trivia_question_requires_auth() -> None:

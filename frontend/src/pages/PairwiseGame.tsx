@@ -7,10 +7,13 @@ import { PageTransition } from "@/components/PageTransition";
 import { API_BASE_URL, useAuth } from "@/hooks/useAuth";
 import type { OnboardingTitle } from "@/pages/Recommend";
 
-// Juego "¿cuál te gustó más?" (idea de Matías, 2026-08-02): a diferencia de
-// la trivia, cada elección es señal real de preferencia relativa entre dos
-// títulos sin puntuar -- el ganador se guarda en el perfil con un rating
-// inferido (GAME_PAIRWISE_RATING en el backend), el perdedor no se toca.
+// Juego "¿cuál te gustó más?" (idea de Matías, 2026-08-02, rediseñado
+// 2026-08-03 tras un bug real: el par venía de títulos SIN VER, y elegir
+// cualquiera los marcaba como vistos+gustados en la bitácora sin que el
+// usuario los hubiera visto nunca). Ahora el par sale de dos títulos que el
+// usuario YA vio y puntuó igual -- no se inventa un rating nuevo, solo se
+// guarda la preferencia relativa para desempatar entre "amados" con el
+// mismo puntaje.
 type Pair = { left: OnboardingTitle | null; right: OnboardingTitle | null };
 
 function Poster({ item, onPick, disabled }: { item: OnboardingTitle; onPick: () => void; disabled: boolean }) {
@@ -69,14 +72,14 @@ export default function PairwiseGame() {
     loadPair();
   }, [loadPair]);
 
-  async function choose(winner: OnboardingTitle) {
+  async function choose(winner: OnboardingTitle, loser: OnboardingTitle) {
     if (!token || choosing) return;
     setChoosing(true);
     try {
       const response = await fetch(`${API_BASE_URL}/games/pairwise/choose`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ winner_title: winner.title, winner_tmdb_id: winner.tmdb_id }),
+        body: JSON.stringify({ winner_title: winner.title, loser_title: loser.title }),
       });
       if (!response.ok) throw new Error();
       setRounds((n) => n + 1);
@@ -107,7 +110,8 @@ export default function PairwiseGame() {
             ¿Cuál te <span className="text-accent italic font-serif normal-case tracking-normal">gustó</span> más?
           </h1>
           <p className="font-mono text-xs text-muted-foreground mt-4">
-            Elegí una. Tu elección queda en el perfil como preferencia, no como puntaje exacto.
+            Dos pelis que ya viste y puntuaste igual. Elegí la que más te gustó -- nos ayuda a
+            desempatar entre tus favoritas, no te cambia el puntaje.
           </p>
         </header>
 
@@ -125,7 +129,9 @@ export default function PairwiseGame() {
         {!loading && !error && (!pair.left || !pair.right) && (
           <div className="p-10 border-2 border-dashed border-foreground/20 text-center">
             <h2 className="text-2xl font-black uppercase tracking-tighter mb-2">
-              {rounds > 0 ? `Jugaste ${rounds} ronda${rounds === 1 ? "" : "s"}.` : "No hay suficientes pelis sin puntuar para armar un par."}
+              {rounds > 0
+                ? `Jugaste ${rounds} ronda${rounds === 1 ? "" : "s"}.`
+                : "Necesitás al menos dos pelis vistas con el mismo puntaje para jugar -- puntuá más en \"Puntuar más\"."}
             </h2>
             <button
               onClick={loadPair}
@@ -142,8 +148,8 @@ export default function PairwiseGame() {
               {rounds} ronda{rounds === 1 ? "" : "s"} jugada{rounds === 1 ? "" : "s"}
             </div>
             <div className="grid grid-cols-2 gap-6 md:gap-10 items-start">
-              <Poster item={pair.left} onPick={() => choose(pair.left!)} disabled={choosing} />
-              <Poster item={pair.right} onPick={() => choose(pair.right!)} disabled={choosing} />
+              <Poster item={pair.left} onPick={() => choose(pair.left!, pair.right!)} disabled={choosing} />
+              <Poster item={pair.right} onPick={() => choose(pair.right!, pair.left!)} disabled={choosing} />
             </div>
           </div>
         )}

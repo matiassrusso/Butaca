@@ -80,10 +80,11 @@ class PairwiseMatchResponse(BaseModel):
 
 
 class PairwiseChoiceRequest(BaseModel):
-    # solo el ganador se persiste -- elegir A sobre B es señal de "preferís
-    # A", no evidencia de que B te haya disgustado.
+    # ambos títulos ya vienen del historial del usuario (ver /games/pairwise)
+    # con un rating real propio -- esto no persiste un rating nuevo, solo la
+    # preferencia relativa (winner sobre loser) para desempatar más adelante.
     winner_title: str = Field(min_length=1, max_length=300)
-    winner_tmdb_id: int | None = None
+    loser_title: str = Field(min_length=1, max_length=300)
 
 
 class TriviaQuestion(BaseModel):

@@ -215,10 +215,20 @@ def _profile_signals(profile: dict | None) -> tuple[set[str], set[str], int | No
     return directors, actors, top_decade
 
 
-def _find_reference_title(ratings: list[RatedItem], matched_tags: set[str]) -> str | None:
+def _find_reference_title(
+    ratings: list[RatedItem], matched_tags: set[str], win_counts: dict[str, int] | None = None
+) -> str | None:
     # names the specific title from the user's own history that justifies
-    # the match, so the "why" reads as tied to their taste, not a template
-    loved = sorted((item for item in ratings if item.rating >= 4), key=lambda i: i.rating, reverse=True)
+    # the match, so the "why" reads as tied to their taste, not a template.
+    # Ties in rating (common among 5-star favorites) break by wins in the
+    # "¿cuál te gustó más?" game instead of arbitrary insertion order —
+    # pedido de Matías (2026-08-03): esa comparación tiene que significar algo.
+    wins = win_counts or {}
+    loved = sorted(
+        (item for item in ratings if item.rating >= 4),
+        key=lambda i: (i.rating, wins.get(_normalize(i.title), 0)),
+        reverse=True,
+    )
     for item in loved:
         if positive_tags_from_text(item.review) & matched_tags:
             return item.title
@@ -364,6 +374,7 @@ def recommend(
     limit: int = 6,
     min_score: int = MIN_MATCH_SCORE,
     extra_phrases: dict[str, str] | None = None,
+    pairwise_win_counts: dict[str, int] | None = None,
 ) -> RecommendResponse:
     taste_ratings = ratings if preference_ratings is None else preference_ratings
     positive_tags, negative_tags = _collect_preference_tags(taste_ratings)
@@ -476,7 +487,7 @@ def recommend(
         matched_genre = tags & required_any_tags if required_any_tags else set()
 
         if matched_positive:
-            reference = _find_reference_title(taste_ratings, matched_positive)
+            reference = _find_reference_title(taste_ratings, matched_positive, pairwise_win_counts)
             # cap how many tags get named: a broad taste profile can match
             # most of a movie's tags at once, and citing all of them reads as
             # a generic tag dump instead of a specific reason

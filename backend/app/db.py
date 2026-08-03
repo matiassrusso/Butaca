@@ -81,6 +81,20 @@ CREATE TABLE IF NOT EXISTS rated_items (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- juego "¿cuál te gustó más?": solo compara títulos que el usuario YA vio y
+-- puntuó (nunca inventa un "vista" falso). Elegir un ganador no le pone un
+-- rating nuevo -- ambos ya tienen uno real -- sino que queda como preferencia
+-- relativa, usada por recommender._find_reference_title para desempatar
+-- entre "amados" con el mismo rating (bug + rediseño reportados por Matías,
+-- 2026-08-03).
+CREATE TABLE IF NOT EXISTS pairwise_preferences (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    winner_title TEXT NOT NULL,
+    loser_title TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS recommendation_sessions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id),
@@ -210,6 +224,14 @@ CREATE TABLE IF NOT EXISTS rated_items (
     watched_date TEXT NOT NULL DEFAULT '',
     source TEXT NOT NULL DEFAULT 'import',
     tmdb_id INTEGER,
+    created_at TEXT NOT NULL DEFAULT ({_PG_NOW})
+);
+
+CREATE TABLE IF NOT EXISTS pairwise_preferences (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    winner_title TEXT NOT NULL,
+    loser_title TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT ({_PG_NOW})
 );
 
@@ -677,6 +699,26 @@ def save_rated_items(
                 for title, rating, review, watched_date, source, tmdb_id in items
             ],
         )
+
+
+def record_pairwise_preference(user_id: int, winner_title: str, loser_title: str) -> None:
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO pairwise_preferences (user_id, winner_title, loser_title) VALUES (?, ?, ?)",
+            (user_id, winner_title, loser_title),
+        )
+
+
+def get_pairwise_win_counts(user_id: int) -> dict[str, int]:
+    """Cuántas veces ganó cada título (normalizado) en el juego "¿cuál te
+    gustó más?" — usado solo para desempatar entre "amados" con el mismo
+    rating en recommender._find_reference_title, no para el scoring."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT winner_title, COUNT(*) AS wins FROM pairwise_preferences WHERE user_id = ? GROUP BY winner_title",
+            (user_id,),
+        ).fetchall()
+    return {row["winner_title"].strip().lower(): row["wins"] for row in rows}
 
 
 def get_watched_items(user_id: int) -> list[dict]:

@@ -6,9 +6,34 @@ from backend.app.recommender import (
     MIN_MATCH_SCORE,
     PICK_OPTIONS,
     TAG_PHRASES,
+    _find_reference_title,
     capitalize_sentence,
     recommend,
 )
+
+
+def test_find_reference_title_picks_the_first_loved_title_without_win_counts() -> None:
+    # sin señal del juego pairwise, el desempate entre dos "amados" con el
+    # mismo rating es el orden de inserción (comportamiento previo, sin
+    # cambios) -- ver el siguiente test para el desempate real.
+    ratings = [
+        RatedItem(title="Movie A", rating=5.0, review="psychological"),
+        RatedItem(title="Movie B", rating=5.0, review="psychological"),
+    ]
+    assert _find_reference_title(ratings, {"psychological"}) == "Movie A"
+
+
+def test_find_reference_title_breaks_ties_with_pairwise_win_counts() -> None:
+    # pedido de Matías (2026-08-03): el juego "¿cuál te gustó más?" solo
+    # tiene sentido si de verdad afina cuál de dos "amados" empatados se cita
+    # en el why -- acá "Movie B" ganó su ronda pairwise, así que gana el
+    # desempate pese a insertarse después.
+    ratings = [
+        RatedItem(title="Movie A", rating=5.0, review="psychological"),
+        RatedItem(title="Movie B", rating=5.0, review="psychological"),
+    ]
+    win_counts = {"movie b": 1}
+    assert _find_reference_title(ratings, {"psychological"}, win_counts) == "Movie B"
 
 
 def test_recommend_filters_seen_titles_and_prefers_matching_mood() -> None:
