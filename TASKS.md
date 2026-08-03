@@ -403,17 +403,25 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
       superación*, *Space Western*, *Romance con discapacidad*. Ya está
       live en butaca.xyz, nada pendiente de este ítem.
 
-- [ ] **`POST /admin/vibes/recompute` corre sincrónico y tarda minutos** (6,5
+- [x] **`POST /admin/vibes/recompute` corre sincrónico y tarda minutos** (6,5
       min medidos con cuota agotada; con cuota disponible son ~10 min solo de
       esperas de rate limit, más el labeling). Sobre Render es muy probable
       que el request se corte antes de terminar — el job igual persiste todo
       lo que va haciendo, pero el cliente no ve el resultado. Decisión de
       Matías si vale la pena moverlo a background o correrlo como script.
-      **Dato nuevo, no cierra el ítem:** la corrida del 2026-08-03 (ver la
-      task de la semilla sesgada arriba) devolvió 200 sin cortarse, pero fue
-      un caso fácil — `embedded:0`, sin nada nuevo que embeber ni esperas de
-      rate limit. El riesgo de timeout sigue en pie para una corrida que sí
-      tenga que embeber en serio (semilla nueva, cache frío).
+      **Dato nuevo del 2026-08-03:** la corrida de esa fecha (ver la task de
+      la semilla sesgada) devolvió 200 sin cortarse, pero fue un caso
+      fácil — `embedded:0`, sin nada nuevo que embeber ni esperas de rate
+      limit. El riesgo de timeout seguía en pie para una corrida que sí
+      tuviera que embeber en serio.
+      **Resuelto el mismo día — Matías eligió pasarlo a background.** El
+      POST responde al toque con `{"status": "started"}` y el job sigue en
+      un thread aparte; nuevo `GET /admin/vibes/recompute/status` para
+      consultar `running`/`done`/`error`. `_VIBE_RECOMPUTE_LOCK` sigue
+      siendo la única fuente de verdad sobre si hay una corrida en curso,
+      solo cambió quién la libera (el thread, no el endpoint). 3 tests
+      nuevos (con un `threading.Thread` fake que corre sincrónico para
+      poder afirmar el resultado sin sleeps). Commit `af02b4e`.
 
 - [x] **[/recommend debe devolver los mejores matches reales, no completar con películas flojas (feedback 2026-07-31)]** — resuelto 2026-08-02. Causa raíz: `recommender.recommend()` no tenía piso de score a propósito ("we always want a full set of picks... even if some are weak matches"), así que rellenaba hasta 6 con lo que hubiera. Decisión de Matías: piso real en 60 (no solo descartar ≤50), y si eso deja el pool corto, `_finish_recommend` primero pide un pool más grande a TMDb (`fetch_candidates(mood, pages=4)`) antes de resignarse a mostrar menos de 6 — nunca rellena con picks flojos. `/weekly` y `/titles/{id}/verdict` quedan afuera (`min_score=0`): ahí el catálogo es fijo (las semanales de la semana, o el título que el usuario buscó), no hay pool del que elegir. 308 tests (33 nuevos/reescritos en `test_recommender.py`/`test_main.py`).
 
@@ -590,11 +598,14 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
       reusa tal cual para el rating inferido del juego "¿cuál te gustó
       más?" (ver más abajo), con un valor de `source` nuevo que cae del
       lado no-preciso.
-- [ ] **Backlog de Matías repasado el 2026-07-30:**
+- [ ] **Backlog de Matías repasado el 2026-07-30** (limpiado 2026-08-03: de
+      los 6 puntos, 4 ya estaban hechos y sin marcar; solo quedan abiertos
+      los dos que de verdad siguen sin resolver):
       1. [x] Ampliar `KEYWORD_TAG_MAP` — hecho, ver entrada de Done más abajo.
-      2. Typewriter para los "why" de la IA al abrir el poster (ya anotado
-         más abajo, "a diseñar bien antes de implementar").
-      3. Onboarding manual estilo swipe (ya anotado, punto 7 del feedback).
+      2. [x] Typewriter para los "why" al abrir el poster — hecho (sesión
+         2026-07-30, unificado en `PosterCard` el 2026-07-31).
+      3. [x] Onboarding manual estilo swipe — hecho, ver "Punto 7 del
+         feedback" en Done.
       4. Bugs de amigos: 19/20 + ronda 2 ya resueltos; queda el "Load failed"
          de Bauti (despriorizado, sin logs).
       5. [x] Banner "Usar mi perfil" en modo manual — hecho, ver entrada de
