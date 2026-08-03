@@ -149,6 +149,41 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
       `recommender.recommend()`, que es tuyo y lo calibraste a mano, así que
       lo dejo reportado en vez de retocarlo por mi cuenta.
 
+- [ ] **Sección para ir marcando qué películas viste, estilo swipe con
+      títulos random** (idea de Matías, 2026-08-02). Hoy la única forma de
+      alimentar el perfil es el onboarding (una vez) o el import de
+      Letterboxd; falta un lugar donde volver cuando querés y sumar de a
+      poco.
+      **Reusar, no rehacer:** `SwipeRating` (`frontend/src/pages/Recommend.tsx:237`)
+      y `useSwipeCard.ts` ya hacen el drag con póster, y `POST /profile/rate`
+      (`main.py:1373`) ya persiste sin necesitar un `recommendation_id` real.
+      Falta la pantalla propia y de dónde salen los títulos.
+      **Decisión de diseño a tomar primero — "vi / no vi" NO es lo mismo que
+      un rating,** y sirven para cosas distintas:
+      - *vi / no vi* mejora la **exclusión** (no recomendarte algo que ya
+        viste). Útil, pero no mueve el match_score.
+      - *me gustó / no me gustó* alimenta el **perfil de gusto**, que es lo
+        que sube la calidad de los picks.
+      Matías propuso lo primero (derecha = la vi). Si se quiere que además
+      mejore las recomendaciones, el patrón de dos pasos ya está resuelto en
+      `DisagreePanel` (¿la viste? → ¿qué te pareció?) y se puede calcar.
+      **De dónde salen los títulos "random" importa:** `discover` por
+      popularidad te muestra siempre los mismos blockbusters. Mejores
+      fuentes ya disponibles: los 940 títulos clusterizados que quedaron en
+      `title_clusters` (variados por construcción), o `onboarding_titles.py`
+      (39 curados). Idealmente sesgado a lo que el usuario **no** tiene
+      puntuado todavía.
+      Se cruza con la task del techo de 86%: más títulos puntuados = mejor
+      perfil = matches más altos ganados de verdad.
+
+- [ ] **Juegos dentro del sitio** (idea de Matías, 2026-08-02, sin scope
+      todavía). Anotada tal cual para no perderla; hay que definir qué juego
+      antes de estimar nada.
+      El criterio para elegir, cuando se retome: **priorizar los que además
+      generan señal de gusto**, porque ahí el juego se paga solo — entretiene
+      y de paso mejora las recomendaciones, en vez de ser una sección
+      aparte que hay que mantener sin que aporte al motor.
+
 - [ ] **Los match_score no pueden pasar de 86% salvo que matchee el director**
       (reportado por Matías 2026-08-02 mirando sus picks: "deberían darme
       matchrates más altos"). No es percepción: está medido.
