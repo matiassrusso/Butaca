@@ -149,6 +149,35 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
       `recommender.recommend()`, que es tuyo y lo calibraste a mano, así que
       lo dejo reportado en vez de retocarlo por mi cuenta.
 
+- [ ] **Ampliar la semilla de la Fase 4: la muestra está sesgada a anime y
+      cine coreano** (detectado 2026-08-02 mirando el picker ya en
+      producción, pedido de Matías de dejarlo anotado).
+      **Síntoma medido** sobre los 39 movimientos que se ofrecen hoy: 9 son
+      de anime/animación (Anime de acción shonen, Animación contemporánea,
+      Animación japonesa, Animación 3D asiática, Isekai Fantasía, Animación
+      fantástica inclusiva, Anime shonen, Animación cómica contemporánea,
+      Anime escolar sobrenatural) y 4 de cine coreano (contemporáneo, de
+      venganza, de género, Romance con chaebol). **13 de 39 = un tercio del
+      picker.** No hay ni un western, ni terror, ni comedia americana, ni
+      cine de los 70, ni documental más allá de "documental musical".
+      **No es un bug del clustering** — la muestra realmente es así, y por
+      eso el clustering la refleja bien. La causa está en `_seed_titles`
+      (`vibes_clustering.py`): la semilla sale de `tmdb_client.fetch_candidates`
+      sobre `_SEED_MOODS = ("", "action", "funny", "romance", "psychological")`,
+      o sea `discover` de TMDb ordenado por popularidad — y el TV popular de
+      TMDb hoy está dominado por anime y K-drama.
+      **Palancas, de menor a mayor esfuerzo:** sumar sesiones a `_SEED_MOODS`
+      (western, terror, documental, bélica...); subir `pages`; o mezclar en
+      la semilla lo mejor puntuado por década vía discover con
+      `sort_by=vote_average.desc` + `vote_count.gte`, que es lo que ya usa
+      `/weekly` para variedad de épocas (`tmdb_client.WEEKLY_CLASSIC_DECADES`)
+      — esa última es la que más cambiaría el resultado, porque ataca el
+      sesgo de popularidad de raíz en vez de compensarlo con más géneros.
+      **Costo de rehacerlo:** bajo. Los títulos ya embebidos salen de
+      `title_embeddings` sin gastar nada; los nuevos se embeben rápido
+      (NVIDIA hizo 500 en 10s). Lo caro sigue siendo bajar metadata de TMDb
+      (~2 min cada 940 títulos) y el labeling.
+
 - [ ] **`POST /admin/vibes/recompute` corre sincrónico y tarda minutos** (6,5
       min medidos con cuota agotada; con cuota disponible son ~10 min solo de
       esperas de rate limit, más el labeling). Sobre Render es muy probable
