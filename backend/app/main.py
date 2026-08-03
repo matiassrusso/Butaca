@@ -290,10 +290,18 @@ def weekly_picks(user: sqlite3.Row | None = Depends(auth.get_optional_user)) -> 
     heuristic = _adjust_match_scores(heuristic)
 
     if user and ratings and llm_client.is_configured():
-        try:
-            return llm_client.predict_fit(user["id"], ratings, heuristic)
-        except llm_client.LlmError as exc:
-            logger.warning("Weekly LLM prediction failed, falling back to heuristic: %s", exc)
+        # veredicto async (2026-08-03): predict_fit síncrono medía ~7s reales
+        # (llamada a NVIDIA) bloqueando toda la respuesta -- la home se veía
+        # "vacía y de la nada aparece" (reporte de Matías). peek_verdict
+        # devuelve YA lo cacheado sin llamar al LLM; si no hay nada todavía,
+        # se dispara en background (kickoff_verdict, con dedup propio) y se
+        # devuelve el heurístico al toque -- el frontend hace polling hasta
+        # que `refined` da True.
+        cached = llm_client.peek_verdict(user["id"], ratings, heuristic)
+        if cached is not None:
+            cached.refined = True
+            return cached
+        llm_client.kickoff_verdict(user["id"], ratings, heuristic)
 
     return heuristic
 

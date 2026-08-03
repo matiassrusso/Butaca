@@ -16,7 +16,16 @@ type RecommendationSession = {
 // /weekly no persiste sesión — id siempre null a diferencia de /history
 type RecommendResponse = {
   recommendations: (Omit<Recommendation, "id"> & { id: number | null })[];
+  // false en la pasada heurística rápida (fix async 2026-08-03: el LLM real
+  // tarda ~7s, /weekly ya no espera esa llamada para responder) -- true
+  // cuando ya pasó por el veredicto real del LLM.
+  refined?: boolean;
 };
+
+// cuánto y cuántas veces reintentar en silencio hasta que /weekly devuelva
+// refined=true, sin volver a mostrar el skeleton (fix async, 2026-08-03)
+const WEEKLY_POLL_INTERVAL_MS = 2500;
+const WEEKLY_POLL_MAX_ATTEMPTS = 6;
 
 const STEPS = [
   {
@@ -89,6 +98,7 @@ export default function Home() {
   const [selectedRec, setSelectedRec] = useState<Recommendation | null>(null);
   const [feedbackState, setFeedbackState] = useState<Record<number, FeedbackStatus>>({});
   const [weeklyPicks, setWeeklyPicks] = useState<Recommendation[]>([]);
+  const [weeklyLoading, setWeeklyLoading] = useState(true);
   // el typewriter del "why" vive en el modal pero su memoria (qué why ya se
   // animó) tiene que sobrevivir a que el modal se desmonte al cerrarlo, así
   // que la ref vive acá — sin esto la home mostraba el texto completo de una,
@@ -180,20 +190,54 @@ export default function Home() {
   // personaliza match_score/why contra el historial real del usuario.
   useEffect(() => {
     let cancelled = false;
-    fetch(`${API_BASE_URL}/weekly`, token ? { headers: { Authorization: `Bearer ${token}` } } : {})
-      .then((response) => (response.ok ? response.json() : null))
-      .then((body: RecommendResponse | null) => {
+    let pollTimer: ReturnType<typeof setTimeout> | undefined;
+
+    function loadWeekly(): Promise<RecommendResponse | null> {
+      return fetch(`${API_BASE_URL}/weekly`, token ? { headers: { Authorization: `Bearer ${token}` } } : {}).then(
+        (response) => (response.ok ? response.json() : null),
+      );
+    }
+
+    function applyWeekly(body: RecommendResponse) {
+      // sin sesión persistida no hay id real — -1 en vez de null para no
+      // ensanchar el type Recommendation compartido con /recommend, que sí
+      // siempre trae un id válido
+      setWeeklyPicks(body.recommendations.map((rec) => ({ ...rec, id: rec.id ?? -1 })));
+    }
+
+    // fix async (2026-08-03): el veredicto real del LLM tarda ~7s, así que
+    // /weekly ya no espera esa llamada -- devuelve el heurístico al toque
+    // (refined=false) y la termina en background. Acá se pide de nuevo en
+    // silencio cada WEEKLY_POLL_INTERVAL_MS hasta que llegue refined=true
+    // (o se agoten los intentos), sin volver a mostrar el skeleton -- ya
+    // hay algo en pantalla, solo se actualiza el "why"/match_score in situ.
+    function pollUntilRefined(attempt: number) {
+      if (cancelled || attempt >= WEEKLY_POLL_MAX_ATTEMPTS) return;
+      pollTimer = setTimeout(() => {
+        loadWeekly().then((body) => {
+          if (cancelled || !body) return;
+          applyWeekly(body);
+          if (!body.refined) pollUntilRefined(attempt + 1);
+        });
+      }, WEEKLY_POLL_INTERVAL_MS);
+    }
+
+    setWeeklyLoading(true);
+    loadWeekly()
+      .then((body) => {
         if (cancelled || !body) return;
-        // sin sesión persistida no hay id real — -1 en vez de null para no
-        // ensanchar el type Recommendation compartido con /recommend, que
-        // sí siempre trae un id válido
-        setWeeklyPicks(body.recommendations.map((rec) => ({ ...rec, id: rec.id ?? -1 })));
+        applyWeekly(body);
+        if (token && !body.refined) pollUntilRefined(0);
       })
       .catch(() => {
         if (!cancelled) setWeeklyPicks([]);
+      })
+      .finally(() => {
+        if (!cancelled) setWeeklyLoading(false);
       });
     return () => {
       cancelled = true;
+      clearTimeout(pollTimer);
     };
   }, [token]);
 
@@ -297,7 +341,7 @@ export default function Home() {
         </div>
       </div>
 
-      {weeklyPicks.length > 0 && (
+      {(weeklyLoading || weeklyPicks.length > 0) && (
         <section className="max-w-7xl mx-auto px-6 py-24 border-b-2 border-foreground">
           <div className="flex items-baseline gap-4 mb-10">
             <span className="font-mono text-xs px-2 py-1 border border-foreground/20">
@@ -320,22 +364,34 @@ export default function Home() {
               </>
             )}
           </p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
-            {weeklyPicks.map((rec, i) => (
-              <PosterCard
-                key={rec.tmdb_id ?? rec.title}
-                rec={rec}
-                index={i}
-                // sin sesión no hay perfil real detrás del "probablemente te
-                // guste": mostrar score/why sería un dato inventado (mismo
-                // criterio que el why del LLM)
-                showScore={isAuthenticated}
-                onSelect={() => setSelectedRec(rec)}
-              >
-                <PickText rec={rec} />
-              </PosterCard>
-            ))}
-          </div>
+          {weeklyLoading ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="animate-pulse">
+                  <div className="w-full aspect-[2/3] bg-secondary border border-foreground/10" />
+                  <div className="h-3 bg-secondary mt-3 w-3/4" />
+                  <div className="h-3 bg-secondary mt-2 w-1/2" />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
+              {weeklyPicks.map((rec, i) => (
+                <PosterCard
+                  key={rec.tmdb_id ?? rec.title}
+                  rec={rec}
+                  index={i}
+                  // sin sesión no hay perfil real detrás del "probablemente
+                  // te guste": mostrar score/why sería un dato inventado
+                  // (mismo criterio que el why del LLM)
+                  showScore={isAuthenticated}
+                  onSelect={() => setSelectedRec(rec)}
+                >
+                  <PickText rec={rec} />
+                </PosterCard>
+              ))}
+            </div>
+          )}
         </section>
       )}
 

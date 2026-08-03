@@ -1,4 +1,6 @@
 import json
+import threading
+import time
 
 import pytest
 
@@ -13,9 +15,11 @@ def _clear_refine_cache():
     # another test that reuses the same mood/candidates.
     llm_client._REFINE_CACHE.clear()
     llm_client._VERDICT_CACHE.clear()
+    llm_client._INFLIGHT_VERDICTS.clear()
     yield
     llm_client._REFINE_CACHE.clear()
     llm_client._VERDICT_CACHE.clear()
+    llm_client._INFLIGHT_VERDICTS.clear()
 
 
 HEURISTIC = RecommendResponse(
@@ -668,4 +672,93 @@ def test_predict_fit_cache_changes_when_profile_changes(monkeypatch) -> None:
     llm_client.predict_fit(1, [RatedItem(title="Alien", rating=1.5)], HEURISTIC)
     llm_client.predict_fit(1, [RatedItem(title="Alien", rating=4.5)], HEURISTIC)
 
-    assert len(calls) == 2
+    assert len(calls) == 2  # perfil distinto -- no puede reusar la predicción del otro
+
+
+def test_peek_verdict_returns_none_on_cache_miss() -> None:
+    assert llm_client.peek_verdict(1, [], HEURISTIC) is None
+
+
+def test_peek_verdict_returns_the_cached_result_without_calling_the_llm(monkeypatch) -> None:
+    monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        llm_client,
+        "_call_nvidia_with_fallback",
+        lambda prompt, api_key: {"picks": [{"title": "Fake Thriller", "why": "le va a encantar"}]},
+    )
+    llm_client.predict_fit(1, [], HEURISTIC)  # warms the cache
+
+    def fail_if_called(prompt: str, api_key: str) -> dict:
+        raise AssertionError("peek_verdict no debería llamar al LLM")
+
+    monkeypatch.setattr(llm_client, "_call_nvidia_with_fallback", fail_if_called)
+
+    result = llm_client.peek_verdict(1, [], HEURISTIC)
+
+    assert result is not None
+    by_title = {r.title: r.why for r in result.recommendations}
+    assert by_title["Fake Thriller"] == "Le va a encantar"
+
+
+def test_peek_verdict_is_the_final_result_when_everything_was_already_seen() -> None:
+    # nada que predecir -- el "ya la viste" es el resultado final, no hay
+    # nada async pendiente detrás (si no, el frontend de /weekly haría
+    # polling para siempre esperando un `refined` que nunca llega)
+    ratings = [
+        RatedItem(title="Fake Thriller", rating=4.5, review="", source="import"),
+        RatedItem(title="Fake Comedy", rating=1.5, review="", source="import"),
+    ]
+
+    result = llm_client.peek_verdict(1, ratings, HEURISTIC)
+
+    assert result is not None
+    by_title = {r.title: r.why for r in result.recommendations}
+    assert by_title["Fake Thriller"] == "Ya la viste — te encantó."
+
+
+def test_kickoff_verdict_populates_the_cache_in_the_background(monkeypatch) -> None:
+    monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        llm_client,
+        "_call_nvidia_with_fallback",
+        lambda prompt, api_key: {"picks": [{"title": "Fake Thriller", "why": "le va a encantar"}]},
+    )
+
+    assert llm_client.peek_verdict(1, [], HEURISTIC) is None
+    llm_client.kickoff_verdict(1, [], HEURISTIC)
+    # no es _SyncThread -- el thread real puede tardar un toque en arrancar
+    for _ in range(50):
+        if llm_client.peek_verdict(1, [], HEURISTIC) is not None:
+            break
+        time.sleep(0.02)
+
+    result = llm_client.peek_verdict(1, [], HEURISTIC)
+    assert result is not None
+    assert result.recommendations[0].why == "Le va a encantar"
+
+
+def test_kickoff_verdict_deduplicates_concurrent_calls(monkeypatch) -> None:
+    # varios polls de /weekly llegando antes de que el primer background
+    # termine no deberían disparar una llamada nueva a NVIDIA cada uno
+    monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
+    calls: list[int] = []
+    release = threading.Event()
+
+    def slow_call(prompt: str, api_key: str) -> dict:
+        calls.append(1)
+        release.wait(timeout=2)
+        return {"picks": [{"title": "Fake Thriller", "why": "le va a encantar"}]}
+
+    monkeypatch.setattr(llm_client, "_call_nvidia_with_fallback", slow_call)
+
+    llm_client.kickoff_verdict(1, [], HEURISTIC)
+    time.sleep(0.05)  # asegura que el primer thread ya entró a _call_nvidia_with_fallback
+    llm_client.kickoff_verdict(1, [], HEURISTIC)  # mismo user/candidatos/perfil -- debe ser un no-op
+    release.set()
+
+    for _ in range(50):
+        if llm_client.peek_verdict(1, [], HEURISTIC) is not None:
+            break
+        time.sleep(0.02)
+
+    assert len(calls) == 1

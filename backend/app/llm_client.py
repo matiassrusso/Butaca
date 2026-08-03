@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 import unicodedata
 import urllib.request
@@ -47,6 +48,12 @@ _REFINE_CACHE: OrderedDict[tuple, tuple[float, dict]] = OrderedDict()
 # LITERALMENTE las mismas para todos, así que sin el user_id en la clave el
 # segundo usuario que pidiera /weekly recibiría la predicción del primero.
 _VERDICT_CACHE: OrderedDict[tuple[int, tuple, str], tuple[float, dict]] = OrderedDict()
+
+# kickoff_verdict evita disparar dos veces el mismo predict_fit en background
+# -- sin esto, varios polls de /weekly llegando antes de que el primero
+# termine dispararían una llamada nueva a NVIDIA cada uno.
+_INFLIGHT_VERDICTS: set[tuple[int, tuple, str]] = set()
+_INFLIGHT_LOCK = threading.Lock()
 
 
 class LlmError(Exception):
@@ -474,6 +481,65 @@ def _build_verdict_prompt(ratings: list[RatedItem], heuristic: RecommendResponse
     )
 
 
+def _verdict_cache_key(
+    user_id: int, ratings: list[RatedItem], heuristic: RecommendResponse
+) -> tuple[int, tuple, str]:
+    candidates = tuple(
+        rec.tmdb_id if rec.tmdb_id is not None else rec.title.strip().lower()
+        for rec in heuristic.recommendations
+    )
+    return (user_id, candidates, _profile_block(ratings))
+
+
+def _predictable_recs(
+    ratings: list[RatedItem], heuristic: RecommendResponse
+) -> tuple[dict[str, RatedItem], list]:
+    # /weekly no excluye del catálogo lo que el usuario ya puntuó (el set de
+    # 5 es fijo para todos) — así que un candidato puede ser algo que ya
+    # vio. Pedirle al LLM que lo "prediga" igual lo confundía: el prompt le
+    # manda el título como candidato Y como parte de su historial, y
+    # terminaba comparando el título consigo mismo como si fueran dos cosas
+    # distintas (reportado por Matías, 2026-07-31 — caso "The Odyssey"). A
+    # esos se les pone directo un why honesto con el rating real, sin
+    # pasar por el LLM.
+    seen_by_key = {_title_key(item.title): item for item in ratings}
+    predictable = [
+        rec for rec in heuristic.recommendations if _title_key(rec.title) not in seen_by_key
+    ]
+    return seen_by_key, predictable
+
+
+def _apply_verdict_result(
+    ratings: list[RatedItem], heuristic: RecommendResponse, result: dict | None
+) -> RecommendResponse:
+    seen_by_key, _ = _predictable_recs(ratings, heuristic)
+    by_title = {_title_key(rec.title): rec for rec in heuristic.recommendations}
+    updates_by_key: dict[str, dict] = {}
+    for pick in (result or {}).get("picks", []):
+        key = _title_key(str(pick.get("title", "")))
+        if key not in by_title:
+            continue
+        why = capitalize_sentence(str(pick.get("why", "")).strip())
+        if why:
+            rec = by_title[key]
+            updates_by_key[key] = {
+                "why": why,
+                "match_score": _pick_match_score(pick, rec.match_score),
+            }
+
+    recommendations = []
+    for rec in heuristic.recommendations:
+        key = _title_key(rec.title)
+        seen_item = seen_by_key.get(key)
+        if seen_item:
+            updates = {"why": f"Ya la viste — {_rating_label(seen_item.rating)}."}
+        else:
+            updates = updates_by_key.get(key)
+            updates = {**updates, "refined": True} if updates else {}
+        recommendations.append(rec.model_copy(update=updates))
+    return RecommendResponse(taste_summary=heuristic.taste_summary, recommendations=recommendations)
+
+
 def predict_fit(
     user_id: int, ratings: list[RatedItem], heuristic: RecommendResponse
 ) -> RecommendResponse:
@@ -493,24 +559,8 @@ def predict_fit(
     if not heuristic.recommendations:
         raise LlmError("No hay candidatos para opinar.")
 
-    candidates = tuple(
-        rec.tmdb_id if rec.tmdb_id is not None else rec.title.strip().lower()
-        for rec in heuristic.recommendations
-    )
-    cache_key = (user_id, candidates, _profile_block(ratings))
-
-    # /weekly no excluye del catálogo lo que el usuario ya puntuó (el set de
-    # 5 es fijo para todos) — así que un candidato puede ser algo que ya
-    # vio. Pedirle al LLM que lo "prediga" igual lo confundía: el prompt le
-    # manda el título como candidato Y como parte de su historial, y
-    # terminaba comparando el título consigo mismo como si fueran dos cosas
-    # distintas (reportado por Matías, 2026-07-31 — caso "The Odyssey"). A
-    # esos se les pone directo un why honesto con el rating real, sin
-    # pasar por el LLM.
-    seen_by_key = {_title_key(item.title): item for item in ratings}
-    predictable = [
-        rec for rec in heuristic.recommendations if _title_key(rec.title) not in seen_by_key
-    ]
+    cache_key = _verdict_cache_key(user_id, ratings, heuristic)
+    _, predictable = _predictable_recs(ratings, heuristic)
 
     result: dict | None = None
     if predictable:
@@ -537,28 +587,52 @@ def predict_fit(
             while len(_VERDICT_CACHE) > REFINE_CACHE_MAX_ENTRIES:
                 _VERDICT_CACHE.popitem(last=False)
 
-    by_title = {_title_key(rec.title): rec for rec in heuristic.recommendations}
-    updates_by_key: dict[str, dict] = {}
-    for pick in (result or {}).get("picks", []):
-        key = _title_key(str(pick.get("title", "")))
-        if key not in by_title:
-            continue
-        why = capitalize_sentence(str(pick.get("why", "")).strip())
-        if why:
-            rec = by_title[key]
-            updates_by_key[key] = {
-                "why": why,
-                "match_score": _pick_match_score(pick, rec.match_score),
-            }
+    return _apply_verdict_result(ratings, heuristic, result)
 
-    recommendations = []
-    for rec in heuristic.recommendations:
-        key = _title_key(rec.title)
-        seen_item = seen_by_key.get(key)
-        if seen_item:
-            updates = {"why": f"Ya la viste — {_rating_label(seen_item.rating)}."}
-        else:
-            updates = updates_by_key.get(key)
-            updates = {**updates, "refined": True} if updates else {}
-        recommendations.append(rec.model_copy(update=updates))
-    return RecommendResponse(taste_summary=heuristic.taste_summary, recommendations=recommendations)
+
+def peek_verdict(
+    user_id: int, ratings: list[RatedItem], heuristic: RecommendResponse
+) -> RecommendResponse | None:
+    """Devuelve el veredicto YA cacheado sin llamar al LLM ni disparar nada
+    -- para el fix async de /weekly (2026-08-03): la primera visita del día
+    paga los ~7s de la llamada real a NVIDIA una sola vez en background
+    (`kickoff_verdict`); esta función es lo que consultan esa misma request
+    (para saber si ya hay algo) y los polls del frontend que le siguen."""
+    if not heuristic.recommendations:
+        return None
+    _, predictable = _predictable_recs(ratings, heuristic)
+    if not predictable:
+        # nada que predecir -- todos los picks ya los vio, el resultado
+        # "ya la viste" es el final, no hay nada async pendiente
+        return _apply_verdict_result(ratings, heuristic, None)
+    cache_key = _verdict_cache_key(user_id, ratings, heuristic)
+    cached = _VERDICT_CACHE.get(cache_key)
+    if cached is None:
+        return None
+    expires_at, cached_result = cached
+    if expires_at <= _now_monotonic():
+        return None
+    return _apply_verdict_result(ratings, heuristic, cached_result)
+
+
+def kickoff_verdict(user_id: int, ratings: list[RatedItem], heuristic: RecommendResponse) -> None:
+    """Dispara predict_fit en un thread de background si no hay uno ya
+    corriendo para la misma clave (dedup vía _INFLIGHT_VERDICTS) -- así
+    varios polls seguidos de /weekly antes de que el primero termine no
+    disparan una llamada nueva a NVIDIA cada uno."""
+    cache_key = _verdict_cache_key(user_id, ratings, heuristic)
+    with _INFLIGHT_LOCK:
+        if cache_key in _INFLIGHT_VERDICTS:
+            return
+        _INFLIGHT_VERDICTS.add(cache_key)
+
+    def _run() -> None:
+        try:
+            predict_fit(user_id, ratings, heuristic)
+        except LlmError as exc:
+            logger.warning("Background weekly verdict failed: %s", exc)
+        finally:
+            with _INFLIGHT_LOCK:
+                _INFLIGHT_VERDICTS.discard(cache_key)
+
+    threading.Thread(target=_run, daemon=True).start()

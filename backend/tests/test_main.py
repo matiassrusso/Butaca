@@ -3,7 +3,7 @@ import zipfile
 
 from fastapi.testclient import TestClient
 
-from backend.app import db, letterboxd_scrape, onboarding_titles, vibes_clustering
+from backend.app import db, letterboxd_scrape, llm_client, onboarding_titles, vibes_clustering
 from backend.app.llm_client import LlmError
 from backend.app.main import (
     TASTE_TAG_LOOKUP_CAP,
@@ -2464,28 +2464,46 @@ def test_weekly_keeps_all_five_even_when_user_already_rated_one(monkeypatch) -> 
 
 
 def test_weekly_uses_llm_prediction_when_configured(monkeypatch) -> None:
+    # fix async (2026-08-03): predict_fit síncrono medía ~7s reales (llamada
+    # a NVIDIA) bloqueando /weekly entero -- la home se veía "vacía y de la
+    # nada aparece" (reporte de Matías). Ahora la primera pasada devuelve el
+    # heurístico al toque (refined=False) mientras el LLM corre en
+    # background; la pasada siguiente lo encuentra cacheado (refined=True).
     monkeypatch.setenv("TMDB_API_KEY", "fake-key")
     monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
     monkeypatch.setattr(
         "backend.app.main.tmdb_client.fetch_weekly_trending", lambda: _WEEKLY_TRENDING
     )
+    # mockear _call_nvidia_with_fallback (no predict_fit entero) para que el
+    # predict_fit REAL corra -- si se mockea predict_fit directo, el cacheo
+    # que hace (_VERDICT_CACHE) nunca pasa, y peek_verdict nunca encuentra
+    # nada en la segunda pasada (bug real de este test, encontrado corriéndolo)
     monkeypatch.setattr(
-        "backend.app.main.llm_client.predict_fit",
-        lambda user_id, ratings, heuristic: heuristic.model_copy(
-            update={
-                "recommendations": [
-                    r.model_copy(update={"why": "predicción del LLM"}) for r in heuristic.recommendations
-                ]
-            }
-        ),
+        "backend.app.llm_client._call_nvidia_with_fallback",
+        lambda prompt, api_key: {
+            "picks": [{"title": t["title"], "why": "Predicción del LLM"} for t in _WEEKLY_TRENDING]
+        },
     )
     headers = _auth_headers("weeklyllm")
     client.post("/recommend/manual", headers=headers, json={"ratings": _MANUAL_RATINGS})
 
-    response = client.get("/weekly", headers=headers)
+    # kickoff_verdict corre en un thread real -- parchearlo para que llame a
+    # predict_fit sincrónico deja el test determinístico sin tocar el
+    # threading.Thread global (weekly_picks() usa un ThreadPoolExecutor real
+    # para otra cosa -- enriquecer tags -- que un patch global rompería)
+    monkeypatch.setattr(
+        "backend.app.main.llm_client.kickoff_verdict",
+        lambda user_id, ratings, heuristic: llm_client.predict_fit(user_id, ratings, heuristic),
+    )
 
-    assert response.status_code == 200
-    assert all(r["why"] == "predicción del LLM" for r in response.json()["recommendations"])
+    first = client.get("/weekly", headers=headers)
+    assert first.status_code == 200
+    assert first.json()["refined"] is False
+
+    second = client.get("/weekly", headers=headers)
+    assert second.status_code == 200
+    assert second.json()["refined"] is True
+    assert all(r["why"] == "Predicción del LLM" for r in second.json()["recommendations"])
 
 
 def test_weekly_falls_back_to_heuristic_when_llm_fails(monkeypatch) -> None:
@@ -2502,10 +2520,22 @@ def test_weekly_falls_back_to_heuristic_when_llm_fails(monkeypatch) -> None:
     headers = _auth_headers("weeklyllmfail")
     client.post("/recommend/manual", headers=headers, json={"ratings": _MANUAL_RATINGS})
 
+    # ver comentario en test_weekly_uses_llm_prediction_when_configured -- acá
+    # además hay que replicar el try/except que kickoff_verdict hace en su
+    # thread real, si no el LlmError se escapa sin capturar
+    def sync_kickoff(user_id, ratings, heuristic):
+        try:
+            llm_client.predict_fit(user_id, ratings, heuristic)
+        except LlmError:
+            pass
+
+    monkeypatch.setattr("backend.app.main.llm_client.kickoff_verdict", sync_kickoff)
+
     response = client.get("/weekly", headers=headers)
 
     assert response.status_code == 200
     assert len(response.json()["recommendations"]) == 5
+    assert response.json()["refined"] is False
 
 
 class _SyncThread:
