@@ -394,10 +394,9 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
       movies y series de exploration, igual que profile/series. Test de
       regresión (`..._enriches_exploration_series_past_the_movie_cap`, falla
       con el código viejo, validado reintroduciéndolo a propósito). 230 tests.
-- [ ] **Otra palanca pendiente: subir `CREDITS_ENRICH_CAP`** (hoy 20) — la
-      exploration ya se enriquece, pero sigue acotada al mismo cap que
-      profile/series. Falta ver en producción si con esto solo ya sube la
-      visibilidad o si además hace falta subir el cap.
+- [x] **~~Subir `CREDITS_ENRICH_CAP`~~ — ya está hecho.** Entrada duplicada
+      que quedó abierta por error: decía "hoy 20" pero el código tiene 30
+      desde el 2026-07-30 (ver la entrada cerrada más abajo).
 - [x] **Ampliar `KEYWORD_TAG_MAP` (2026-07-30)** — 9 strings nuevos, todos
       re-verificados contra el buscador público de keywords de TMDb
       (`themoviedb.org/search/keyword?query=...`) antes de sumarlos. Reusan
@@ -431,11 +430,13 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
       y se sumó una no-semilla (Pulp Fiction) en la misma sesión, contador a
       "11 / 10". Test nuevo
       (`test_onboarding_titles_merges_previously_rated_titles`). 232 tests.
-- [ ] **Ideas descartadas de la línea Flick, por si se retoman:** embeddings +
-      Leiden clustering real, o embeddings + k-means/coseno. Ambas resuelven
-      *descubrir* una taxonomía desconocida y necesitan corpus de reviews en
-      volumen; Butaca no lo tiene (TMDb `/reviews` es escaso, Letterboxd da 403
-      desde datacenter). El activo propio de largo plazo es otro: cuando haya
+- [x] **~~Ideas descartadas de la línea Flick~~ — embeddings + Leiden SE HIZO
+      (Fase 4, 2026-08-02, commit `fc3b2e3`).** Esta entrada quedó al revés y
+      se corrige acá para que no confunda: lo que era inviable era clusterizar
+      **reseñas** (ahí sí falta corpus). Clusterizar **metadata** —sinopsis,
+      keywords, géneros, director, reparto— no necesita reseñas y es lo que
+      está corriendo en producción hoy. Lo de abajo sigue valiendo solo para
+      la variante de reseñas. El activo propio de largo plazo es otro: cuando haya
       cientos de usuarios reales, `rated_items` guarda qué pelis puntúan juntas
       *nuestros* usuarios — data que ni TMDb ni Letterboxd tienen y que Butaca
       genera sola. Hoy no hay escala para que sirva.
