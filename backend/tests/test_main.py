@@ -1781,73 +1781,142 @@ def test_trivia_question_requires_auth() -> None:
     assert client.get("/games/trivia").status_code == 401
 
 
-def test_trivia_question_builds_a_year_question_when_directors_are_unavailable(monkeypatch) -> None:
+def test_trivia_question_builds_a_year_question_from_a_watched_title(monkeypatch) -> None:
+    # rediseño 2026-08-03 (pedido de Matías): el título preguntado (subject)
+    # tiene que ser algo que el usuario YA vio, no cualquier película -- los
+    # distractores sí pueden ser de cualquiera.
+    from backend.app import main as main_module
+
     monkeypatch.setenv("TMDB_API_KEY", "fake-key")
-    monkeypatch.setattr("backend.app.main.random.random", lambda: 0.9)  # fuerza "year"
+    monkeypatch.setattr(main_module, "TRIVIA_BUILDERS", (main_module._year_trivia_question,))
     monkeypatch.setattr(
+        "backend.app.main.tmdb_client.search_title",
+        lambda title, year=None: {"tmdb_id": 1, "title": title, "year": 1999, "kind": "movie", "poster_path": None},
+    )
+    monkeypatch.setattr(
+        # 6 = TRIVIA_OPTION_COUNT + 2, para no disparar el relleno de
+        # onboarding_titles.py (que con este mock resolvería todo a
+        # tmdb_id=1/año 1999 y ahogaría los distractores controlados)
         "backend.app.main.db.get_random_cluster_keys",
-        lambda limit: [(1, "movie"), (2, "movie"), (3, "movie"), (4, "movie"), (5, "movie")],
+        lambda limit: [(n, "movie") for n in range(2, 8)],
     )
     monkeypatch.setattr(
         "backend.app.main.tmdb_client.fetch_title_by_id",
         lambda tmdb_id, kind="movie": {
-            "tmdb_id": tmdb_id, "title": f"Movie {tmdb_id}", "year": 2000 + tmdb_id, "kind": "movie",
+            "tmdb_id": tmdb_id, "title": f"Other {tmdb_id}", "year": 1990 + tmdb_id, "kind": "movie",
             "poster_path": None,
         },
     )
     headers = _auth_headers("triviayear")
+    user_id = db.get_user_by_username("triviayear")["id"]
+    db.save_rated_items(user_id, [("My Movie", 4.5, "", "", "import", None)])
 
     response = client.get("/games/trivia", headers=headers)
 
     assert response.status_code == 200
     body = response.json()
     assert body is not None
+    assert body["title"] == "My Movie"  # el título vino de lo que el usuario vio, no de "Other N"
+    assert body["correct_answer"] == "1999"
     assert body["correct_answer"] in body["options"]
     assert len(set(body["options"])) == 4
     assert "año" in body["question"]
 
 
 def test_trivia_question_builds_a_director_question(monkeypatch) -> None:
+    from backend.app import main as main_module
+
     monkeypatch.setenv("TMDB_API_KEY", "fake-key")
-    monkeypatch.setattr("backend.app.main.random.random", lambda: 0.1)  # fuerza "director"
+    monkeypatch.setattr(main_module, "TRIVIA_BUILDERS", (main_module._director_trivia_question,))
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.search_title",
+        lambda title, year=None: {"tmdb_id": 1, "title": title, "year": 1999, "kind": "movie", "poster_path": None},
+    )
     monkeypatch.setattr(
         "backend.app.main.db.get_random_cluster_keys",
-        lambda limit: [(1, "movie"), (2, "movie"), (3, "movie"), (4, "movie"), (5, "movie")],
+        lambda limit: [(n, "movie") for n in range(2, 8)],
     )
     monkeypatch.setattr(
         "backend.app.main.tmdb_client.fetch_title_by_id",
         lambda tmdb_id, kind="movie": {
-            "tmdb_id": tmdb_id, "title": f"Movie {tmdb_id}", "year": 2000, "kind": "movie",
-            "poster_path": None,
+            "tmdb_id": tmdb_id, "title": f"Other {tmdb_id}", "year": 2000, "kind": "movie", "poster_path": None,
         },
     )
-    directors = {1: "Director A", 2: "Director B", 3: "Director C", 4: "Director D", 5: "Director E"}
+    directors = {
+        1: "Director A", 2: "Director B", 3: "Director C", 4: "Director D",
+        5: "Director E", 6: "Director F", 7: "Director G",
+    }
     monkeypatch.setattr(
         "backend.app.main.tmdb_client.fetch_taste_credits",
         lambda tmdb_id, kind="movie": {"director": directors[tmdb_id], "actors": []},
     )
     headers = _auth_headers("triviadirector")
+    user_id = db.get_user_by_username("triviadirector")["id"]
+    db.save_rated_items(user_id, [("My Movie", 4.5, "", "", "import", None)])
 
     response = client.get("/games/trivia", headers=headers)
 
     assert response.status_code == 200
     body = response.json()
     assert body is not None
-    # _unwatched_candidate_pool mezcla el orden, así que el "subject" no es
-    # siempre tmdb_id=1 -- solo importa que sea uno de los directores reales
-    # y que coincida con el título de la pregunta.
-    assert body["correct_answer"] in directors.values()
+    assert body["title"] == "My Movie"
+    assert body["correct_answer"] == "Director A"
     assert body["correct_answer"] in body["options"]
     assert len(set(body["options"])) == 4
-    assert body["title"] in body["question"]
     assert "dirigió" in body["question"]
 
 
-def test_trivia_question_returns_none_when_pool_never_has_enough_options(monkeypatch) -> None:
+def test_trivia_question_builds_an_actor_question(monkeypatch) -> None:
+    from backend.app import main as main_module
+
     monkeypatch.setenv("TMDB_API_KEY", "fake-key")
-    monkeypatch.setattr("backend.app.main.db.get_random_cluster_keys", lambda limit: [(1, "movie")])
-    monkeypatch.setattr("backend.app.main.onboarding_titles.ONBOARDING_TITLES", [])
-    headers = _auth_headers("trivianopool")
+    monkeypatch.setattr(main_module, "TRIVIA_BUILDERS", (main_module._actor_trivia_question,))
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.search_title",
+        lambda title, year=None: {"tmdb_id": 1, "title": title, "year": 1999, "kind": "movie", "poster_path": None},
+    )
+    monkeypatch.setattr(
+        "backend.app.main.db.get_random_cluster_keys",
+        lambda limit: [(n, "movie") for n in range(2, 8)],
+    )
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.fetch_title_by_id",
+        lambda tmdb_id, kind="movie": {
+            "tmdb_id": tmdb_id, "title": f"Other {tmdb_id}", "year": 2000, "kind": "movie", "poster_path": None,
+        },
+    )
+    credits_by_id = {
+        1: {"director": "X", "actors": ["Lead Actor", "Second Actor"]},
+        2: {"director": "X", "actors": ["Distractor A"]},
+        3: {"director": "X", "actors": ["Distractor B"]},
+        4: {"director": "X", "actors": ["Distractor C"]},
+        5: {"director": "X", "actors": ["Distractor D"]},
+        6: {"director": "X", "actors": ["Distractor E"]},
+        7: {"director": "X", "actors": ["Distractor F"]},
+    }
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.fetch_taste_credits",
+        lambda tmdb_id, kind="movie": credits_by_id[tmdb_id],
+    )
+    headers = _auth_headers("triviaactor")
+    user_id = db.get_user_by_username("triviaactor")["id"]
+    db.save_rated_items(user_id, [("My Movie", 4.5, "", "", "import", None)])
+
+    response = client.get("/games/trivia", headers=headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body is not None
+    assert body["correct_answer"] == "Lead Actor"
+    assert body["correct_answer"] in body["options"]
+    # "Second Actor" (también del reparto real) nunca puede colarse como
+    # distractor -- sería, sin querer, otra respuesta válida.
+    assert "Second Actor" not in body["options"]
+    assert "actuó" in body["question"]
+
+
+def test_trivia_question_returns_none_without_any_watched_titles() -> None:
+    headers = _auth_headers("trivianowatched")
 
     response = client.get("/games/trivia", headers=headers)
 

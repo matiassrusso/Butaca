@@ -268,6 +268,31 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
       director real con distractores reales, ambas con feedback correcto/
       incorrecto y avance a la siguiente.
 
+      **Rediseñada 2026-08-03 tras feedback de Matías** ("deberían ser sobre
+      las películas que viste" + "la pregunta es siempre la misma: en qué
+      año salió, tendría que haber preguntas más difíciles, o más centradas
+      en la película"). Dos cambios, no uno:
+      1. **El título preguntado (subject) ahora sale del historial VISTO del
+         usuario** (`db.get_watched_items`, resuelto contra TMDb igual que
+         `/onboarding/titles`), no de cualquier película — reconocer algo
+         que viste es lo que la hace entretenida. Los distractores sí
+         pueden ser de cualquier película real (confirmado por Matías), así
+         que siguen saliendo de `_unwatched_candidate_pool`.
+      2. **Variedad y dificultad:** se sumó un tercer tipo de pregunta,
+         **actor** (`_actor_trivia_question`, usa `fetch_taste_credits` que
+         ya se pedía para director — sin costo extra de requests), elegido
+         al azar entre los 3 tipos con la misma probabilidad. Los
+         distractores de año ahora son los más **cercanos** al año real
+         (`sorted(..., key=lambda year: abs(year - correcto))`) en vez de
+         arbitrarios, para que no se adivinen por descarte.
+      3 tests reescritos + 1 nuevo (actor), 367 tests en total.
+      **Verificado end-to-end en el dev server local:** pregunta de
+      director sobre "Bound by Honor" (ya puntuada), pregunta de actor
+      sobre "Die Hard" (Bruce Willis correcto entre 4 actores reales),
+      pregunta de director sobre "Dou kyu sei – Classmates" — las tres
+      sobre títulos que de verdad estaban en el historial de la cuenta de
+      prueba, no sobre cualquier película.
+
 - [x] **Los match_score no pueden pasar de 86% salvo que matchee el director**
       (reportado por Matías 2026-08-02 mirando sus picks: "deberían darme
       matchrates más altos"). No es percepción: está medido.

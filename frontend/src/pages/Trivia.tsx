@@ -5,7 +5,10 @@ import { useLocation } from "wouter";
 import { PageTransition } from "@/components/PageTransition";
 import { API_BASE_URL, useAuth } from "@/hooks/useAuth";
 
-// Trivia de cine (idea de Matías, 2026-08-02) -- puro entretenimiento, no
+// Trivia de cine (idea de Matías, 2026-08-02, rediseñada 2026-08-03: la
+// película preguntada ahora sale de tu propio historial visto, no de
+// cualquiera -- reconocer algo que viste es lo que la hace entretenida) --
+// puro entretenimiento igual, no
 // toca el perfil de gusto (a diferencia del juego pairwise): el puntaje
 // vive solo en este componente, se pierde al salir de la página a propósito.
 type Question = {
@@ -74,7 +77,7 @@ export default function Trivia() {
             Trivia de <span className="text-accent italic font-serif normal-case tracking-normal">cine</span>
           </h1>
           <p className="font-mono text-xs text-muted-foreground mt-4">
-            Puro entretenimiento -- esto no toca tu perfil de gusto.
+            Sobre pelis y series que ya viste. Puro entretenimiento -- esto no toca tu perfil de gusto.
           </p>
         </header>
 
@@ -92,7 +95,7 @@ export default function Trivia() {
         {!loading && !error && !question && (
           <div className="p-10 border-2 border-dashed border-foreground/20 text-center">
             <h2 className="text-2xl font-black uppercase tracking-tighter mb-2">
-              No hay suficientes pelis sin puntuar para armar una pregunta.
+              Necesitás tener pelis puntuadas (y variedad de otras en el catálogo) para armar una pregunta.
             </h2>
             <button
               onClick={loadQuestion}

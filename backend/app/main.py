@@ -1376,12 +1376,16 @@ def pairwise_choose(
 
 
 def _year_trivia_question(subject: dict, others: list[dict]) -> TriviaQuestion | None:
-    distractor_years = {
-        item["year"] for item in others if item.get("year") and item["year"] != subject.get("year")
-    }
+    distractor_years = sorted(
+        {item["year"] for item in others if item.get("year") and item["year"] != subject.get("year")},
+        # más difícil que un distractor cualquiera: los años más CERCANOS al
+        # real (pedido de Matías, 2026-08-03: "tendría que haber preguntas
+        # más difíciles") no se pueden descartar por ser obviamente lejanos.
+        key=lambda year: abs(year - subject["year"]),
+    )
     if not subject.get("year") or len(distractor_years) < TRIVIA_OPTION_COUNT - 1:
         return None
-    options = [str(subject["year"])] + [str(y) for y in list(distractor_years)[: TRIVIA_OPTION_COUNT - 1]]
+    options = [str(subject["year"])] + [str(y) for y in distractor_years[: TRIVIA_OPTION_COUNT - 1]]
     random.shuffle(options)
     return TriviaQuestion(
         title=subject["title"],
@@ -1420,20 +1424,66 @@ def _director_trivia_question(subject: dict, others: list[dict]) -> TriviaQuesti
     )
 
 
+def _actor_trivia_question(subject: dict, others: list[dict]) -> TriviaQuestion | None:
+    """Más centrada en la propia película que año/director (pedido de
+    Matías, 2026-08-03) -- hay que reconocer el reparto, no solo un dato de
+    ficha técnica."""
+
+    def _actors_of(item: dict) -> list[str]:
+        try:
+            return tmdb_client.fetch_taste_credits(item["tmdb_id"], kind=item.get("kind", "movie")).get("actors") or []
+        except tmdb_client.TmdbError:
+            return []
+
+    subject_actors = _actors_of(subject) if subject.get("tmdb_id") else []
+    if not subject_actors:
+        return None
+    correct = subject_actors[0]
+
+    with ThreadPoolExecutor(max_workers=taste_profile.MATCH_WORKERS) as pool:
+        other_actors = list(pool.map(_actors_of, others))
+    # se excluye TODO el reparto propio, no solo `correct`: un distractor que
+    # también actuó en la película sería, sin querer, otra respuesta válida.
+    distractors = {a for actors in other_actors for a in actors} - set(subject_actors)
+    if len(distractors) < TRIVIA_OPTION_COUNT - 1:
+        return None
+
+    options = [correct] + list(distractors)[: TRIVIA_OPTION_COUNT - 1]
+    random.shuffle(options)
+    return TriviaQuestion(
+        title=subject["title"],
+        poster_path=subject.get("poster_path"),
+        question=f'¿Quién actuó en "{subject["title"]}"?',
+        options=options,
+        correct_answer=correct,
+    )
+
+
+TRIVIA_BUILDERS = (_year_trivia_question, _director_trivia_question, _actor_trivia_question)
+
+
 def _build_trivia_question(user_id: int) -> TriviaQuestion | None:
     """Puro entretenimiento (Matías la pidió sabiendo que no genera señal de
-    gusto, a diferencia de "¿cuál te gustó más?"). "year" es más robusto (ya
-    viene resuelto, sin request extra) que "director" (necesita credits de
-    varios títulos y puede no alcanzar distractores distintos) — se
-    reintenta con un pool random nuevo en cada intento en vez de fallar en
-    silencio ante un pool desfavorable puntual."""
+    gusto, a diferencia de "¿cuál te gustó más?"). El título preguntado
+    (subject) sale del propio historial visto del usuario -- reconocer algo
+    que viste es lo que hace la trivia entretenida, a diferencia de adivinar
+    sobre una película cualquiera (pedido de Matías, 2026-08-03). Los
+    distractores sí pueden ser de cualquier película real (confirmado por
+    Matías), así que salen del pool general de _unwatched_candidate_pool.
+    Se reintenta con un subject/pool nuevos en cada intento en vez de fallar
+    en silencio ante una combinación puntual sin distractores suficientes."""
+    watched = db.get_watched_items(user_id)
+    if not watched:
+        return None
     for _ in range(TRIVIA_ATTEMPTS):
-        pool = _unwatched_candidate_pool(user_id, TRIVIA_OPTION_COUNT + 1)
-        if len(pool) < TRIVIA_OPTION_COUNT + 1:
+        subject_row = random.choice(watched)
+        subject = _resolve_watched_title(subject_row)
+        if not subject or not subject.get("year"):
             continue
-        subject, *others = pool
-        builder = _director_trivia_question if random.random() < 0.4 else _year_trivia_question
-        question = builder(subject, others)
+        others = _unwatched_candidate_pool(user_id, TRIVIA_OPTION_COUNT + 2)
+        if len(others) < TRIVIA_OPTION_COUNT - 1:
+            continue
+        question = random.choice(TRIVIA_BUILDERS)(subject, others)
         if question is not None:
             return question
     return None
@@ -1441,10 +1491,11 @@ def _build_trivia_question(user_id: int) -> TriviaQuestion | None:
 
 @app.get("/games/trivia", response_model=TriviaQuestion | None)
 def trivia_question(user: sqlite3.Row = Depends(auth.get_current_user)) -> TriviaQuestion | None:
-    """Trivia de director/año sobre títulos del mismo pool que
-    /titles/swipe-batch. None cuando no se pudo armar una pregunta con
-    distractores reales suficientes (pool muy chico) -- el frontend lo trata
-    igual que el pool agotado del pairwise, ofreciendo reintentar."""
+    """Trivia de año/director/actor sobre un título que el usuario YA vio,
+    con distractores de cualquier película real. None cuando no se pudo
+    armar una pregunta con distractores suficientes (historial muy chico) --
+    el frontend lo trata igual que el pool agotado del pairwise, ofreciendo
+    reintentar."""
     return _build_trivia_question(user["id"])
 
 
