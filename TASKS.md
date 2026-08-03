@@ -33,6 +33,38 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
 
 ## Pending
 
+- [ ] **[wow-features-2026-08-03] Tres features "para asombrarse", aprobadas
+      por Matías** — pidió "opciones interactivas... para divertirse, o para
+      asombrarse con la producción que tiene la página detrás". Se investigaron
+      sus otros proyectos del AI Brain y referencias externas; de las 3
+      propuestas dijo *"esas 3 me gustan, le agregaría más cosas, pero para
+      arrancar va bien"*. **Falta que defina qué más sumar y por cuál arrancar.**
+      1. **Mapa interactivo del universo de pelis** — proyectar los 940
+         embeddings de la Fase 4 (hoy invisibles, solo trabajan en el backend)
+         en un mapa 2D explorable con las propias resaltadas. Misma técnica que
+         usan herramientas reales de embeddings (t-SNE/UMAP + Plotly). Es lo
+         que más "muestra la producción de atrás" porque expone ML que ya
+         está construido. Inspirado en la vista táctica pendiente de BalonPie.
+      2. **"Tu año en Butaca"** — resumen compartible estilo Letterboxd Wrapped
+         (verificado: es una feature real y conocida), pero con el ángulo
+         propio de Butaca: evolución del match_score, qué movimientos de vibras
+         te definen, tu perfil de gusto.
+      3. **Chat con tu perfil de gusto** — inspirado directo en el "clon
+         conversacional" de ¿Quién Mató El Grupo?. Reusa `llm_client` +
+         `taste_profile` que ya existen, pero como charla libre en vez del
+         wizard rígido de hoy.
+
+- [ ] **[swipe-latency-2026-08-03] Vigilar el costo del escaneo profundo de
+      "puntuar más"** — `SWIPE_POPULAR_MAX_PAGES` pasó de 15 a 40 para matar el
+      muro permanente. En el caso normal corta en la 1ª o 2ª página, pero si el
+      pool está realmente agotado son hasta **40 requests secuenciales a TMDb
+      en un solo pedido (~18s), y 80 si se elige "Ambas"** — en Render free eso
+      puede rozar el timeout. No se tocó porque el muro era el problema real y
+      esto es el caso raro; si aparece en producción, la salida es paralelizar
+      las páginas o bajar el tope y aceptar tandas más chicas. Ojo también con
+      el borde lejano: TMDb corta en la página 500, y ahí el cursor deja de
+      avanzar y se gastan 40 requests fallidos por llamada.
+
 - [x] **[Fase 4: vibes por clustering real (embeddings + Leiden), 2026-08-02]**
       — arrancada por Codex (todo el pipeline: tablas, `vibes_clustering.py`,
       endpoint admin, `extra_phrases`, tests), cerrada por Claude el mismo día
@@ -1010,6 +1042,58 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
 (vacío)
 
 ## Done
+
+- [x] **[weekly-async-2026-08-03] `/weekly` sacado del camino crítico del LLM**
+      | owner: claude | La home se veía vacía unos segundos y "de la nada
+      aparecía". **Medido, no estimado:** `/weekly` en frío tardaba **7,3s**
+      contra la API real de NVIDIA porque `predict_fit` corría sincrónico y
+      bloqueaba la respuesta entera. Ahora `peek_verdict` devuelve lo ya
+      cacheado sin llamar al LLM; si no hay nada, `kickoff_verdict` lo dispara
+      en un thread (con dedup por clave, para que varios polls no gatillen una
+      llamada nueva cada uno) y se responde el heurístico al toque. El frontend
+      hace polling silencioso cada 2,5s (hasta 6 intentos) hasta que `refined`
+      da `True`, y actualiza las cards in situ sin volver al skeleton. Se
+      **reusó** `RecommendResponse.refined`, que ya existía con esa semántica y
+      `/weekly` nunca seteaba. De paso, la home ahora muestra un skeleton en
+      vez de no renderizar la sección hasta tener datos (era la mitad de la
+      sensación de "no pasa nada") | archivos: `backend/app/{llm_client,main}.py`,
+      `frontend/src/pages/Home.tsx`, `backend/tests/{conftest,test_llm_client,test_main}.py`
+      | verificación: 376 tests + build; end-to-end contra NVIDIA real (cada
+      request ~12ms, el poll levanta el veredicto a los ~8,5s)
+
+- [x] **[swipe-fixes-2026-08-03] "Puntuar más": tipo, cola infinita y el muro**
+      | owner: claude | Tres reportes de Matías probándolo: (1) casi todo lo
+      que salía eran **series** — el catálogo popular de TMDb las devuelve con
+      mucha más frecuencia y no se solapa con lo que la gente puntúa en
+      Letterboxd (movie-only); nuevo parámetro `kind` (películas por default,
+      series, o ambas). (2) Las **tandas** cortaban el flujo — ahora la cola es
+      infinita, se pre-fetchea el lote siguiente cuando quedan ≤5 títulos por
+      delante. (3) **"Esto no puede pasar"**: con historial grande se llegaba a
+      un muro permanente, porque `_swipe_popular_pool` arrancaba SIEMPRE en la
+      página 1 y confiaba solo en `swipe_asked_titles` para saltear; al agotar
+      las primeras páginas no había salida. Nueva tabla `swipe_pool_cursor`
+      (user_id, kind) que recuerda hasta dónde se escaneó y retoma ahí.
+      También en la UI: swipe solo horizontal con cartel para cada lado, drag
+      separado de la animación de avance (peleaban por `transform` en el mismo
+      nodo), títulos a 2 líneas fijas para que la página no salte
+      | archivos: `backend/app/{db,main}.py`, `frontend/src/pages/Rate.tsx`,
+      `backend/tests/test_main.py` | verificación: 371 tests con este commit
+      aislado + probado a mano en el browser
+
+- [x] **[unreleased-2026-08-03] No ofrecer estrenos futuros para puntuar**
+      | owner: claude | Apareció **"Avengers: Doomsday" (2026)** en "puntuar
+      más", imposible de haber visto: TMDb `/movie/popular` y `/tv/popular`
+      mezclan estrenos con hype que todavía no salieron. Se filtra por fecha
+      real (`release_date`/`first_air_date` ≤ hoy). **El año solo no
+      alcanzaba** — 2026 puede ser pasado o futuro según el día
+      | archivos: `backend/app/tmdb_client.py`, `backend/tests/test_tmdb_client.py`
+
+- [x] **[theme-fade-2026-08-03] Transición gradual claro/oscuro**
+      | owner: claude | El toggle cambiaba todos los colores de golpe.
+      Transición de 0,3s sobre `background/border/color/fill/stroke` en
+      `@layer base`; los `transition-colors` más rápidos de los botones siguen
+      ganando por especificidad, y respeta `prefers-reduced-motion` vía la
+      regla que ya existía | archivos: `frontend/src/index.css`
 
 - [x] **[ratings-refresh-2026-07-31] Nuevos picks + precedencia + edición de estrellas**
       | owner: codex | el fallback de candidatos viejos ya no entra al selector

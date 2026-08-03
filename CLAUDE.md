@@ -45,26 +45,29 @@ Solo yo (Matías), con posible coordinación multi-agente (Claude, Codex) docume
 
 <!-- SESSION_STATE:START -->
 ## Estado actual
-_Última actualización: 2026-08-02_
+_Última actualización: 2026-08-03_
 
-**Qué se hizo (sesión 3 del 2026-08-02 — Fase 4 cerrada y en producción, 8 commits `fc3b2e3`..`0c71a9d`, 320 → 345 tests):**
-- **Fase 4 completa y viva en producción**: 940 títulos embebidos, 6 clusters L1 y 57 L2, **39 movimientos** ofrecidos en el picker de butaca.xyz junto a los 18 géneros y las 8 vibras. El pipeline lo dejó armado Codex; esta sesión resolvió el error que había quedado sin capturar y todo lo que apareció al correrlo de verdad a escala.
-- **Embeddings movidos de Gemini a NVIDIA NIM** (`nvidia/nemotron-3-embed-1b`, 2048-d), a pedido de Matías. El free tier de Gemini cuenta CADA texto de un `batchEmbedContents` como un request (100/min, **1.000/día**), así que la muestra no entraba en un día — con `seed_cap=50` nunca se veía porque era un solo batch. NVIDIA hace 940 en una pasada, con la key que el proyecto ya usaba.
-- **6 bugs encontrados verificando con datos reales** (ninguno lo agarraban los tests): el pool genérico que no se solapaba con los clusters (solo 3 de 52 movimientos juntaban 6 picks); el tag `vibe-l2:N` colgado a todo candidato, que diluía el score de la muestra; la penalización de series hundiendo tandas 100% series bajo el piso de 60; un label roto del LLM que llegó a ser opción clickeable en producción; y **el pool de Neon sirviendo conexiones muertas**, que afectaba producción entera, no solo el job.
-- Board limpiado: dos entradas desactualizadas cerradas (una decía que embeddings+Leiden era inviable, justo lo que se acababa de shippear) y 4 ideas/hallazgos nuevos anotados con detalle.
+**Qué se hizo (2026-08-03 — sesión larga: se vació el board y después se pulió todo contra feedback en vivo. 17 commits `c60f70c`..`d09f734`, 345 → 376 tests):**
 
-**Dónde retomar:** No hay nada a medio hacer ni bloqueando. Lo más valioso para la calidad del producto es la task **"Los match_score no pueden pasar de 86% salvo que matchee el director"** en `TASKS.md` — está medida con la tabla de escenarios y con los dos caminos evaluados. Ojo con la trampa que quedó anotada ahí: recalibrar la pendiente (el `/40` de `recommender.recommend`) sube los números en una línea pero comprime la parte de abajo, que es exactamente la queja del 2026-07-31 (4 de 5 semanales con 81% idéntico). El camino recomendado es ampliar la evidencia, no la curva.
+- **Se cerraron los pendientes que venían del board:** el **techo de 86%** del match_score (causa real: los parámetros de `discover` de TMDb se combinan con AND, así que el pool venía sesgado por género y las de Nolan ni aparecían — se agregó una segunda pasada solo-persona), el **sesgo anime/coreano** de la muestra de vibras (mezcla de top-rated por década en `_seed_titles`; medido en prod: 39 → **46 movimientos** con menos sesgo), el recompute pasado a **background**, un **badge** para distinguir los picks de relleno heurístico, y refuerzo contra alucinar títulos fuera de la lista.
+- **Se construyó lo que estaba propuesto y nunca hecho:** la sección `/rate` ("puntuar más") y dos juegos (pairwise "¿cuál te gustó más?" y trivia).
+- **Matías los probó y no le gustaron — se rediseñaron los tres.** El más grave: el pairwise **marcaba como vista y gustada** cualquier peli que votaras, aunque no la hubieras visto ("grave error"). Se rediseñó de raíz: ahora compara dos títulos que **ya viste y puntuaste igual**, y elegir un ganador no escribe ningún rating — queda como preferencia relativa (`pairwise_preferences`) que desempata entre favoritas. La trivia pasó a preguntar sobre **pelis que ya viste**, con un tercer tipo de pregunta (actor) y años incorrectos cercanos al real.
+- **"Puntuar más" recibió tres reportes más y quedó bastante distinto:** filtro películas/series/ambas (salían casi solo series), **cola infinita** en vez de tandas, y el arreglo del **muro permanente** ("esto no puede pasar") con la tabla `swipe_pool_cursor`. Más: no ofrecer **estrenos futuros** (salió "Avengers: Doomsday" 2026 para puntuar), swipe solo horizontal con cartel en ambos lados, y animaciones.
+- **`/weekly` salió del camino crítico del LLM.** Medido, no estimado: tardaba **7,3s** en frío contra NVIDIA real, y por eso la home se veía vacía y "de la nada aparecía". Ahora responde el heurístico al toque y el veredicto del LLM llega por polling silencioso.
 
-Justo abajo en prioridad: el sesgo de la muestra de vibras (13 de 39 movimientos son anime o coreano, medido — es la semilla de `_seed_titles`, no el clustering).
+**Dónde retomar:** Nada a medio hacer. Lo siguiente en valor es lo que Matías aprobó al cierre: las **tres features "wow"** anotadas en `TASKS.md` (`wow-features-2026-08-03`) — mapa interactivo de embeddings, "Tu año en Butaca", y chat con tu perfil de gusto. Dijo *"esas 3 me gustan, le agregaría más cosas"*, así que **antes de codear falta que defina qué más sumar y por cuál arrancar**.
 
-**Bloqueos / decisiones pendientes:** Ninguno. Todo pusheado, CI verde, deploy live. Pendientes que solo puede hacer Matías: borrar el proyecto viejo de Neon (São Paulo) y renombrar la carpeta local del proyecto.
+**Bloqueos / decisiones pendientes:** Ninguno técnico. Pendientes que solo puede hacer Matías: borrar el proyecto viejo de Neon (São Paulo) y renombrar la carpeta local del proyecto.
 
 **Contexto que no es obvio del código:**
+- **Los parámetros de `discover` de TMDb se combinan con AND, no con OR** (el pipe `|` dentro de un mismo parámetro sí es OR). Confirmado contra la API real. Eso era la causa del techo de 86%: pedir género + persona juntos devolvía un pool sesgado donde faltaban las películas obvias del director.
+- **El pairwise NO escribe ratings, a propósito.** Es la corrección de un bug real: fabricar un "vista + gustada" para algo que el usuario nunca vio es peor que no tener el dato. Si alguna vez se quiere que aporte al scoring, el camino es `pairwise_preferences` como señal relativa, nunca un rating inventado.
+- **`_VERDICT_CACHE` es global al módulo, no aislado por test como la DB.** Dos tests con el mismo catálogo/perfil comparten clave — y como `isolated_db` resetea el autoincrement, hasta el `user_id` puede coincidir. Hay un fixture autouse en `conftest.py` que lo limpia; sin eso, un test lee el resultado cacheado de otro.
+- **`SWIPE_POPULAR_MAX_PAGES` es 40 y eso tiene un costo conocido:** con el pool agotado son hasta 40 requests secuenciales a TMDb en un pedido (80 con "Ambas"). Se aceptó porque el muro permanente era el problema real; detalle y salidas en `TASKS.md` (`swipe-latency-2026-08-03`).
 - **La key de NVIDIA es de cuenta, una sola para los 102 modelos** — build.nvidia.com pone un botón "Get API Key" en cada página de modelo y eso confunde. Lo que cambia por modelo es el *entitlement*: `snowflake/arctic-embed-l` da `404 "not found for account"` igual que kimi-k2.6, y eso NO se arregla con otra key.
 - **`title_embeddings` lleva `model` en la PK.** Vectores de dos modelos no comparten espacio (ni dimensión), así que el cache de uno nunca puede contestar por el otro. Si se cambia de modelo de embeddings, el cache viejo simplemente queda sin usar.
-- **El pool de Postgres ahora sondea con `SELECT 1` antes de entregar la conexión** (`db._checkout_live_connection`). Neon cierra las ociosas y `pool.getconn()` las devolvía igual — `closed` solo refleja lo que sabe el proceso. En producción UptimeRobot mantiene el proceso vivo pegándole a `/health`, que no toca la base, así que el pool podía quedarse horas con conexiones muertas. **Candidato sin confirmar del "Load failed" de Bauti.**
-- **La calidad de NVIDIA vs Gemini se midió, no se asumió:** empate (pureza cruzada 0,55/0,60) sobre los mismos 650 títulos. El cine coreano, que era la debilidad de NVIDIA con 650, se reagrupa bien con 940 — era falta de muestra, no del modelo. El cambio se decidió por lo operativo.
-- `refined=True` en los logs es del **lote entero**, no de cada pick: cuando el LLM devuelve títulos fuera de la lista de candidatos, los huecos se rellenan desde el ranking heurístico y esos picks conservan el "why" de plantilla.
+- **El pool de Postgres sondea con `SELECT 1` antes de entregar la conexión** (`db._checkout_live_connection`). Neon cierra las ociosas y `pool.getconn()` las devolvía igual — `closed` solo refleja lo que sabe el proceso. En producción UptimeRobot mantiene el proceso vivo pegándole a `/health`, que no toca la base, así que el pool podía quedarse horas con conexiones muertas. **Candidato sin confirmar del "Load failed" de Bauti.**
+- `refined` a nivel de **lote** (`RecommendResponse.refined`) ahora lo usa `/weekly` para avisarle al frontend que ya pasó por el LLM. El `refined` **por pick** sigue quedando en `False` aunque el LLM conteste — visto en vivo verificando; es la task del "why heurístico de relleno", sin resolver.
 - El modo manual (`ManualRating`) solo tiene título+rating, nunca reseña — sin `TMDB_API_KEY` el catálogo mock no tiene señal de tags, así que con el piso de score devuelve vacío en local. El otro sistema de Flick (clusterizar reseñas) sigue siendo inviable acá: 68 títulos con reseña real en toda la base.
 - `npx tsc --noEmit` no chequea nada por la config de project references; el gate real es `npm run build` (`tsc -b`).
 <!-- SESSION_STATE:END -->
@@ -380,6 +383,38 @@ Justo abajo en prioridad: el sesgo de la muestra de vibras (13 de 39 movimientos
 </details>
 
 ## Historial de sesiones
+
+### 2026-08-03 — se vació el board, y después el feedback en vivo reescribió medio trabajo
+Arranqué cerrando lo que quedaba anotado: el techo de 86% (la causa real era
+que los parámetros de `discover` de TMDb se combinan con AND, así que pedir
+género + persona juntos devolvía un pool sin las películas obvias del
+director), el sesgo anime/coreano de la muestra de vibras, el recompute a
+background, el badge de picks heurísticos. Después construí lo que estaba
+propuesto hace tiempo y nunca hecho: la sección de "puntuar más" y dos juegos.
+
+Ahí la sesión cambió de forma. Matías los probó y **no le gustaron**, y de
+paso encontró un bug serio que yo no había pensado: el juego de comparar
+películas te marcaba como **vista y gustada** cualquiera que votaras, aunque
+nunca la hubieras visto. Lo llamó "grave error" y tenía razón — es fabricar
+datos del usuario. No lo parcheé: lo rediseñé de raíz para que compare solo
+cosas que ya viste y puntuaste igual, y que elegir un ganador no escriba
+ningún rating. Lo mismo con la trivia (ahora pregunta sobre lo que viste) y
+con "puntuar más", que se comió tres reportes más — salían casi solo series,
+las tandas cortaban el flujo, y con historial grande se llegaba a un muro sin
+salida ("esto no puede pasar"). Ese último era el más interesante: escaneaba
+siempre desde la página 1 de TMDb confiando en la exclusión, así que al
+agotar las primeras páginas no había forma de avanzar nunca más.
+
+Cerró con `/weekly`: Matías notó que la home "se queda unos segundos y de la
+nada aparece". Medí en vez de suponer — 7,3s reales contra la API de NVIDIA,
+porque el veredicto del LLM corría sincrónico y bloqueaba la respuesta. Ahora
+responde el heurístico al toque y refina en background con polling silencioso.
+Verificado end-to-end contra NVIDIA real: ~12ms por request, el veredicto
+personalizado entra a los ~8,5s.
+
+Al final propuse tres features "para asombrarse" (mapa de embeddings, "Tu año
+en Butaca", chat con tu perfil); le gustaron las tres pero quiere sumarles
+cosas antes de arrancar. 17 commits `c60f70c`..`d09f734`, 345 → 376 tests.
 
 ### 2026-08-02 (sesión 3) — Fase 4 cerrada: vibes por clustering real, en producción
 Retomé donde lo dejó Codex. El error que había quedado sin capturar era cuota
