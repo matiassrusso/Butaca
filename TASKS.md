@@ -184,7 +184,7 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
       y de paso mejora las recomendaciones, en vez de ser una sección
       aparte que hay que mantener sin que aporte al motor.
 
-- [ ] **Los match_score no pueden pasar de 86% salvo que matchee el director**
+- [x] **Los match_score no pueden pasar de 86% salvo que matchee el director**
       (reportado por Matías 2026-08-02 mirando sus picks: "deberían darme
       matchrates más altos"). No es percepción: está medido.
       La fórmula es `50 + 49*tanh(puntos/40)` (`recommender.recommend`). Lo
@@ -216,6 +216,32 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
          altos se ganen de verdad. Más trabajo, no falsea nada.
       **Recomendado: el 2.** El 1 se siente bien tres días y después vuelve
       la queja de "todos iguales".
+      **Resuelto 2026-08-03 por el camino 2.** Causa real: `_fetch_personalized_discover`
+      combina `with_genres` y `with_people` con **AND** (no OR — confirmado
+      en `docs/(C) research-tmdb-discover-personalization.md`), así que el
+      pool exigía género del perfil Y persona favorita **a la vez** en la
+      misma película. Las películas del director/actor favorito que no caen
+      en ese género quedaban afuera del pool entero, y el bonus de +25/+10
+      (la única forma de pasar el techo de 86%) casi nunca se ganaba. Fix en
+      `tmdb_client.fetch_personalized_candidates`: cuando el perfil tiene
+      `person_ids`, se suma una segunda pasada de discover **solo con
+      `with_people`** (sin género), así entran de verdad todas las películas
+      del director/actor favorito y ese bonus se gana con evidencia real.
+      Dedup existente (primer visto gana) evita duplicar contra la pasada de
+      género. 1 test nuevo
+      (`test_fetch_personalized_candidates_adds_people_only_pass_for_director_matches`),
+      346 tests en verde.
+      **Verificado con la TMDb key real** (Matías la actualizó en
+      `backend/.env` durante esta sesión) armando un perfil de prueba
+      (Christopher Nolan + Leonardo DiCaprio, género Action/Drama, década
+      2010) y comparando las dos pasadas директamente: la pasada género+persona
+      (AND) devolvió 20 títulos, ninguno de *The Dark Knight*, *Inception* ni
+      *Memento* — las tres faltaban por no estar tageadas "Drama" en TMDb
+      pese a ser de Nolan. La pasada nueva (solo persona) las trajo. Resultado final: 10 candidatos con `director="Christopher Nolan"`
+      y 14 con `actors` incluyendo "Leonardo DiCaprio", sobre 66 candidatos
+      totales — el pool antes de este fix directamente no tenía a Inception
+      ni Dark Knight para ofrecer, así que ningún pick de un perfil como ese
+      podía pasar el techo de 86% por más señal que hubiera.
 
 - [ ] **Un pick de relleno hereda el "why" heurístico y no se distingue**
       (reportado por Matías 2026-08-02: "¿por qué devolvió el heurístico?",

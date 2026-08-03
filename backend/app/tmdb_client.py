@@ -1386,22 +1386,43 @@ def fetch_personalized_candidates(profile: dict, mood: str, kind_filter: str = "
 
     if has_profile_signal and kind_filter in ("movie", "both"):
         movie_genre_ids = [GENRE_NAME_ID_MAP[name] for name in genre_names if name in GENRE_NAME_ID_MAP]
-        movies = _fetch_personalized_discover(
-            DISCOVER_URL, "movie", GENRE_ID_TAG_MAP, movie_genre_ids, person_ids, top_decade, api_key
-        )
-        for item in movies[:CREDITS_ENRICH_CAP]:
-            # credits y keywords son enriquecimientos independientes: que falle
-            # uno no tiene que saltear el otro para el mismo item (esto era un
-            # `continue` antes de que existieran los keywords).
-            try:
-                credits = fetch_taste_credits(item["tmdb_id"], kind="movie")
-            except TmdbError:
-                pass
-            else:
-                item["director"] = credits["director"]
-                item["actors"] = credits["actors"]
-            _enrich_with_keyword_tags(item, "movie")
-        candidates.extend(movies)
+        movie_pools = [
+            _fetch_personalized_discover(
+                DISCOVER_URL, "movie", GENRE_ID_TAG_MAP, movie_genre_ids, person_ids, top_decade, api_key
+            )
+        ]
+        if person_ids:
+            # with_genres and with_people combine with AND (confirmed in
+            # docs/(C) research-tmdb-discover-personalization.md and again
+            # here empirically): the pool above requires the profile's top
+            # genre AND a favorite person on the same movie, so a director's
+            # films outside that genre never show up — verified live against
+            # a Christopher Nolan profile, where The Dark Knight/Inception/
+            # Memento (not tagged "Drama") were missing from that first call
+            # and only appeared once with_genres was dropped here. Without
+            # them in the pool, recommend()'s director/actor bonus (the only
+            # way past the ~86% ceiling with 4/4 tags + decade) almost never
+            # fires. This second, people-only pass finds movies that
+            # genuinely are by/with the favorite person regardless of genre.
+            movie_pools.append(
+                _fetch_personalized_discover(
+                    DISCOVER_URL, "movie", GENRE_ID_TAG_MAP, [], person_ids, top_decade, api_key
+                )
+            )
+        for movies in movie_pools:
+            for item in movies[:CREDITS_ENRICH_CAP]:
+                # credits y keywords son enriquecimientos independientes: que falle
+                # uno no tiene que saltear el otro para el mismo item (esto era un
+                # `continue` antes de que existieran los keywords).
+                try:
+                    credits = fetch_taste_credits(item["tmdb_id"], kind="movie")
+                except TmdbError:
+                    pass
+                else:
+                    item["director"] = credits["director"]
+                    item["actors"] = credits["actors"]
+                _enrich_with_keyword_tags(item, "movie")
+            candidates.extend(movies)
 
     if has_profile_signal and kind_filter in ("series", "both"):
         # with_people isn't supported on /discover/tv (confirmed empirically

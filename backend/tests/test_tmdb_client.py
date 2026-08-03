@@ -758,6 +758,57 @@ def test_fetch_personalized_candidates_biases_movie_discover_by_profile(monkeypa
     assert profile_movie["director"] == "A Director"
 
 
+def test_fetch_personalized_candidates_adds_people_only_pass_for_director_matches(monkeypatch) -> None:
+    # el pool género+persona (OR) puede no traer ni una película del director
+    # favorito; esta pasada extra, solo con with_people, existe justamente
+    # para que el bonus de director en recommend() deje de ser un premio raro.
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    calls: list[str] = []
+
+    def fake_get_json(url: str) -> dict:
+        calls.append(url)
+        if "search/person" in url:
+            return {"results": [{"id": 525, "known_for_department": "Directing", "popularity": 9.9}]}
+        if "discover/movie" in url:
+            if "with_genres" in url:
+                return {
+                    "results": [
+                        {"id": 1, "title": "Genre Movie", "release_date": "2010-01-01", "genre_ids": [18], "overview": ""}
+                    ]
+                }
+            return {
+                "results": [
+                    {"id": 2, "title": "Director Movie", "release_date": "2010-01-01", "genre_ids": [18], "overview": ""}
+                ]
+            }
+        return {"results": []}
+
+    monkeypatch.setattr(tmdb_client, "_get_json", fake_get_json)
+
+    def fake_credits(tmdb_id: int, kind: str = "movie") -> dict:
+        if tmdb_id == 2:
+            return {"director": "A Director", "actors": []}
+        return {"director": None, "actors": []}
+
+    monkeypatch.setattr(tmdb_client, "fetch_taste_credits", fake_credits)
+
+    profile = {
+        "genre_breakdown": [{"genre": "Drama", "weight": 10.0}],
+        "decade_breakdown": [{"decade": 2010, "count": 3}],
+        "top_directors": [{"name": "A Director", "count": 2}],
+        "top_actors": [],
+    }
+
+    candidates = tmdb_client.fetch_personalized_candidates(profile, mood="", kind_filter="movie")
+
+    movie_calls = [url for url in calls if "discover/movie" in url]
+    people_only_calls = [url for url in movie_calls if "with_people" in url and "with_genres" not in url]
+    assert len(people_only_calls) == 1  # la pasada people-only existe, separada de género+exploration
+
+    director_movie = next(c for c in candidates if c["title"] == "Director Movie")
+    assert director_movie["director"] == "A Director"
+
+
 def _profile_movie_fake_get_json(calls: list[str]):
     """Fake _get_json compartido por los tests de enriquecimiento con keywords:
     un solo candidato movie (género 18 -> tag "character")."""
