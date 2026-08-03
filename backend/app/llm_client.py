@@ -230,6 +230,14 @@ def _build_prompt(ratings: list[RatedItem], mood: str, heuristic: RecommendRespo
         f"{WRITING_RULES}\n\n"
         f"{SCORE_RULE}\n\n"
         f"{MATCH_SCORE_RULE}\n\n"
+        # reforzado cerca del final a propósito (2026-08-03, TASKS.md): un
+        # candidato inventado ("Zodiac", "Obsession" — ninguno estaba en la
+        # lista) tira ese pick al heurístico sin que se note en pantalla. La
+        # instrucción de "SOLO títulos de esta lista" ya existe más arriba,
+        # pero repetirla acá, pegada al schema de salida, es donde más pesa.
+        "IMPORTANTE: cada \"title\" que devuelvas tiene que ser una copia exacta de un título "
+        "de la lista de candidatos de arriba. No seleccionés una película o serie real que no "
+        "esté en esa lista, aunque le quede mejor al usuario.\n\n"
         "Respondé ÚNICAMENTE con un JSON válido, sin texto ni markdown alrededor, con esta forma "
         'exacta: {"taste_summary": "...", "picks": [{"title": "...", "why": "...", '
         '"match_score": 85}, ...]}'
