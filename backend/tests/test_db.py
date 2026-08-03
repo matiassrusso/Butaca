@@ -37,3 +37,56 @@ def test_vibe_tables_round_trip() -> None:
     assert db.get_vibe_clusters(level=2) == [
         {"level": 2, "cluster_id": 4, "label": "Atracos tensos", "sample_titles": ["A"], "size": 1}
     ]
+
+
+def test_dead_pooled_connections_are_discarded_before_use(monkeypatch) -> None:
+    """Neon cierra las conexiones ociosas, pero pool.getconn() las devuelve
+    igual: `closed` solo refleja lo que sabe este proceso. Sin el sondeo, la
+    primera query real explota con "SSL connection has been closed
+    unexpectedly" — que es lo que pasó guardando los clusters tras ~6 min sin
+    tocar la base."""
+    import psycopg2
+
+    class FakeCursor:
+        def __init__(self, alive): self.alive = alive
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def execute(self, sql, params=()):
+            if not self.alive:
+                raise psycopg2.OperationalError("SSL connection has been closed unexpectedly")
+
+    class FakeConn:
+        def __init__(self, alive): self.alive, self.closed = alive, 0
+        def cursor(self, *a, **k): return FakeCursor(self.alive)
+
+    muerta, viva = FakeConn(alive=False), FakeConn(alive=True)
+    devueltas, descartadas = [muerta, viva], []
+
+    class FakePool:
+        def getconn(self): return devueltas.pop(0)
+        def putconn(self, conn, close=False):
+            if close:
+                descartadas.append(conn)
+
+    assert db._checkout_live_connection(FakePool()) is viva
+    assert descartadas == [muerta]
+
+
+def test_checkout_gives_up_instead_of_looping_forever(monkeypatch) -> None:
+    import psycopg2
+
+    class AlwaysDead:
+        closed = 0
+        def cursor(self, *a, **k):
+            raise psycopg2.OperationalError("server closed the connection")
+
+    class FakePool:
+        def getconn(self): return AlwaysDead()
+        def putconn(self, conn, close=False): pass
+
+    try:
+        db._checkout_live_connection(FakePool())
+    except psycopg2.Error:
+        pass
+    else:
+        raise AssertionError("tiene que propagar el error, no colgarse reintentando")

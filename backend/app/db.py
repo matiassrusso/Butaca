@@ -1,11 +1,14 @@
 import hashlib
 import json
+import logging
 import os
 import sqlite3
 import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "butaca.db"
 
@@ -405,6 +408,36 @@ def _get_pg_pool():
     return _PG_POOL
 
 
+def _checkout_live_connection(pool):
+    """Sacar del pool una conexión que de verdad siga viva.
+
+    Neon es serverless y cierra las conexiones ociosas por su cuenta, pero
+    `pool.getconn()` te la devuelve igual: `closed` solo refleja lo que sabe
+    este proceso, no que el server la haya cortado del otro lado. La primera
+    query real explota entonces con "SSL connection has been closed
+    unexpectedly" (visto 2026-08-02 guardando los clusters después de ~6 min
+    sin tocar la base). El `SELECT 1` es la única forma de enterarse antes.
+
+    No es un caso de borde del job offline: en producción UptimeRobot mantiene
+    el proceso vivo pegándole a /health, que no toca la base — así que el pool
+    puede quedarse horas con conexiones que Neon ya cerró, y el primer usuario
+    que llega después se come un 500.
+    """
+    import psycopg2
+
+    last_error = None
+    for _ in range(3):
+        conn = pool.getconn()
+        try:
+            with conn.cursor() as probe:
+                probe.execute("SELECT 1")
+            return conn
+        except psycopg2.Error as exc:  # conexión muerta: descartarla y pedir otra
+            last_error = exc
+            pool.putconn(conn, close=True)
+    raise last_error
+
+
 def _ensure_schema_ready(conn) -> None:
     target = _database_url() or _db_path()
     if target in _initialized_targets:
@@ -428,7 +461,7 @@ def get_connection():
         from psycopg2.extras import RealDictCursor
 
         pool = _get_pg_pool()
-        pg_conn = pool.getconn()
+        pg_conn = _checkout_live_connection(pool)
         pg_conn.cursor_factory = RealDictCursor
         conn = _PostgresConnWrapper(pg_conn)
         _ensure_schema_ready(conn)
@@ -436,11 +469,20 @@ def get_connection():
             yield conn
             pg_conn.commit()
         except Exception:
-            pg_conn.rollback()
+            # el rollback va best-effort: si lo que falló fue la conexión, este
+            # rollback tira InterfaceError y taparía el error de verdad, que es
+            # el que dice qué pasó (visto 2026-08-02).
+            try:
+                pg_conn.rollback()
+            except Exception:
+                logger.warning("Rollback fallido, la conexión ya estaba caída", exc_info=True)
             raise
         finally:
-            conn._cursor.close()
-            pool.putconn(pg_conn)
+            try:
+                conn._cursor.close()
+            except Exception:
+                pass
+            pool.putconn(pg_conn, close=pg_conn.closed != 0)
     else:
         conn = sqlite3.connect(_db_path())
         conn.row_factory = sqlite3.Row
