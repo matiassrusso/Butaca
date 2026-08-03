@@ -41,6 +41,7 @@ EMBED_RETRY_ATTEMPTS = 2
 EMBED_RETRY_FALLBACK_SECONDS = 60.0
 METADATA_WORKERS = 8
 LABEL_DELAY_SECONDS = 2
+MAX_LABEL_LENGTH = 40  # el prompt pide 2 a 5 palabras; más que esto no es un nombre
 _SEED_MOODS = ("", "action", "funny", "romance", "psychological")
 
 
@@ -237,6 +238,26 @@ def _fallback_label(samples: list[dict]) -> str:
     return "Vibra mixta"
 
 
+def _is_sane_label(label: str) -> bool:
+    """Un label del LLM termina siendo una opción clickeable del picker, así
+    que tiene que parecerse a un nombre antes de aceptarlo.
+
+    Bajo carga (503 y timeouts de NIM) el modelo degrada y devuelve JSON
+    válido con basura adentro; en la corrida contra producción del 2026-08-02
+    entró así un movimiento llamado
+    'An us:ru} is isan :ureosed: (2:weorted1 (   -11 2itaé:é-122:2 |:}:--'.
+    El prompt pide 2 a 5 palabras, y eso es lo que se verifica.
+    """
+    words = label.split()
+    if not label or len(label) > MAX_LABEL_LENGTH or not 1 <= len(words) <= 6:
+        return False
+    # casi todo tiene que ser letras y espacios: deja pasar "neo-noir",
+    # "animación 3d" o "Cine LGBTQ+ de adolescencia", y corta la basura, que
+    # viene cargada de dos puntos, llaves, guiones y números sueltos.
+    readable = sum(character.isalpha() or character.isspace() for character in label)
+    return readable / len(label) >= 0.85
+
+
 def _label_cluster(sample_titles_metadata: list[dict]) -> str:
     fallback = _fallback_label(sample_titles_metadata)
     if not llm_client.is_configured():
@@ -255,7 +276,10 @@ def _label_cluster(sample_titles_metadata: list[dict]) -> str:
     except llm_client.LlmError:
         return fallback
     label = str(label).strip()
-    return label[:80] if label else fallback
+    if not _is_sane_label(label):
+        logger.warning("Label descartado por no parecer un nombre: %r", label[:120])
+        return fallback
+    return label
 
 
 def _sample_cluster(members: list[int], records: list[dict], vectors: list[list[float]]) -> list[dict]:

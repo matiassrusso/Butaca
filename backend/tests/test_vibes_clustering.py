@@ -143,6 +143,33 @@ def test_retry_delay_falls_back_when_the_provider_omits_it() -> None:
     )
 
 
+def test_garbled_llm_labels_fall_back_instead_of_reaching_the_picker(monkeypatch) -> None:
+    """Bajo 503/timeouts el modelo devuelve JSON válido con basura adentro, y
+    el label termina siendo una opción clickeable. El primer string es el que
+    llegó de verdad a producción el 2026-08-02."""
+    basura = "An us:ru} is isan :ureosed: (2:weorted1 (      -11 2itaé:é-122:2 |:}:--:--:-2-- "
+    monkeypatch.setattr(vibes_clustering.llm_client, "is_configured", lambda: True)
+    monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        vibes_clustering.llm_client, "_call_nvidia_with_fallback", lambda prompt, api_key: {"label": basura}
+    )
+
+    assert vibes_clustering._label_cluster([
+        {"title": "A", "year": 2000, "keywords": ["heist"], "tags": []},
+    ]) == "Heist"  # cae al heurístico, no al string roto
+
+
+def test_real_movement_names_are_accepted_as_labels() -> None:
+    # los que salieron de las corridas reales tienen que seguir pasando
+    for label in (
+        "Cine italiano de autor", "neo-noir", "animación 3d", "Charlie Chaplin",
+        "Cine LGBTQ+ de adolescencia", "Anime cyberpunk existencial",
+    ):
+        assert vibes_clustering._is_sane_label(label), label
+    for label in ("", "   ", "a" * 60, "1:2:3-4-5 }{ 6:7", "un nombre demasiado largo para ser una etiqueta corta"):
+        assert not vibes_clustering._is_sane_label(label), label
+
+
 def test_recompute_clusters_the_partial_sample_when_the_rate_limit_holds(monkeypatch) -> None:
     """Un rate limit sostenido tiene que dejar clusterizado lo que sí se
     embebió, no tirar la corrida entera (la siguiente completa desde
