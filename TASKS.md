@@ -464,6 +464,16 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
       confirmar la causa. Sospechoso principal: cold start de Render +
       latencia extra del RSS de Letterboxd. Si vuelve a salir, revisar
       logs de Render en el momento exacto.
+      **Candidato nuevo (2026-08-02), sin confirmar:** el pool devolvía
+      conexiones que Neon ya había cerrado del otro lado, y la primera query
+      reventaba con "SSL connection has been closed unexpectedly" → 500 →
+      "Load failed" en el browser. Encaja con el síntoma (intermitente,
+      irreproducible, sin patrón) y con el setup: UptimeRobot mantiene el
+      proceso vivo pegándole a `/health`, que no toca la base, así que el
+      pool puede quedarse horas con conexiones muertas y el primer usuario
+      que llega después se la come. Arreglado en `ac823c7`
+      (`db._checkout_live_connection`). Si el reporte no vuelve a aparecer,
+      probablemente era esto; si vuelve, hay que buscar por otro lado.
 
 - [x] **Feedback de amigos: 19 de 20 puntos resueltos (2026-07-23, sesión
       2)** — lote rápido (1,4,5,6,12,13,19), wizard multi-step en
