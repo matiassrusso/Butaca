@@ -216,9 +216,24 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
       ganador con rating 3.5/source "game" (confirmado contra
       `/history/watched`), y avanzó a un par nuevo.
 
-- [ ] **Trivia de cine** (segundo juego pedido junto con "¿cuál te gustó
+- [x] **Trivia de cine** (segundo juego pedido junto con "¿cuál te gustó
       más?", 2026-08-03) — puro entretenimiento, Matías lo pidió sabiendo
-      que no genera señal de gusto. En progreso.
+      que no genera señal de gusto.
+      **Resuelto.** `GET /games/trivia` arma una pregunta de opción múltiple
+      (año o director, 60/40 a favor de año por ser más robusto: no necesita
+      un request extra de credits que puede no traer director) sobre un
+      título del mismo pool que `/titles/swipe-batch`/pairwise, con 3
+      distractores REALES sacados de otros títulos del pool (nunca
+      inventados) — si no hay suficientes distractores distintos, reintenta
+      con un pool random nuevo (hasta `TRIVIA_ATTEMPTS`) antes de devolver
+      `None`. El puntaje vive solo en el cliente, no se persiste nada (a
+      propósito: es el único juego que no toca el perfil). Nueva página
+      `/games/trivia`, linkeada desde el hub `/games`. 4 tests nuevos de
+      backend (365 en total). **Verificado end-to-end en el dev server
+      local** con TMDb real: pregunta de año real ("¿De qué año es
+      WALL·E?", 2008 correcto entre 4 opciones reales), después una de
+      director real con distractores reales, ambas con feedback correcto/
+      incorrecto y avance a la siguiente.
 
 - [x] **Los match_score no pueden pasar de 86% salvo que matchee el director**
       (reportado por Matías 2026-08-02 mirando sus picks: "deberían darme

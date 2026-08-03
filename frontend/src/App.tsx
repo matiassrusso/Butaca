@@ -18,6 +18,7 @@ import Profile from "./pages/Profile";
 import Rate from "./pages/Rate";
 import Recommend from "./pages/Recommend";
 import ResetPassword from "./pages/ResetPassword";
+import Trivia from "./pages/Trivia";
 import VerifyEmail from "./pages/VerifyEmail";
 
 function Router() {
@@ -31,6 +32,7 @@ function Router() {
       <Route path="/rate" component={Rate} />
       <Route path="/games" component={Games} />
       <Route path="/games/pairwise" component={PairwiseGame} />
+      <Route path="/games/trivia" component={Trivia} />
       <Route path="/history" component={History} />
       <Route path="/profile" component={Profile} />
       <Route component={NotFound} />

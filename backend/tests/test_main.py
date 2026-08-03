@@ -1783,6 +1783,84 @@ def test_pairwise_choose_does_not_override_a_precise_rating() -> None:
     assert any(item["title"] == "Aliens" and item["rating"] == 2.0 for item in watched)
 
 
+def test_trivia_question_requires_auth() -> None:
+    assert client.get("/games/trivia").status_code == 401
+
+
+def test_trivia_question_builds_a_year_question_when_directors_are_unavailable(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setattr("backend.app.main.random.random", lambda: 0.9)  # fuerza "year"
+    monkeypatch.setattr(
+        "backend.app.main.db.get_random_cluster_keys",
+        lambda limit: [(1, "movie"), (2, "movie"), (3, "movie"), (4, "movie"), (5, "movie")],
+    )
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.fetch_title_by_id",
+        lambda tmdb_id, kind="movie": {
+            "tmdb_id": tmdb_id, "title": f"Movie {tmdb_id}", "year": 2000 + tmdb_id, "kind": "movie",
+            "poster_path": None,
+        },
+    )
+    headers = _auth_headers("triviayear")
+
+    response = client.get("/games/trivia", headers=headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body is not None
+    assert body["correct_answer"] in body["options"]
+    assert len(set(body["options"])) == 4
+    assert "año" in body["question"]
+
+
+def test_trivia_question_builds_a_director_question(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setattr("backend.app.main.random.random", lambda: 0.1)  # fuerza "director"
+    monkeypatch.setattr(
+        "backend.app.main.db.get_random_cluster_keys",
+        lambda limit: [(1, "movie"), (2, "movie"), (3, "movie"), (4, "movie"), (5, "movie")],
+    )
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.fetch_title_by_id",
+        lambda tmdb_id, kind="movie": {
+            "tmdb_id": tmdb_id, "title": f"Movie {tmdb_id}", "year": 2000, "kind": "movie",
+            "poster_path": None,
+        },
+    )
+    directors = {1: "Director A", 2: "Director B", 3: "Director C", 4: "Director D", 5: "Director E"}
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.fetch_taste_credits",
+        lambda tmdb_id, kind="movie": {"director": directors[tmdb_id], "actors": []},
+    )
+    headers = _auth_headers("triviadirector")
+
+    response = client.get("/games/trivia", headers=headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body is not None
+    # _unwatched_candidate_pool mezcla el orden, así que el "subject" no es
+    # siempre tmdb_id=1 -- solo importa que sea uno de los directores reales
+    # y que coincida con el título de la pregunta.
+    assert body["correct_answer"] in directors.values()
+    assert body["correct_answer"] in body["options"]
+    assert len(set(body["options"])) == 4
+    assert body["title"] in body["question"]
+    assert "dirigió" in body["question"]
+
+
+def test_trivia_question_returns_none_when_pool_never_has_enough_options(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setattr("backend.app.main.db.get_random_cluster_keys", lambda limit: [(1, "movie")])
+    monkeypatch.setattr("backend.app.main.onboarding_titles.ONBOARDING_TITLES", [])
+    headers = _auth_headers("trivianopool")
+
+    response = client.get("/games/trivia", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json() is None
+
+
 def test_onboarding_search_returns_matches(monkeypatch) -> None:
     monkeypatch.setenv("TMDB_API_KEY", "fake-key")
     monkeypatch.setattr(

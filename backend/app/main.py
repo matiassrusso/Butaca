@@ -53,6 +53,7 @@ from .models import (
     RecommendResponse,
     RegisterRequest,
     TasteProfileResponse,
+    TriviaQuestion,
     UserCredentials,
     WatchedHistoryResponse,
 )
@@ -73,6 +74,8 @@ MOVEMENT_MEMBER_CAP = 40  # títulos por movimiento elegido que se resuelven con
 MIN_MOVEMENT_SIZE = 6  # un movimiento con menos títulos que una tanda de picks no se ofrece
 SWIPE_BATCH_SIZE = 20  # cuántos títulos sin puntuar se ofrecen por tanda en la sección de swipe
 SWIPE_CLUSTER_OVERSAMPLE = 3  # margen para sobrevivir el filtro de "ya puntuado"
+TRIVIA_OPTION_COUNT = 4  # una correcta + 3 distractores
+TRIVIA_ATTEMPTS = 4  # cuántos pools random se prueban antes de rendirse (ver _build_trivia_question)
 # rating inferido para el ganador del juego "¿cuál te gustó más?": elegir A
 # sobre B es preferencia relativa, no un puntaje que el usuario haya dado —
 # 3.5 cae en el rango "te gustó" de _rating_label (ni "te encantó" ni "no te
@@ -1342,6 +1345,79 @@ def pairwise_choose(
     )
     db.invalidate_taste_profile(user["id"])
     return {"status": "saved"}
+
+
+def _year_trivia_question(subject: dict, others: list[dict]) -> TriviaQuestion | None:
+    distractor_years = {
+        item["year"] for item in others if item.get("year") and item["year"] != subject.get("year")
+    }
+    if not subject.get("year") or len(distractor_years) < TRIVIA_OPTION_COUNT - 1:
+        return None
+    options = [str(subject["year"])] + [str(y) for y in list(distractor_years)[: TRIVIA_OPTION_COUNT - 1]]
+    random.shuffle(options)
+    return TriviaQuestion(
+        title=subject["title"],
+        poster_path=subject.get("poster_path"),
+        question=f'¿De qué año es "{subject["title"]}"?',
+        options=options,
+        correct_answer=str(subject["year"]),
+    )
+
+
+def _director_trivia_question(subject: dict, others: list[dict]) -> TriviaQuestion | None:
+    def _director_of(item: dict) -> str | None:
+        try:
+            return tmdb_client.fetch_taste_credits(item["tmdb_id"], kind=item.get("kind", "movie")).get("director")
+        except tmdb_client.TmdbError:
+            return None
+
+    correct = _director_of(subject) if subject.get("tmdb_id") else None
+    if not correct:
+        return None
+
+    with ThreadPoolExecutor(max_workers=taste_profile.MATCH_WORKERS) as pool:
+        other_directors = list(pool.map(_director_of, others))
+    distractors = {d for d in other_directors if d and d != correct}
+    if len(distractors) < TRIVIA_OPTION_COUNT - 1:
+        return None
+
+    options = [correct] + list(distractors)[: TRIVIA_OPTION_COUNT - 1]
+    random.shuffle(options)
+    return TriviaQuestion(
+        title=subject["title"],
+        poster_path=subject.get("poster_path"),
+        question=f'¿Quién dirigió "{subject["title"]}"?',
+        options=options,
+        correct_answer=correct,
+    )
+
+
+def _build_trivia_question(user_id: int) -> TriviaQuestion | None:
+    """Puro entretenimiento (Matías la pidió sabiendo que no genera señal de
+    gusto, a diferencia de "¿cuál te gustó más?"). "year" es más robusto (ya
+    viene resuelto, sin request extra) que "director" (necesita credits de
+    varios títulos y puede no alcanzar distractores distintos) — se
+    reintenta con un pool random nuevo en cada intento en vez de fallar en
+    silencio ante un pool desfavorable puntual."""
+    for _ in range(TRIVIA_ATTEMPTS):
+        pool = _unwatched_candidate_pool(user_id, TRIVIA_OPTION_COUNT + 1)
+        if len(pool) < TRIVIA_OPTION_COUNT + 1:
+            continue
+        subject, *others = pool
+        builder = _director_trivia_question if random.random() < 0.4 else _year_trivia_question
+        question = builder(subject, others)
+        if question is not None:
+            return question
+    return None
+
+
+@app.get("/games/trivia", response_model=TriviaQuestion | None)
+def trivia_question(user: sqlite3.Row = Depends(auth.get_current_user)) -> TriviaQuestion | None:
+    """Trivia de director/año sobre títulos del mismo pool que
+    /titles/swipe-batch. None cuando no se pudo armar una pregunta con
+    distractores reales suficientes (pool muy chico) -- el frontend lo trata
+    igual que el pool agotado del pairwise, ofreciendo reintentar."""
+    return _build_trivia_question(user["id"])
 
 
 @app.post("/recommend/manual", response_model=RecommendResponse)

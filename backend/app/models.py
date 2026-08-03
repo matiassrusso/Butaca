@@ -86,6 +86,18 @@ class PairwiseChoiceRequest(BaseModel):
     winner_tmdb_id: int | None = None
 
 
+class TriviaQuestion(BaseModel):
+    # puro entretenimiento (Matías lo pidió sabiendo que no genera señal de
+    # gusto, a diferencia del pairwise) -- no se persiste nada, el puntaje
+    # vive solo en el cliente. correct_answer viaja en la respuesta porque no
+    # hay nada sensible que proteger acá.
+    title: str
+    poster_path: str | None = None
+    question: str
+    options: list[str]
+    correct_answer: str
+
+
 class CatalogStatsResponse(BaseModel):
     movies: int
     series: int
