@@ -1032,17 +1032,24 @@ def fetch_popular_titles(kind: str, page: int) -> list[dict]:
     """Los más populares de TMDb ahora mismo (no vote_average como el resto
     del módulo) -- para "puntuar más" (pedido de Matías, 2026-08-03): la
     idea es justamente que el usuario reconozca algo popular que vio y
-    quizás se olvidó de anotar, no descubrir algo de nicho."""
+    quizás se olvidó de anotar, no descubrir algo de nicho. TMDb "popular"
+    incluye estrenos futuros con mucho hype (bug real reportado 2026-08-03:
+    salió "Avengers: Doomsday", 2026, sin haberse estrenado todavía) -- se
+    descartan los que su fecha de estreno/emisión sea posterior a hoy, algo
+    imposible de haber visto."""
     api_key = os.environ.get("TMDB_API_KEY")
     if not api_key:
         raise TmdbError("TMDB_API_KEY no configurada.")
     genre_tag_map = GENRE_ID_TAG_MAP if kind == "movie" else TV_GENRE_ID_TAG_MAP
+    date_field = "release_date" if kind == "movie" else "first_air_date"
+    today = datetime.date.today().isoformat()
     params = {"api_key": api_key, "language": "en-US", "page": page}
     data = _get_json(f"{POPULAR_URL[kind]}?{urllib.parse.urlencode(params)}")
     return [
         result
         for raw in data.get("results", [])
-        if (result := _map_result(raw, kind, genre_tag_map)) is not None
+        if (raw.get(date_field) or "") <= today
+        and (result := _map_result(raw, kind, genre_tag_map)) is not None
     ]
 
 

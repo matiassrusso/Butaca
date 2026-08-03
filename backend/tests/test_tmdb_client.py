@@ -1532,3 +1532,28 @@ def test_fetch_weekly_trending_does_not_alias_the_cached_dict(monkeypatch) -> No
     second = tmdb_client.fetch_weekly_trending()
 
     assert second[0]["title"] == "X"
+
+
+def test_fetch_popular_titles_excludes_unreleased_titles(monkeypatch) -> None:
+    # bug real reportado por Matías (2026-08-03): "puntuar más" ofreció
+    # "Avengers: Doomsday" (2026, sin estrenar todavía) -- imposible haberla
+    # visto. TMDb "popular" mezcla estrenos futuros con mucho hype, hay que
+    # filtrar por fecha real, no solo por año (mismo año que hoy no alcanza).
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    today = tmdb_client.datetime.date.today().isoformat()
+    future_date = tmdb_client.datetime.date.today() + tmdb_client.datetime.timedelta(days=30)
+    monkeypatch.setattr(
+        tmdb_client,
+        "_get_json",
+        lambda url: {
+            "results": [
+                {"id": 1, "title": "Ya Estrenada", "release_date": today, "genre_ids": [28]},
+                {"id": 2, "title": "Todavia No Sale", "release_date": future_date.isoformat(), "genre_ids": [28]},
+            ]
+        },
+    )
+
+    popular = tmdb_client.fetch_popular_titles("movie", 1)
+
+    titles = {item["title"] for item in popular}
+    assert titles == {"Ya Estrenada"}
