@@ -193,6 +193,31 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
       → `POST /profile/rate` 201, "No la vi" avanzó sin persistir nada, y
       una tanda nueva ya no ofreció el título recién puntuado.
 
+      **Rediseñada la fuente 2026-08-03 tras feedback de Matías** ("cada
+      usuario debería tener una lista de películas MUY POPULARES que no
+      haya visto... la lista tiene que ir rotando a medida que vota, así
+      la próxima vez le aparecen siempre nuevas opciones"). Dos cambios:
+      1. **Fuente:** de `title_clusters` (la muestra clusterizada de
+         vibras, pensada para diversidad, no para popularidad) a populares
+         reales de TMDb — nueva `tmdb_client.fetch_popular_titles(kind,
+         page)` sobre `/movie/popular` y `/tv/popular`, paginando movies y
+         series intercalados hasta juntar la tanda (`SWIPE_POPULAR_MAX_PAGES
+         = 15` de tope). El objetivo es justamente que el usuario reconozca
+         algo popular que vio y se olvidó de anotar, lo opuesto de lo que
+         busca la semilla de vibras.
+      2. **Rotación real:** nueva tabla `swipe_asked_titles` — cada título
+         que una tanda devuelve queda registrado ahí al toque (lo puntúe o
+         no), y la próxima tanda lo excluye igual que a lo ya visto. Sin
+         esto, "no la vi" no dejaba rastro y el mismo título podía
+         reaparecer en la siguiente tanda.
+      Se sacó el fallback a `onboarding_titles.py` (ya no hace falta: TMDb
+      popular tiene cientos de páginas, muy distinto del pool chico de
+      title_clusters que sí podía agotarse). 5 tests reescritos, 367 en
+      total. **Verificado end-to-end con TMDb real:** primera tanda trajo
+      títulos reconocibles (Vikings, Modern Family, Interstellar, Avengers,
+      Spider-Man...), la segunda tanda no repitió ni un solo título de la
+      primera.
+
 - [x] **Juegos dentro del sitio** (idea de Matías, 2026-08-02).
       El criterio para elegir: **priorizar los que además generan señal de
       gusto**, porque ahí el juego se paga solo — entretiene y de paso

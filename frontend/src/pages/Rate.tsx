@@ -107,8 +107,8 @@ export default function Rate() {
             ¿Qué más <span className="text-accent italic font-serif normal-case tracking-normal">viste</span>?
           </h1>
           <p className="font-mono text-xs text-muted-foreground mt-4">
-            Cuanto más puntúes, mejores matches. Ni el título ni la muestra son curados a mano: salen de
-            la misma variedad que usa el picker de vibras.
+            Cuanto más puntúes, mejores matches. Te mostramos lo más popular real de TMDb que todavía
+            no tenés en tu perfil -- pensado para lo que quizás viste y te olvidaste de anotar.
           </p>
         </header>
 

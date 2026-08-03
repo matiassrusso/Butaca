@@ -1636,71 +1636,91 @@ def test_swipe_batch_returns_empty_without_tmdb_key(monkeypatch) -> None:
     assert response.json()["titles"] == []
 
 
-def test_swipe_batch_resolves_random_cluster_titles(monkeypatch) -> None:
+def _fake_popular(movies_by_page: dict, series_by_page: dict):
+    def fake(kind: str, page: int) -> list[dict]:
+        source = movies_by_page if kind == "movie" else series_by_page
+        return source.get(page, [])
+
+    return fake
+
+
+def test_swipe_batch_resolves_popular_titles(monkeypatch) -> None:
+    # rediseño 2026-08-03 (pedido de Matías): la fuente pasó de la muestra
+    # clusterizada de vibras a populares reales de TMDb.
     monkeypatch.setenv("TMDB_API_KEY", "fake-key")
     monkeypatch.setattr(
-        "backend.app.main.db.get_random_cluster_keys",
-        lambda limit: [(1, "movie"), (2, "movie")],
+        "backend.app.main.tmdb_client.fetch_popular_titles",
+        _fake_popular(
+            movies_by_page={1: [{"tmdb_id": 1, "title": "Popular Movie", "year": 2024, "kind": "movie", "poster_path": None}]},
+            series_by_page={1: [{"tmdb_id": 2, "title": "Popular Series", "year": 2024, "kind": "series", "poster_path": None}]},
+        ),
     )
-    monkeypatch.setattr(
-        "backend.app.main.tmdb_client.fetch_title_by_id",
-        lambda tmdb_id, kind="movie": {
-            "tmdb_id": tmdb_id, "title": f"Cluster Movie {tmdb_id}", "year": 2010, "kind": "movie",
-            "poster_path": f"p{tmdb_id}.jpg",
-        },
-    )
-    headers = _auth_headers("swipecluster")
+    headers = _auth_headers("swipepopular")
 
     response = client.get("/titles/swipe-batch", headers=headers)
 
     assert response.status_code == 200
     titles = {item["title"] for item in response.json()["titles"]}
-    assert titles == {"Cluster Movie 1", "Cluster Movie 2"}
+    assert titles == {"Popular Movie", "Popular Series"}
 
 
 def test_swipe_batch_excludes_already_rated_titles(monkeypatch) -> None:
     monkeypatch.setenv("TMDB_API_KEY", "fake-key")
     monkeypatch.setattr(
-        "backend.app.main.db.get_random_cluster_keys",
-        lambda limit: [(1, "movie"), (2, "movie")],
-    )
-    monkeypatch.setattr(
-        "backend.app.main.tmdb_client.fetch_title_by_id",
-        lambda tmdb_id, kind="movie": {
-            "tmdb_id": tmdb_id, "title": f"Cluster Movie {tmdb_id}", "year": 2010, "kind": "movie",
-            "poster_path": None,
-        },
+        "backend.app.main.tmdb_client.fetch_popular_titles",
+        _fake_popular(
+            movies_by_page={
+                1: [
+                    {"tmdb_id": 1, "title": "Popular Movie", "year": 2024, "kind": "movie", "poster_path": None},
+                    {"tmdb_id": 2, "title": "Other Movie", "year": 2024, "kind": "movie", "poster_path": None},
+                ]
+            },
+            series_by_page={},
+        ),
     )
     headers = _auth_headers("swipeexclude")
     client.post(
         "/recommend/manual",
         headers=headers,
-        json={"ratings": _MANUAL_RATINGS + [{"title": "Cluster Movie 1", "rating": 4.0}]},
+        json={"ratings": _MANUAL_RATINGS + [{"title": "Popular Movie", "rating": 4.0}]},
     )
 
     response = client.get("/titles/swipe-batch", headers=headers)
 
     titles = {item["title"] for item in response.json()["titles"]}
-    assert "Cluster Movie 1" not in titles
-    assert "Cluster Movie 2" in titles
+    assert "Popular Movie" not in titles
+    assert "Other Movie" in titles
 
 
-def test_swipe_batch_falls_back_to_onboarding_seeds_when_cluster_is_empty(monkeypatch) -> None:
+def test_swipe_batch_never_repeats_a_title_across_calls(monkeypatch) -> None:
+    # pedido textual de Matías (2026-08-03): "la lista tiene que ir rotando
+    # a medida que el usuario va votando... así la próxima vez que aprieta
+    # 'puntuar más' le aparecen siempre nuevas opciones" -- ofrecida una vez
+    # (puntuada o no), un título no puede volver a aparecer.
     monkeypatch.setenv("TMDB_API_KEY", "fake-key")
-    monkeypatch.setattr("backend.app.main.db.get_random_cluster_keys", lambda limit: [])
+    # SWIPE_BATCH_SIZE (20) títulos en la página 1 -- la primera tanda se
+    # llena entera ahí y nunca toca la página 2.
+    page_one = [
+        {"tmdb_id": n, "title": f"Page One Movie {n}", "year": 2024, "kind": "movie", "poster_path": None}
+        for n in range(1, 21)
+    ]
+    page_two = [{"tmdb_id": 99, "title": "Page Two Movie", "year": 2024, "kind": "movie", "poster_path": None}]
     monkeypatch.setattr(
-        "backend.app.main.tmdb_client.search_title",
-        lambda title, year=None: {
-            "tmdb_id": 42, "title": title, "year": year or 2000, "kind": "movie", "poster_path": "p.jpg",
-        },
+        "backend.app.main.tmdb_client.fetch_popular_titles",
+        _fake_popular(movies_by_page={1: page_one, 2: page_two}, series_by_page={}),
     )
-    headers = _auth_headers("swipefallback")
+    headers = _auth_headers("swiperotate")
 
-    response = client.get("/titles/swipe-batch", headers=headers)
+    first = client.get("/titles/swipe-batch", headers=headers).json()["titles"]
+    second = client.get("/titles/swipe-batch", headers=headers).json()["titles"]
 
-    assert response.status_code == 200
-    titles = {item["title"] for item in response.json()["titles"]}
-    assert titles  # el fallback de onboarding_titles.py lo llenó
+    first_titles = {item["title"] for item in first}
+    second_titles = {item["title"] for item in second}
+    assert first_titles == {item["title"] for item in page_one}
+    # la segunda tanda ya no tiene nada de la página 1 para ofrecer (todo
+    # quedó registrado como "ya ofrecido") y pasa a la página 2
+    assert first_titles.isdisjoint(second_titles)
+    assert second_titles == {"Page Two Movie"}
 
 
 def test_pairwise_match_requires_auth() -> None:

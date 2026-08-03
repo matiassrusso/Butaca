@@ -81,6 +81,17 @@ CREATE TABLE IF NOT EXISTS rated_items (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- "puntuar más" (/titles/swipe-batch): registra cada título YA ofrecido a
+-- este usuario (lo haya puntuado o marcado "no la vi") para que la próxima
+-- tanda rote de verdad y nunca repita nada -- pedido explícito de Matías,
+-- 2026-08-03.
+CREATE TABLE IF NOT EXISTS swipe_asked_titles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    title TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- juego "¿cuál te gustó más?": solo compara títulos que el usuario YA vio y
 -- puntuó (nunca inventa un "vista" falso). Elegir un ganador no le pone un
 -- rating nuevo -- ambos ya tienen uno real -- sino que queda como preferencia
@@ -224,6 +235,13 @@ CREATE TABLE IF NOT EXISTS rated_items (
     watched_date TEXT NOT NULL DEFAULT '',
     source TEXT NOT NULL DEFAULT 'import',
     tmdb_id INTEGER,
+    created_at TEXT NOT NULL DEFAULT ({_PG_NOW})
+);
+
+CREATE TABLE IF NOT EXISTS swipe_asked_titles (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    title TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT ({_PG_NOW})
 );
 
@@ -698,6 +716,24 @@ def save_rated_items(
                 (user_id, title, rating, review, watched_date, source, tmdb_id)
                 for title, rating, review, watched_date, source, tmdb_id in items
             ],
+        )
+
+
+def get_swipe_asked_titles(user_id: int) -> set[str]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT title FROM swipe_asked_titles WHERE user_id = ?", (user_id,)
+        ).fetchall()
+    return {row["title"].strip().lower() for row in rows}
+
+
+def record_swipe_asked_titles(user_id: int, titles: list[str]) -> None:
+    if not titles:
+        return
+    with get_connection() as conn:
+        conn.executemany(
+            "INSERT INTO swipe_asked_titles (user_id, title) VALUES (?, ?)",
+            [(user_id, title) for title in titles],
         )
 
 

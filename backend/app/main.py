@@ -73,7 +73,8 @@ WATCHLIST_MATCH_CAP = 60  # how many watchlist titles to resolve against TMDb pe
 MOVEMENT_MEMBER_CAP = 40  # títulos por movimiento elegido que se resuelven contra TMDb
 MIN_MOVEMENT_SIZE = 6  # un movimiento con menos títulos que una tanda de picks no se ofrece
 SWIPE_BATCH_SIZE = 20  # cuántos títulos sin puntuar se ofrecen por tanda en la sección de swipe
-SWIPE_CLUSTER_OVERSAMPLE = 3  # margen para sobrevivir el filtro de "ya puntuado"
+SWIPE_CLUSTER_OVERSAMPLE = 3  # margen para sobrevivir el filtro de "ya puntuado" (usado por trivia)
+SWIPE_POPULAR_MAX_PAGES = 15  # tope de páginas de populares a revisar antes de rendirse
 TRIVIA_OPTION_COUNT = 4  # una correcta + 3 distractores
 TRIVIA_ATTEMPTS = 4  # cuántos pools random se prueban antes de rendirse (ver _build_trivia_question)
 _VIBE_RECOMPUTE_LOCK = threading.Lock()
@@ -1283,13 +1284,47 @@ def _unwatched_candidate_pool(user_id: int, count: int, extra_exclude: set[str] 
     return picked[:count]
 
 
+def _swipe_popular_pool(user_id: int, count: int) -> list[dict]:
+    """Populares real de TMDb (movies + series intercalados) para "puntuar
+    más" -- rediseñado 2026-08-03 a pedido de Matías: la idea es que el
+    usuario reconozca algo popular que vio y quizás se olvidó de anotar, no
+    descubrir algo de nicho (por eso populares reales, no la muestra
+    clusterizada de vibras). Excluye lo ya visto Y lo ya ofrecido en una
+    tanda anterior (`swipe_asked_titles`) para que la próxima tanda rote de
+    verdad: "así la próxima vez que aprieta 'puntuar más' le aparecen
+    siempre nuevas opciones", pedido textual."""
+    if not tmdb_client.is_configured():
+        return []
+    watched_titles = {item["title"].strip().lower() for item in db.get_watched_items(user_id)}
+    seen_titles = watched_titles | db.get_swipe_asked_titles(user_id)
+
+    picked: list[dict] = []
+    for page in range(1, SWIPE_POPULAR_MAX_PAGES + 1):
+        if len(picked) >= count:
+            break
+        for kind in ("movie", "series"):
+            try:
+                results = tmdb_client.fetch_popular_titles(kind, page)
+            except tmdb_client.TmdbError:
+                continue
+            for item in results:
+                key = item["title"].strip().lower()
+                if key in seen_titles:
+                    continue
+                seen_titles.add(key)
+                picked.append(item)
+    return picked[:count]
+
+
 @app.get("/titles/swipe-batch", response_model=OnboardingTitlesResponse)
 def swipe_batch(user: sqlite3.Row = Depends(auth.get_current_user)) -> OnboardingTitlesResponse:
-    """Tanda random de títulos sin puntuar para la sección de swipe "marcá lo
-    que viste" (idea de Matías, 2026-08-02): un lugar donde volver cuando
-    quiera y sumar de a poco, sin depender del onboarding (una vez) o un
-    reimport de Letterboxd."""
-    picked = _unwatched_candidate_pool(user["id"], SWIPE_BATCH_SIZE)
+    """Tanda de títulos MUY POPULARES sin puntuar para la sección de swipe
+    "marcá lo que viste" (idea de Matías, 2026-08-02): un lugar donde volver
+    cuando quiera y sumar de a poco, sin depender del onboarding (una vez) o
+    un reimport de Letterboxd. Cada título devuelto queda registrado como
+    "ya ofrecido" -- la próxima tanda nunca lo repite, la hayas puntuado o
+    marcado "no la vi"."""
+    picked = _swipe_popular_pool(user["id"], SWIPE_BATCH_SIZE)
     titles = [
         OnboardingTitle(
             title=item["title"],
@@ -1300,6 +1335,8 @@ def swipe_batch(user: sqlite3.Row = Depends(auth.get_current_user)) -> Onboardin
         )
         for item in picked
     ]
+    if titles:
+        db.record_swipe_asked_titles(user["id"], [t.title for t in titles])
     return OnboardingTitlesResponse(titles=titles)
 
 
