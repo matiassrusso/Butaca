@@ -265,7 +265,7 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
       reciba un why propio en vez de heredar la plantilla (ataca el síntoma,
       que es lo que se ve).
 
-- [ ] **Ampliar la semilla de la Fase 4: la muestra está sesgada a anime y
+- [x] **Ampliar la semilla de la Fase 4: la muestra está sesgada a anime y
       cine coreano** (detectado 2026-08-02 mirando el picker ya en
       producción, pedido de Matías de dejarlo anotado).
       **Síntoma medido** sobre los 39 movimientos que se ofrecen hoy: 9 son
@@ -293,6 +293,27 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
       `title_embeddings` sin gastar nada; los nuevos se embeben rápido
       (NVIDIA hizo 500 en 10s). Lo caro sigue siendo bajar metadata de TMDb
       (~2 min cada 940 títulos) y el labeling.
+      **Resuelto (código) 2026-08-03 con la palanca de mayor impacto: mezclar
+      lo mejor puntuado por década.** Nueva `tmdb_client.fetch_top_rated_by_decade(kind, decade, pages)`
+      (generaliza `_fetch_weekly_classics` a movies+series y cualquier
+      década) + `vibes_clustering._SEED_DECADES = (1950..2020)`: `_seed_titles`
+      ahora suma 16 pools más (8 décadas × movie/series) por `vote_average.desc`,
+      intercaladas con las 5 pools de mood existentes en el mismo round-robin
+      de siempre (dedup por `tmdb_id`+`kind` sin tocar). 2 tests nuevos, 348
+      en total.
+      **Verificado con la TMDB_API_KEY real** (Matías la actualizó esta
+      sesión): 1970s series trae *Fawlty Towers*, *Columbo*, *El Chavo del
+      Ocho*, *The Muppet Show* — ni un anime forzado afuera, pero ya no es
+      monocultivo. 1990s mezcla *The Sopranos* y *Batman: The Animated
+      Series* con anime real de esa era (*Evangelion*, *Slam Dunk* — quedan
+      porque de verdad son de los mejor puntuados, no se los excluye a
+      propósito). El objetivo nunca fue sacar el anime/K-drama, era que
+      dejara de ser un tercio de la muestra por default de popularidad.
+      **Pendiente, no incluido acá:** esto solo cambia lo que la *próxima*
+      corrida de `POST /admin/vibes/recompute` va a ver — los 39 movimientos
+      que hoy están live en butaca.xyz no cambian hasta que se corra de
+      nuevo, y esa corrida tarda 6,5-10+ min (ver el ítem de abajo sobre que
+      corre sincrónico). Decisión de Matías cuándo/cómo dispararla.
 
 - [ ] **`POST /admin/vibes/recompute` corre sincrónico y tarda minutos** (6,5
       min medidos con cuota agotada; con cuota disponible son ~10 min solo de

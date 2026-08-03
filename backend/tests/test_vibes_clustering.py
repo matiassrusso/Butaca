@@ -62,8 +62,36 @@ def test_seed_titles_interleaves_discover_biases(monkeypatch) -> None:
         return [{"tmdb_id": identifier, "kind": "movie", "title": mood, "year": 2000, "tags": []}]
 
     monkeypatch.setattr(vibes_clustering.tmdb_client, "fetch_candidates", fake_fetch)
+    monkeypatch.setattr(vibes_clustering.tmdb_client, "fetch_top_rated_by_decade", lambda kind, decade, pages=1: [])
 
     assert [item["tmdb_id"] for item in vibes_clustering._seed_titles(cap=5)] == [0, 1, 2, 3, 4]
+
+
+def test_seed_titles_folds_in_top_rated_by_decade_pools(monkeypatch) -> None:
+    """El sesgo a anime/K-drama sale de que fetch_candidates ordena por
+    popularidad (medido en TASKS.md); estas pools ordenan por vote_average
+    por década en cambio, y tienen que entrar a la semilla igual que las de
+    mood, no quedar sin usar."""
+
+    def fake_fetch(mood, pages=2):
+        identifier = list(vibes_clustering._SEED_MOODS).index(mood)
+        return [{"tmdb_id": identifier, "kind": "movie", "title": mood, "year": 2000, "tags": []}]
+
+    decade_calls: list[tuple[str, int]] = []
+
+    def fake_decade(kind, decade, pages=1):
+        decade_calls.append((kind, decade))
+        if (kind, decade) == ("movie", vibes_clustering._SEED_DECADES[0]):
+            return [{"tmdb_id": 100, "kind": "movie", "title": "Classic", "year": decade, "tags": []}]
+        return []
+
+    monkeypatch.setattr(vibes_clustering.tmdb_client, "fetch_candidates", fake_fetch)
+    monkeypatch.setattr(vibes_clustering.tmdb_client, "fetch_top_rated_by_decade", fake_decade)
+
+    seed = vibes_clustering._seed_titles(cap=6)
+
+    assert decade_calls  # las pools de década se consultaron de verdad
+    assert 100 in [item["tmdb_id"] for item in seed]
 
 
 def test_leiden_cluster_ids_are_deterministic_and_empty_groups_are_dropped() -> None:

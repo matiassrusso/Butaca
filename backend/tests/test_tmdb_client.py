@@ -1463,6 +1463,31 @@ def test_fetch_weekly_classics_filters_by_the_rotating_decade(monkeypatch) -> No
     assert picks[0]["title"] == "Classic"
 
 
+def test_fetch_top_rated_by_decade_uses_the_right_date_field_per_kind(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    captured: dict[str, str] = {}
+
+    def fake_get_json(url: str) -> dict:
+        if "discover/movie" in url:
+            captured["movie"] = url
+            return {"results": [{"id": 1, "title": "Old Movie", "release_date": "1975-01-01", "genre_ids": [18]}]}
+        captured["series"] = url
+        return {"results": [{"id": 2, "name": "Old Show", "first_air_date": "1975-01-01", "genre_ids": [18]}]}
+
+    monkeypatch.setattr(tmdb_client, "_get_json", fake_get_json)
+
+    movies = tmdb_client.fetch_top_rated_by_decade("movie", 1970)
+    series = tmdb_client.fetch_top_rated_by_decade("series", 1970)
+
+    assert "primary_release_date.gte=1970-01-01" in captured["movie"]
+    assert "primary_release_date.lte=1979-12-31" in captured["movie"]
+    assert "sort_by=vote_average.desc" in captured["movie"]
+    assert "first_air_date.gte=1970-01-01" in captured["series"]
+    assert "first_air_date.lte=1979-12-31" in captured["series"]
+    assert movies[0]["title"] == "Old Movie"
+    assert series[0]["title"] == "Old Show"
+
+
 def test_fetch_weekly_trending_backfills_with_trending_when_classics_fail(monkeypatch) -> None:
     # variedad de épocas es best-effort — si discover falla, las 5 siguen
     # completas con más trending en vez de devolver menos

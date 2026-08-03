@@ -43,6 +43,10 @@ METADATA_WORKERS = 8
 LABEL_DELAY_SECONDS = 2
 MAX_LABEL_LENGTH = 40  # el prompt pide 2 a 5 palabras; más que esto no es un nombre
 _SEED_MOODS = ("", "action", "funny", "romance", "psychological")
+# ataca el sesgo de popularidad de raíz (TASKS.md, 2026-08-02: 13 de 39
+# movimientos eran anime o cine coreano porque /discover/tv por popularidad
+# está dominado por eso hoy) en vez de compensarlo con más sesiones de mood.
+_SEED_DECADES = (1950, 1960, 1970, 1980, 1990, 2000, 2010, 2020)
 
 
 class VibeError(Exception):
@@ -64,6 +68,15 @@ def _seed_titles(cap: int = 1500) -> list[dict]:
     pools: list[list[dict]] = []
     for mood in _SEED_MOODS:
         pools.append([item for item in tmdb_client.fetch_candidates(mood, pages=pages) if item.get("tmdb_id") is not None])
+    for decade in _SEED_DECADES:
+        for kind in ("movie", "series"):
+            pools.append(
+                [
+                    item
+                    for item in tmdb_client.fetch_top_rated_by_decade(kind, decade, pages=1)
+                    if item.get("tmdb_id") is not None
+                ]
+            )
     seed: list[dict] = []
     seen: set[tuple[int, str]] = set()
     while len(seed) < cap and any(pools):

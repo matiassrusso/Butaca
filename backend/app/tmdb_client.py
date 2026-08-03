@@ -636,6 +636,41 @@ def _fetch_weekly_classics(api_key: str, seen_ids: set[int], count: int) -> list
     return picks
 
 
+def fetch_top_rated_by_decade(kind: str, decade: int, pages: int = 1) -> list[dict]:
+    """Lo mejor puntuado (vote_average.desc) de una década/formato dado —
+    mismo patrón que _fetch_weekly_classics, generalizado a movies+series y
+    cualquier década. Usado por vibes_clustering para mezclar en la semilla
+    de la Fase 4: el discover ordenado por popularidad que usa fetch_candidates
+    está hoy dominado por anime/K-drama en /tv (medido 2026-08-02: 13 de 39
+    movimientos eran justamente eso), y esto ataca el sesgo de raíz en vez de
+    compensarlo con más géneros."""
+    api_key = os.environ.get("TMDB_API_KEY")
+    if not api_key:
+        raise TmdbError("TMDB_API_KEY no configurada.")
+
+    url = DISCOVER_URL if kind == "movie" else DISCOVER_TV_URL
+    genre_tag_map = GENRE_ID_TAG_MAP if kind == "movie" else TV_GENRE_ID_TAG_MAP
+    date_field = "primary_release_date" if kind == "movie" else "first_air_date"
+
+    items: list[dict] = []
+    for page in range(1, pages + 1):
+        params = {
+            "api_key": api_key,
+            "language": "en-US",
+            "sort_by": "vote_average.desc",
+            "vote_count.gte": 200,
+            "page": page,
+            f"{date_field}.gte": f"{decade}-01-01",
+            f"{date_field}.lte": f"{decade + 9}-12-31",
+        }
+        data = _get_json(f"{url}?{urllib.parse.urlencode(params)}")
+        for raw in data.get("results", []):
+            result = _map_result(raw, kind, genre_tag_map)
+            if result is not None:
+                items.append(result)
+    return items
+
+
 def fetch_weekly_trending() -> list[dict]:
     """5 películas semanales: 3 de tendencia real de TMDb
     (/trending/movie/week) + 2 de variedad de épocas (WEEKLY_CLASSIC_SLOTS,
