@@ -3,12 +3,13 @@ import zipfile
 
 from fastapi.testclient import TestClient
 
-from backend.app import db, letterboxd_scrape, onboarding_titles
+from backend.app import db, letterboxd_scrape, onboarding_titles, vibes_clustering
 from backend.app.llm_client import LlmError
 from backend.app.main import (
     TASTE_TAG_LOOKUP_CAP,
     _enrich_loved_ratings_with_genre_tags,
     _movement_candidates,
+    _VIBE_RECOMPUTE_LOCK,
     app,
 )
 from backend.app.models import RatedItem
@@ -2108,11 +2109,35 @@ def test_weekly_falls_back_to_heuristic_when_llm_fails(monkeypatch) -> None:
     assert len(response.json()["recommendations"]) == 5
 
 
-def test_admin_vibes_recompute_is_gated_and_calls_the_offline_job(monkeypatch) -> None:
+class _SyncThread:
+    """Corre el target al toque en vez de en un thread real, así el test
+    puede afirmar el resultado sin sleeps ni polling contra un hilo de
+    verdad."""
+
+    def __init__(self, target, daemon=None):
+        self._target = target
+
+    def start(self) -> None:
+        self._target()
+
+
+def test_admin_vibes_recompute_is_gated(monkeypatch) -> None:
     assert client.post("/admin/vibes/recompute").status_code == 404
+    assert client.get("/admin/vibes/recompute/status").status_code == 404
 
     monkeypatch.setenv("BUTACA_ADMIN_TOKEN", "secret")
     assert client.post("/admin/vibes/recompute", headers={"X-Admin-Token": "wrong"}).status_code == 403
+    assert (
+        client.get("/admin/vibes/recompute/status", headers={"X-Admin-Token": "wrong"}).status_code
+        == 403
+    )
+
+
+def test_admin_vibes_recompute_runs_in_background_and_status_reports_the_result(monkeypatch) -> None:
+    # el POST responde al toque, sin esperar los 6,5-10+ min que puede tardar
+    # una corrida pesada — Render corta requests antes de eso (TASKS.md).
+    monkeypatch.setenv("BUTACA_ADMIN_TOKEN", "secret")
+    monkeypatch.setattr("backend.app.main.threading.Thread", _SyncThread)
     monkeypatch.setattr(
         "backend.app.main.vibes_clustering.recompute",
         lambda: {"seeded": 50, "embedded": 50, "l1_clusters": 3, "l2_clusters": 6},
@@ -2121,7 +2146,47 @@ def test_admin_vibes_recompute_is_gated_and_calls_the_offline_job(monkeypatch) -
     response = client.post("/admin/vibes/recompute", headers={"X-Admin-Token": "secret"})
 
     assert response.status_code == 200
-    assert response.json()["seeded"] == 50
+    assert response.json() == {"status": "started"}
+
+    status = client.get("/admin/vibes/recompute/status", headers={"X-Admin-Token": "secret"})
+    assert status.json() == {
+        "status": "done",
+        "result": {"seeded": 50, "embedded": 50, "l1_clusters": 3, "l2_clusters": 6},
+    }
+
+
+def test_admin_vibes_recompute_status_reports_error_and_releases_the_lock(monkeypatch) -> None:
+    monkeypatch.setenv("BUTACA_ADMIN_TOKEN", "secret")
+    monkeypatch.setattr("backend.app.main.threading.Thread", _SyncThread)
+
+    def boom():
+        raise vibes_clustering.VibeError("sin cuota")
+
+    monkeypatch.setattr("backend.app.main.vibes_clustering.recompute", boom)
+
+    client.post("/admin/vibes/recompute", headers={"X-Admin-Token": "secret"})
+
+    status = client.get("/admin/vibes/recompute/status", headers={"X-Admin-Token": "secret"})
+    assert status.json() == {"status": "error", "error": "sin cuota"}
+
+    # el lock se liberó pese al error -- una corrida nueva no da 409
+    monkeypatch.setattr(
+        "backend.app.main.vibes_clustering.recompute",
+        lambda: {"seeded": 1, "embedded": 1, "l1_clusters": 1, "l2_clusters": 1},
+    )
+    retry = client.post("/admin/vibes/recompute", headers={"X-Admin-Token": "secret"})
+    assert retry.status_code == 200
+
+
+def test_admin_vibes_recompute_rejects_a_second_call_while_one_is_running(monkeypatch) -> None:
+    monkeypatch.setenv("BUTACA_ADMIN_TOKEN", "secret")
+
+    assert _VIBE_RECOMPUTE_LOCK.acquire(blocking=False)
+    try:
+        response = client.post("/admin/vibes/recompute", headers={"X-Admin-Token": "secret"})
+        assert response.status_code == 409
+    finally:
+        _VIBE_RECOMPUTE_LOCK.release()
 
 
 def test_vibe_l2_tag_is_injected_and_uses_its_label_in_the_why() -> None:

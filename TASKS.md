@@ -524,17 +524,21 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
          mismo criterio de validar reintroduciendo el bug) + test de
          persistencia (`test_recommend_manual_persists_source_as_manual`).
       235 tests.
-- [ ] **Hallazgo relacionado, no arreglado esta sesión:** el mismo problema
-      de "puntaje sintético citado como preciso" existe también DENTRO de
-      un import real de Letterboxd — `letterboxd_zip.py` usa
-      `LIKE_RATING = 4.5` para títulos que el usuario marcó "like" sin
-      puntuarlos con estrellas, y `FAVORITE_RATING` para "favoritos" — ambos
-      quedan con `source="import"` (correcto a nivel de fuente) pero
-      también son ratings inventados, no un puntaje real que el usuario
-      haya dado. Si esto molesta igual que el caso de "Sin cuenta", hace
-      falta otro eje además de `source` (algo como "rating preciso sí/no")
-      para distinguirlo del caso de un rating real de Letterboxd que
-      justo también sea 4.5.
+- [x] **Hallazgo relacionado — resultó estar ya resuelto, la nota estaba
+      desactualizada (verificado 2026-08-03 antes de picar código nuevo).**
+      Decía que `LIKE_RATING`/`FAVORITE_RATING` (títulos "like"/"favorito"
+      de un import real de Letterboxd, sin estrellas) quedaban con
+      `source="import"` y por eso el LLM podía citarlos como puntaje
+      preciso. Al revisar `letterboxd_zip.py` de verdad, ambos usan
+      `source="like"` (no `"import"`) desde el commit `c0d0931`
+      (2026-07-31) — anterior a esta nota (2026-08-02). `llm_client._profile_block`
+      (línea ~133) y `History.tsx` (línea ~271) ya tratan `{"import", "star"}`
+      como preciso y todo lo demás (`"like"`, `"manual"`) como no preciso —
+      el eje "rating preciso sí/no" que pedía la nota **es** `source`, ya
+      existe, no hace falta agregar nada. No se tocó código: el eje se
+      reusa tal cual para el rating inferido del juego "¿cuál te gustó
+      más?" (ver más abajo), con un valor de `source` nuevo que cae del
+      lado no-preciso.
 - [ ] **Backlog de Matías repasado el 2026-07-30:**
       1. [x] Ampliar `KEYWORD_TAG_MAP` — hecho, ver entrada de Done más abajo.
       2. Typewriter para los "why" de la IA al abrir el poster (ya anotado

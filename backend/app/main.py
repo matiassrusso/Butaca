@@ -356,8 +356,7 @@ def title_verdict(
     return heuristic.recommendations[0]
 
 
-@app.get("/admin/stats")
-def admin_stats(x_admin_token: str | None = Header(default=None)) -> dict:
+def _require_admin_token(x_admin_token: str | None) -> None:
     # gated by a shared secret in BUTACA_ADMIN_TOKEN. When that env isn't
     # set (any environment that hasn't opted in) the endpoint 404s as if it
     # didn't exist, so it's never reachable in prod without deliberate setup.
@@ -366,25 +365,50 @@ def admin_stats(x_admin_token: str | None = Header(default=None)) -> dict:
         raise HTTPException(status_code=404, detail="No encontrado.")
     if not x_admin_token or not hmac.compare_digest(x_admin_token, expected):
         raise HTTPException(status_code=403, detail="Token de administrador inválido.")
+
+
+@app.get("/admin/stats")
+def admin_stats(x_admin_token: str | None = Header(default=None)) -> dict:
+    _require_admin_token(x_admin_token)
     return db.get_admin_stats()
+
+
+# corrido en un thread aparte (ver recompute_vibes): una corrida pesada de
+# verdad (semilla nueva, cache frío) puede tardar 10+ min, y Render corta el
+# request bastante antes de eso — devolver 200 al toque y dejar que el job
+# siga en background saca ese riesgo del todo. _VIBE_RECOMPUTE_LOCK sigue
+# siendo la única fuente de verdad sobre si hay una corrida en curso; este
+# dict es solo para que /admin/vibes/recompute/status tenga algo que mostrar.
+_VIBE_RECOMPUTE_STATE: dict = {"status": "idle"}
+
+
+def _run_vibe_recompute() -> None:
+    global _VIBE_RECOMPUTE_STATE
+    try:
+        result = vibes_clustering.recompute()
+        _VIBE_RECOMPUTE_STATE = {"status": "done", "result": result}
+    except (vibes_clustering.VibeError, tmdb_client.TmdbError) as exc:
+        logger.warning("Vibe recompute failed: %s", exc)
+        _VIBE_RECOMPUTE_STATE = {"status": "error", "error": str(exc)}
+    finally:
+        _VIBE_RECOMPUTE_LOCK.release()
 
 
 @app.post("/admin/vibes/recompute")
 def recompute_vibes(x_admin_token: str | None = Header(default=None)) -> dict:
-    expected = os.environ.get("BUTACA_ADMIN_TOKEN")
-    if not expected:
-        raise HTTPException(status_code=404, detail="No encontrado.")
-    if not x_admin_token or not hmac.compare_digest(x_admin_token, expected):
-        raise HTTPException(status_code=403, detail="Token de administrador inválido.")
+    _require_admin_token(x_admin_token)
     if not _VIBE_RECOMPUTE_LOCK.acquire(blocking=False):
         raise HTTPException(status_code=409, detail="El recálculo de vibras ya está corriendo.")
-    try:
-        return vibes_clustering.recompute()
-    except (vibes_clustering.VibeError, tmdb_client.TmdbError) as exc:
-        logger.warning("Vibe recompute failed: %s", exc)
-        raise HTTPException(status_code=502, detail="No se pudo recalcular las vibras.") from exc
-    finally:
-        _VIBE_RECOMPUTE_LOCK.release()
+    global _VIBE_RECOMPUTE_STATE
+    _VIBE_RECOMPUTE_STATE = {"status": "running"}
+    threading.Thread(target=_run_vibe_recompute, daemon=True).start()
+    return {"status": "started"}
+
+
+@app.get("/admin/vibes/recompute/status")
+def vibe_recompute_status(x_admin_token: str | None = Header(default=None)) -> dict:
+    _require_admin_token(x_admin_token)
+    return _VIBE_RECOMPUTE_STATE
 
 
 def _issue_email_verification(user_id: int, email: str | None) -> str:
