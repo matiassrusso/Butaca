@@ -193,13 +193,32 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
       → `POST /profile/rate` 201, "No la vi" avanzó sin persistir nada, y
       una tanda nueva ya no ofreció el título recién puntuado.
 
-- [ ] **Juegos dentro del sitio** (idea de Matías, 2026-08-02, sin scope
-      todavía). Anotada tal cual para no perderla; hay que definir qué juego
-      antes de estimar nada.
-      El criterio para elegir, cuando se retome: **priorizar los que además
-      generan señal de gusto**, porque ahí el juego se paga solo — entretiene
-      y de paso mejora las recomendaciones, en vez de ser una sección
-      aparte que hay que mantener sin que aporte al motor.
+- [x] **Juegos dentro del sitio** (idea de Matías, 2026-08-02).
+      El criterio para elegir: **priorizar los que además generan señal de
+      gusto**, porque ahí el juego se paga solo — entretiene y de paso
+      mejora las recomendaciones, en vez de ser una sección aparte que hay
+      que mantener sin que aporte al motor.
+      **Resuelto 2026-08-03 — Matías eligió arrancar con dos: "¿cuál te
+      gustó más?" (cumple el criterio) y trivia de cine (no lo cumple, la
+      pidió igual como puro entretenimiento).** Nuevo hub `/games` con un
+      link por juego, cada uno marcado si mejora los picks o no. **"¿Cuál
+      te gustó más?"** (`/games/pairwise`): `GET /games/pairwise` arma un
+      par sin puntuar del mismo pool que `/titles/swipe-batch` (factorizado
+      a `_unwatched_candidate_pool`, compartido entre los dos); el ganador
+      se guarda con `POST /games/pairwise/choose` con un rating inferido
+      (`GAME_PAIRWISE_RATING = 3.5`) y un `source` nuevo, `"game"` — mismo
+      eje "preciso sí/no" que ya distinguía import/star de manual/like,
+      reusado en vez de agregar uno nuevo (se sumó `"game"` al `Literal` de
+      `source`/`rating_source` en los 4 lugares del backend y los 3 del
+      frontend que lo repetían). El perdedor no se toca. 10 tests nuevos de
+      backend (361 en total). **Verificado end-to-end en el dev server
+      local** con TMDb real: par real cargado, elegir un póster guardó al
+      ganador con rating 3.5/source "game" (confirmado contra
+      `/history/watched`), y avanzó a un par nuevo.
+
+- [ ] **Trivia de cine** (segundo juego pedido junto con "¿cuál te gustó
+      más?", 2026-08-03) — puro entretenimiento, Matías lo pidió sabiendo
+      que no genera señal de gusto. En progreso.
 
 - [x] **Los match_score no pueden pasar de 86% salvo que matchee el director**
       (reportado por Matías 2026-08-02 mirando sus picks: "deberían darme

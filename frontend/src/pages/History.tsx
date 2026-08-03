@@ -22,7 +22,7 @@ type WatchedItem = {
   review: string;
   created_at: string;
   watched_date: string;
-  source: "import" | "manual" | "like" | "star";
+  source: "import" | "manual" | "like" | "star" | "game";
 };
 
 function formatSessionDate(value: string): string {

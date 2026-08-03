@@ -87,7 +87,7 @@ export type OnboardingTitle = {
   // solo viene seteado si el usuario ya puntuó este título antes — precarga
   // la grilla en vez de forzar a re-puntuar lo mismo cada sesión
   rating?: number | null;
-  rating_source?: "import" | "manual" | "like" | "star" | null;
+  rating_source?: "import" | "manual" | "like" | "star" | "game" | null;
 };
 
 const MIN_MANUAL_RATINGS = 10; // keep in sync with backend/app/main.py::MIN_MANUAL_RATINGS

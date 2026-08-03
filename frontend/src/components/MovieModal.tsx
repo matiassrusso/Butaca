@@ -40,7 +40,7 @@ export type MovieDetails = {
     buy: Provider[];
   } | null;
   user_rating: number | null;
-  rating_source: "import" | "manual" | "like" | "star" | null;
+  rating_source: "import" | "manual" | "like" | "star" | "game" | null;
 };
 
 // pedido de Matías: revelar el "why" con efecto máquina de escribir, pero

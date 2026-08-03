@@ -8,10 +8,12 @@ import { Footer } from "./components/Footer";
 import { Navbar } from "./components/Navbar";
 import { VerifyEmailBanner } from "./components/VerifyEmailBanner";
 import { AuthProvider } from "./hooks/useAuth";
+import Games from "./pages/Games";
 import History from "./pages/History";
 import Home from "./pages/Home";
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
+import PairwiseGame from "./pages/PairwiseGame";
 import Profile from "./pages/Profile";
 import Rate from "./pages/Rate";
 import Recommend from "./pages/Recommend";
@@ -27,6 +29,8 @@ function Router() {
       <Route path="/verify-email" component={VerifyEmail} />
       <Route path="/recommend" component={Recommend} />
       <Route path="/rate" component={Rate} />
+      <Route path="/games" component={Games} />
+      <Route path="/games/pairwise" component={PairwiseGame} />
       <Route path="/history" component={History} />
       <Route path="/profile" component={Profile} />
       <Route component={NotFound} />

@@ -1703,6 +1703,86 @@ def test_swipe_batch_falls_back_to_onboarding_seeds_when_cluster_is_empty(monkey
     assert titles  # el fallback de onboarding_titles.py lo llenó
 
 
+def test_pairwise_match_requires_auth() -> None:
+    assert client.get("/games/pairwise").status_code == 401
+
+
+def test_pairwise_match_returns_two_distinct_titles(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        "backend.app.main.db.get_random_cluster_keys",
+        lambda limit: [(1, "movie"), (2, "movie")],
+    )
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.fetch_title_by_id",
+        lambda tmdb_id, kind="movie": {
+            "tmdb_id": tmdb_id, "title": f"Cluster Movie {tmdb_id}", "year": 2010, "kind": "movie",
+            "poster_path": None,
+        },
+    )
+    headers = _auth_headers("pairwisematch")
+
+    response = client.get("/games/pairwise", headers=headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["left"]["title"] != body["right"]["title"]
+
+
+def test_pairwise_match_degrades_to_partial_pair_when_pool_is_thin(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setattr("backend.app.main.db.get_random_cluster_keys", lambda limit: [])
+    monkeypatch.setattr(
+        "backend.app.main.onboarding_titles.ONBOARDING_TITLES", [{"title": "Solo Seed", "year": 2000}]
+    )
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.search_title",
+        lambda title, year=None: {"tmdb_id": 1, "title": title, "year": year, "kind": "movie", "poster_path": None},
+    )
+    headers = _auth_headers("pairwisethin")
+
+    response = client.get("/games/pairwise", headers=headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["left"] is not None
+    assert body["right"] is None
+
+
+def test_pairwise_choose_persists_the_winner_with_a_synthetic_rating() -> None:
+    headers = _auth_headers("pairwisewin")
+
+    response = client.post(
+        "/games/pairwise/choose",
+        headers=headers,
+        json={"winner_title": "Aliens", "winner_tmdb_id": 679},
+    )
+
+    assert response.status_code == 201
+    watched = client.get("/history/watched", headers=headers).json()["items"]
+    assert any(
+        item["title"] == "Aliens" and item["rating"] == 3.5 and item["source"] == "game"
+        for item in watched
+    )
+
+
+def test_pairwise_choose_does_not_override_a_precise_rating() -> None:
+    headers = _auth_headers("pairwisepreserve")
+    user_id = db.get_user_by_username("pairwisepreserve")["id"]
+    db.save_rated_items(user_id, [("Aliens", 2.0, "", "", "star", 679)])
+
+    response = client.post(
+        "/games/pairwise/choose",
+        headers=headers,
+        json={"winner_title": "Aliens", "winner_tmdb_id": 679},
+    )
+
+    assert response.status_code == 201
+    assert response.json() == {"status": "preserved"}
+    watched = client.get("/history/watched", headers=headers).json()["items"]
+    assert any(item["title"] == "Aliens" and item["rating"] == 2.0 for item in watched)
+
+
 def test_onboarding_search_returns_matches(monkeypatch) -> None:
     monkeypatch.setenv("TMDB_API_KEY", "fake-key")
     monkeypatch.setattr(

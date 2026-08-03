@@ -35,6 +35,8 @@ from .models import (
     MovieDetails,
     OnboardingTitle,
     OnboardingTitlesResponse,
+    PairwiseChoiceRequest,
+    PairwiseMatchResponse,
     PasswordResetConfirmRequest,
     PasswordResetRequest,
     PickOption,
@@ -71,6 +73,11 @@ MOVEMENT_MEMBER_CAP = 40  # títulos por movimiento elegido que se resuelven con
 MIN_MOVEMENT_SIZE = 6  # un movimiento con menos títulos que una tanda de picks no se ofrece
 SWIPE_BATCH_SIZE = 20  # cuántos títulos sin puntuar se ofrecen por tanda en la sección de swipe
 SWIPE_CLUSTER_OVERSAMPLE = 3  # margen para sobrevivir el filtro de "ya puntuado"
+# rating inferido para el ganador del juego "¿cuál te gustó más?": elegir A
+# sobre B es preferencia relativa, no un puntaje que el usuario haya dado —
+# 3.5 cae en el rango "te gustó" de _rating_label (ni "te encantó" ni "no te
+# gustó"), la lectura más honesta de "lo preferiste, sin más detalle".
+GAME_PAIRWISE_RATING = 3.5
 _VIBE_RECOMPUTE_LOCK = threading.Lock()
 
 # ponytail: uvicorn only wires handlers for its own "uvicorn.*" loggers, not
@@ -1215,23 +1222,21 @@ def onboarding_search_endpoint(
     return OnboardingTitlesResponse(titles=[OnboardingTitle(**r) for r in results])
 
 
-@app.get("/titles/swipe-batch", response_model=OnboardingTitlesResponse)
-def swipe_batch(user: sqlite3.Row = Depends(auth.get_current_user)) -> OnboardingTitlesResponse:
-    """Tanda random de títulos sin puntuar para la sección de swipe "marcá lo
-    que viste" (idea de Matías, 2026-08-02): un lugar donde volver cuando
-    quiera y sumar de a poco, sin depender del onboarding (una vez) o un
-    reimport de Letterboxd.
-
-    Sale de title_clusters (la muestra clusterizada de la Fase 4, variada por
-    construcción) en vez de discover por popularidad — mismo motivo que la
-    semilla de vibras: discover ordenado por popularidad muestra siempre los
-    mismos blockbusters. Se completa con onboarding_titles.py si el cluster
-    no alcanza (usuario con casi todo puntuado, o title_clusters vacío/sin
-    correr la Fase 4 en este ambiente)."""
+def _unwatched_candidate_pool(user_id: int, count: int, extra_exclude: set[str] = frozenset()) -> list[dict]:
+    """Tanda random de títulos sin puntuar, dicts crudos con shape de TMDb
+    (title/year/kind/tmdb_id/poster_path). Sale de title_clusters (la
+    muestra clusterizada de la Fase 4, variada por construcción) en vez de
+    discover por popularidad — mismo motivo que la semilla de vibras:
+    discover ordenado por popularidad muestra siempre los mismos
+    blockbusters. Se completa con onboarding_titles.py si el cluster no
+    alcanza (usuario con casi todo puntuado, o title_clusters vacío/sin
+    correr la Fase 4 en este ambiente). Compartido por /titles/swipe-batch y
+    el juego "¿cuál te gustó más?"."""
     if not tmdb_client.is_configured():
-        return OnboardingTitlesResponse(titles=[])
+        return []
 
-    watched_titles = {item["title"].strip().lower() for item in db.get_watched_items(user["id"])}
+    watched_titles = {item["title"].strip().lower() for item in db.get_watched_items(user_id)}
+    seen_titles = watched_titles | extra_exclude
 
     def _resolve_by_id(key: tuple[int, str]) -> dict | None:
         try:
@@ -1239,21 +1244,21 @@ def swipe_batch(user: sqlite3.Row = Depends(auth.get_current_user)) -> Onboardin
         except tmdb_client.TmdbError:
             return None
 
-    cluster_keys = db.get_random_cluster_keys(SWIPE_BATCH_SIZE * SWIPE_CLUSTER_OVERSAMPLE)
+    cluster_keys = db.get_random_cluster_keys(count * SWIPE_CLUSTER_OVERSAMPLE)
     with ThreadPoolExecutor(max_workers=taste_profile.MATCH_WORKERS) as pool:
         resolved = list(pool.map(_resolve_by_id, cluster_keys))
 
-    candidates = [item for item in resolved if item]
-    seen_titles = set(watched_titles)
     picked = []
-    for item in candidates:
+    for item in resolved:
+        if not item:
+            continue
         key = item["title"].strip().lower()
         if key in seen_titles:
             continue
         seen_titles.add(key)
         picked.append(item)
 
-    if len(picked) < SWIPE_BATCH_SIZE:
+    if len(picked) < count:
         extra_seed = [t for t in onboarding_titles.ONBOARDING_TITLES if t["title"].strip().lower() not in seen_titles]
 
         def _match_curated(entry: dict) -> dict | None:
@@ -1274,6 +1279,16 @@ def swipe_batch(user: sqlite3.Row = Depends(auth.get_current_user)) -> Onboardin
             picked.append(item)
 
     random.shuffle(picked)
+    return picked[:count]
+
+
+@app.get("/titles/swipe-batch", response_model=OnboardingTitlesResponse)
+def swipe_batch(user: sqlite3.Row = Depends(auth.get_current_user)) -> OnboardingTitlesResponse:
+    """Tanda random de títulos sin puntuar para la sección de swipe "marcá lo
+    que viste" (idea de Matías, 2026-08-02): un lugar donde volver cuando
+    quiera y sumar de a poco, sin depender del onboarding (una vez) o un
+    reimport de Letterboxd."""
+    picked = _unwatched_candidate_pool(user["id"], SWIPE_BATCH_SIZE)
     titles = [
         OnboardingTitle(
             title=item["title"],
@@ -1282,9 +1297,51 @@ def swipe_batch(user: sqlite3.Row = Depends(auth.get_current_user)) -> Onboardin
             tmdb_id=item.get("tmdb_id"),
             poster_path=item.get("poster_path"),
         )
-        for item in picked[:SWIPE_BATCH_SIZE]
+        for item in picked
     ]
     return OnboardingTitlesResponse(titles=titles)
+
+
+@app.get("/games/pairwise", response_model=PairwiseMatchResponse)
+def pairwise_match(user: sqlite3.Row = Depends(auth.get_current_user)) -> PairwiseMatchResponse:
+    """Un par de títulos sin puntuar para el juego "¿cuál te gustó más?"
+    (idea de Matías, 2026-08-02: un juego que además genere señal de gusto,
+    no solo entretenga). Mismo pool que /titles/swipe-batch."""
+    picked = _unwatched_candidate_pool(user["id"], 2)
+    options = [
+        OnboardingTitle(
+            title=item["title"],
+            year=item.get("year") or 0,
+            kind=item.get("kind") or "movie",
+            tmdb_id=item.get("tmdb_id"),
+            poster_path=item.get("poster_path"),
+        )
+        for item in picked
+    ]
+    return PairwiseMatchResponse(
+        left=options[0] if len(options) > 0 else None,
+        right=options[1] if len(options) > 1 else None,
+    )
+
+
+@app.post("/games/pairwise/choose", status_code=201)
+def pairwise_choose(
+    payload: PairwiseChoiceRequest, user: sqlite3.Row = Depends(auth.get_current_user)
+) -> dict[str, str]:
+    """Persiste al ganador de una ronda del juego pairwise con un rating
+    inferido (GAME_PAIRWISE_RATING) y source="game" -- mismo eje "rating
+    preciso sí/no" que ya distingue import/star (preciso) de manual/like
+    (sintético), reusado acá en vez de agregar uno nuevo."""
+    existing = db.get_preferred_rated_item(user["id"], payload.winner_title, payload.winner_tmdb_id)
+    if existing and existing["source"] in {"import", "star"}:
+        # ya tiene un rating preciso propio -- no lo pisa un rating inferido
+        return {"status": "preserved"}
+    db.save_rated_items(
+        user["id"],
+        [(payload.winner_title, GAME_PAIRWISE_RATING, "", "", "game", payload.winner_tmdb_id)],
+    )
+    db.invalidate_taste_profile(user["id"])
+    return {"status": "saved"}
 
 
 @app.post("/recommend/manual", response_model=RecommendResponse)

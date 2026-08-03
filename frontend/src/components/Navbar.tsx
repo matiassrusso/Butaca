@@ -90,6 +90,9 @@ export function Navbar() {
                 <Link to="/rate" role="menuitem" className={menuItemCls}>
                   Puntuar más
                 </Link>
+                <Link to="/games" role="menuitem" className={menuItemCls}>
+                  Juegos
+                </Link>
                 <Link to="/history" role="menuitem" className={menuItemCls}>
                   Archivo
                 </Link>

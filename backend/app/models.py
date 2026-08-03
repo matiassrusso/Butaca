@@ -12,10 +12,11 @@ class RatedItem(BaseModel):
     # 'import' = rating numerico real de Letterboxd (zip/username). 'star' =
     # rating preciso del selector actual de Butaca. 'manual' = rating sintético
     # histórico de los tres botones viejos. 'like' = like/favorito de
-    # Letterboxd sin estrellas puestas.
-    # 'manual' y 'like' llevan un rating sintetico — el llm_client usa esto
-    # para no citarlo con una precisión de "(4.5/5)" que el usuario nunca dio.
-    source: Literal["import", "manual", "like", "star"] = "import"
+    # Letterboxd sin estrellas puestas. 'game' = ganador inferido del juego
+    # "¿cuál te gustó más?" (comparación pairwise).
+    # 'manual', 'like' y 'game' llevan un rating sintetico — el llm_client usa
+    # esto para no citarlo con una precisión de "(4.5/5)" que el usuario nunca dio.
+    source: Literal["import", "manual", "like", "star", "game"] = "import"
     # id de TMDb ya resuelto, cuando la fuente lo trae (tmdb:movieId del feed
     # RSS de username) — evita una búsqueda por texto (más rápido, sin
     # riesgo de matchear un remake con el mismo nombre) en
@@ -63,11 +64,26 @@ class OnboardingTitle(BaseModel):
     # puntuó antes (de cualquier fuente) — precarga la grilla manual en vez
     # de forzar a re-puntuar lo mismo cada sesión
     rating: float | None = None
-    rating_source: Literal["import", "manual", "like", "star"] | None = None
+    rating_source: Literal["import", "manual", "like", "star", "game"] | None = None
 
 
 class OnboardingTitlesResponse(BaseModel):
     titles: list[OnboardingTitle]
+
+
+class PairwiseMatchResponse(BaseModel):
+    """Un par para el juego "¿cuál te gustó más?" — None en cualquiera de
+    los dos lados si no se pudo armar un par completo (pool agotado)."""
+
+    left: OnboardingTitle | None = None
+    right: OnboardingTitle | None = None
+
+
+class PairwiseChoiceRequest(BaseModel):
+    # solo el ganador se persiste -- elegir A sobre B es señal de "preferís
+    # A", no evidencia de que B te haya disgustado.
+    winner_title: str = Field(min_length=1, max_length=300)
+    winner_tmdb_id: int | None = None
 
 
 class CatalogStatsResponse(BaseModel):
@@ -141,7 +157,7 @@ class WatchedItem(BaseModel):
     # 1-5 para todo, aunque los ratings de "manual"/"like" son sintéticos (ver
     # RatedItem.source) — el frontend usa esto para mostrar "te encantó"/
     # "te gustó"/"no te gustó" en vez de estrellas cuando no fue preciso
-    source: Literal["import", "manual", "like", "star"] = "import"
+    source: Literal["import", "manual", "like", "star", "game"] = "import"
 
 
 class WatchedHistoryResponse(BaseModel):
@@ -231,7 +247,7 @@ class MovieDetails(BaseModel):
     # from TMDb /watch/providers (JustWatch). None when unavailable/failed.
     providers: dict | None = None
     user_rating: float | None = None
-    rating_source: Literal["import", "manual", "like", "star"] | None = None
+    rating_source: Literal["import", "manual", "like", "star", "game"] | None = None
 
 
 class GenreWeight(BaseModel):
