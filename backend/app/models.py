@@ -100,6 +100,12 @@ class Recommendation(BaseModel):
     backdrop_path: str | None = None
     overview: str = ""
     vote_average: float | None = None
+    # a diferencia de RecommendResponse.refined (todo el lote), esto es por
+    # pick: cuando el LLM inventa un título fuera de la lista de candidatos
+    # (medido: "Zodiac"/"Obsession"), ese hueco se rellena con el heurístico
+    # tal cual, y sin esto no había forma de distinguir esas cards en pantalla
+    # de las que sí tienen un why del LLM (2026-08-03, TASKS.md).
+    refined: bool = False
 
 
 class RecommendResponse(BaseModel):

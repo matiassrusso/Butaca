@@ -411,6 +411,7 @@ def refine_recommendations(
                 update={
                     "why": why or rec.why,
                     "match_score": match_score,
+                    "refined": True,
                 }
             )
         )
@@ -554,10 +555,10 @@ def predict_fit(
     for rec in heuristic.recommendations:
         key = _title_key(rec.title)
         seen_item = seen_by_key.get(key)
-        updates = (
-            {"why": f"Ya la viste — {_rating_label(seen_item.rating)}."}
-            if seen_item
-            else updates_by_key.get(key, {})
-        )
+        if seen_item:
+            updates = {"why": f"Ya la viste — {_rating_label(seen_item.rating)}."}
+        else:
+            updates = updates_by_key.get(key)
+            updates = {**updates, "refined": True} if updates else {}
         recommendations.append(rec.model_copy(update=updates))
     return RecommendResponse(taste_summary=heuristic.taste_summary, recommendations=recommendations)

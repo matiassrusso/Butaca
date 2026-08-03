@@ -23,6 +23,9 @@ export type Recommendation = {
   backdrop_path: string | null;
   overview: string;
   vote_average: number | null;
+  // false cuando el LLM inventó un título fuera de la lista de candidatos y
+  // este pick es relleno heurístico tal cual (2026-08-03, TASKS.md)
+  refined: boolean;
 };
 
 type Provider = { name: string; logo_path: string | null };

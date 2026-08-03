@@ -114,6 +114,15 @@ export function PosterCard({
             {feedback === "not_interested" && <ThumbsDown className="w-3.5 h-3.5 text-destructive" />}
           </span>
         )}
+
+        {!rec.refined && (
+          <span
+            className="absolute bottom-3 right-3 font-mono text-[9px] uppercase px-1.5 py-1 bg-background border border-foreground/20 text-muted-foreground"
+            title="Elegido por el motor de recomendación, sin pasar por la IA"
+          >
+            heurístico
+          </span>
+        )}
       </div>
       {children}
     </button>

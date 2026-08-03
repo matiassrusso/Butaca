@@ -243,7 +243,7 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
       ni Dark Knight para ofrecer, así que ningún pick de un perfil como ese
       podía pasar el techo de 86% por más señal que hubiera.
 
-- [ ] **Un pick de relleno hereda el "why" heurístico y no se distingue**
+- [x] **Un pick de relleno hereda el "why" heurístico y no se distingue**
       (reportado por Matías 2026-08-02: "¿por qué devolvió el heurístico?",
       viendo un why de plantilla en Spider-Man: Into the Spider-Verse).
       **Diagnóstico cerrado contra logs de producción, no hipótesis:** el log
@@ -264,6 +264,30 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
       elegir solo de la lista (ataca la causa), y que un pick de relleno
       reciba un why propio en vez de heredar la plantilla (ataca el síntoma,
       que es lo que se ve).
+      **Resuelto 2026-08-03, los dos arreglos:**
+      1. **Causa:** la instrucción de "solo títulos de la lista" ya existía
+         en el prompt de `_build_prompt` pero enterrada a mitad de camino;
+         se repitió pegada al schema de salida (donde más pesa) —
+         verificado contra la API real de NVIDIA (6/6 picks dentro de la
+         lista en la corrida de prueba).
+      2. **Síntoma:** a Matías se le preguntó qué quería ver en pantalla en
+         ese caso (no era obvio inventar la respuesta) — eligió un badge
+         chico. Nuevo campo `Recommendation.refined: bool` (default
+         `False`) que distingue, pick por pick, si lo eligió el LLM o si es
+         relleno heurístico — antes solo existía a nivel de lote entero
+         (`RecommendResponse.refined`), que es justo lo que ocultaba el
+         problema. Aplicado tanto en `refine_recommendations` (/recommend)
+         como en `predict_fit` (/weekly y el veredicto del buscador), que
+         comparten el mismo patrón de "algunos picks los reescribe el LLM,
+         otros no". Frontend: badge "heurístico" en `PosterCard`, visible
+         solo cuando `!refined`.
+      Verificado end-to-end en el dev server local con TMDb/NVIDIA reales:
+      un perfil de 10 ratings generó 6 picks, los 6 con `refined:true` (el
+      LLM no alucinó ningún título esta vez) y sin badge. Para confirmar
+      que el badge en sí funciona, se interceptó `window.fetch` para forzar
+      `refined:false` en 2 de los 6 picks de una regeneración real — el
+      badge apareció solo en esos dos. 348 tests de backend, build de
+      frontend limpio.
 
 - [x] **Ampliar la semilla de la Fase 4: la muestra está sesgada a anime y
       cine coreano** (detectado 2026-08-02 mirando el picker ya en

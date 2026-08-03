@@ -77,6 +77,7 @@ def test_refine_reorders_and_overrides_why(monkeypatch) -> None:
     assert result.recommendations[0].why == "Porque te reís poco últimamente"
     assert result.recommendations[0].match_score == 78
     assert result.recommendations[0].tags == ["funny", "light"]
+    assert all(rec.refined for rec in result.recommendations)
 
 
 def test_refine_backfills_six_when_model_returns_fewer_picks(monkeypatch) -> None:
@@ -116,6 +117,10 @@ def test_refine_backfills_six_when_model_returns_fewer_picks(monkeypatch) -> Non
         "Candidate 2",
         "Candidate 3",
     ]
+    # los 4 primeros los eligió el LLM; los 2 de relleno son heurística tal
+    # cual (2026-08-03, TASKS.md: sin esto no había forma de distinguirlos)
+    assert all(rec.refined for rec in result.recommendations[:4])
+    assert not any(rec.refined for rec in result.recommendations[4:])
 
 
 def test_refine_drops_a_pick_with_a_negative_verdict(monkeypatch) -> None:
@@ -558,6 +563,8 @@ def test_predict_fit_never_drops_a_candidate_the_llm_missed(monkeypatch) -> None
 
     assert [r.title for r in result.recommendations] == ["Fake Thriller", "Fake Comedy"]
     assert result.recommendations[1].why == "heurística"  # el why original de HEURISTIC, sin tocar
+    assert result.recommendations[0].refined
+    assert not result.recommendations[1].refined
 
 
 def test_predict_fit_skips_the_llm_for_a_title_the_user_already_rated(monkeypatch) -> None:
@@ -587,6 +594,9 @@ def test_predict_fit_skips_the_llm_for_a_title_the_user_already_rated(monkeypatc
     # formato ("- título (año, tags: ...)") que no debe estar
     assert "- Fake Thriller (2020" not in captured_prompts[0]
     assert "- Fake Comedy (2019" in captured_prompts[0]
+    by_refined = {r.title: r.refined for r in result.recommendations}
+    assert by_refined["Fake Comedy"]  # predicho por el LLM
+    assert not by_refined["Fake Thriller"]  # "ya la viste" es honesto, no una opinión del LLM
 
 
 def test_predict_fit_skips_the_llm_entirely_when_all_candidates_already_seen(monkeypatch) -> None:
