@@ -309,11 +309,24 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
       porque de verdad son de los mejor puntuados, no se los excluye a
       propósito). El objetivo nunca fue sacar el anime/K-drama, era que
       dejara de ser un tercio de la muestra por default de popularidad.
-      **Pendiente, no incluido acá:** esto solo cambia lo que la *próxima*
-      corrida de `POST /admin/vibes/recompute` va a ver — los 39 movimientos
-      que hoy están live en butaca.xyz no cambian hasta que se corra de
-      nuevo, y esa corrida tarda 6,5-10+ min (ver el ítem de abajo sobre que
-      corre sincrónico). Decisión de Matías cuándo/cómo dispararla.
+      **Corrido contra producción el mismo día.** `BUTACA_ADMIN_TOKEN` nunca
+      había estado seteado en Render (el endpoint 404eaba por diseño) — así
+      que como sea que Fase 4 haya llegado a prod la primera vez, no fue por
+      este endpoint. Matías lo agregó como env var nueva, redeploy solo, y
+      el POST devolvió 200 sin cortarse por timeout (~lo que tardó no quedó
+      cronometrado, pero entró dentro del `--max-time 590` sin problema):
+      `{"seeded":939,"embedded":0,"pending_embeddings":0,"quota_exhausted":false,"l1_clusters":6,"l2_clusters":51}`.
+      `embedded:0` es esperable: ya había suficiente cache acumulado de
+      corridas previas como para que ningún título de esta tanda necesitara
+      un embedding nuevo — lo que cambió fue qué títulos entraron a la
+      selección final y cómo se reagruparon, no cuántos hubo que embeber.
+      **Verificado en vivo contra `GET /recommend/options`:** de 39
+      movimientos a **46**, y el anime+coreano bajó de 13/39 (33%) a ~12/46
+      (~26%). Aparecieron categorías que antes no existían en absoluto:
+      *Cine contra el nazismo*, *Cine italiano de autor*, *Cine mudo
+      romántico*, *Cine indio contemporáneo*, *Historias reales de
+      superación*, *Space Western*, *Romance con discapacidad*. Ya está
+      live en butaca.xyz, nada pendiente de este ítem.
 
 - [ ] **`POST /admin/vibes/recompute` corre sincrónico y tarda minutos** (6,5
       min medidos con cuota agotada; con cuota disponible son ~10 min solo de
@@ -321,6 +334,11 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
       que el request se corte antes de terminar — el job igual persiste todo
       lo que va haciendo, pero el cliente no ve el resultado. Decisión de
       Matías si vale la pena moverlo a background o correrlo como script.
+      **Dato nuevo, no cierra el ítem:** la corrida del 2026-08-03 (ver la
+      task de la semilla sesgada arriba) devolvió 200 sin cortarse, pero fue
+      un caso fácil — `embedded:0`, sin nada nuevo que embeber ni esperas de
+      rate limit. El riesgo de timeout sigue en pie para una corrida que sí
+      tenga que embeber en serio (semilla nueva, cache frío).
 
 - [x] **[/recommend debe devolver los mejores matches reales, no completar con películas flojas (feedback 2026-07-31)]** — resuelto 2026-08-02. Causa raíz: `recommender.recommend()` no tenía piso de score a propósito ("we always want a full set of picks... even if some are weak matches"), así que rellenaba hasta 6 con lo que hubiera. Decisión de Matías: piso real en 60 (no solo descartar ≤50), y si eso deja el pool corto, `_finish_recommend` primero pide un pool más grande a TMDb (`fetch_candidates(mood, pages=4)`) antes de resignarse a mostrar menos de 6 — nunca rellena con picks flojos. `/weekly` y `/titles/{id}/verdict` quedan afuera (`min_score=0`): ahí el catálogo es fijo (las semanales de la semana, o el título que el usuario buscó), no hay pool del que elegir. 308 tests (33 nuevos/reescritos en `test_recommender.py`/`test_main.py`).
 
