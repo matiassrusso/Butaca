@@ -149,6 +149,61 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
       `recommender.recommend()`, que es tuyo y lo calibraste a mano, así que
       lo dejo reportado en vez de retocarlo por mi cuenta.
 
+- [ ] **Los match_score no pueden pasar de 86% salvo que matchee el director**
+      (reportado por Matías 2026-08-02 mirando sus picks: "deberían darme
+      matchrates más altos"). No es percepción: está medido.
+      La fórmula es `50 + 49*tanh(puntos/40)` (`recommender.recommend`). Lo
+      que puede sumar puntos para una película en modo perfil:
+      tags (`30 * matcheados/total`), década (+8), director (+25), actores
+      (+10 c/u, tope 2). Traducido a escenarios reales:
+      | evidencia | score |
+      |---|---|
+      | 2 de 4 tags | 68% |
+      | 3 de 4 tags + década | 81% |
+      | **4 de 4 tags + década (todo lo posible)** | **86%** |
+      | + director del perfil | 93% |
+      | + director + 2 actores | 97% |
+      O sea que **sin match de director/actor el techo es 86%** por más que
+      matchee absolutamente todo lo demás — el 40% superior de la escala es
+      espacio casi muerto. El pick de 86% que vio Matías ya estaba clavado en
+      su máximo posible.
+      **Por qué el director casi nunca matchea:** se necesitan las dos cosas
+      a la vez — que el candidato haya entrado en los primeros
+      `CREDITS_ENRICH_CAP` (30) que se enriquecen con credits, y que su
+      director esté entre los top del perfil del usuario.
+      **Dos caminos, con una trampa:**
+      1. Recalibrar la pendiente (el `/40`). Una línea, pero comprime la
+         parte de abajo — y eso es exactamente el problema del 2026-07-31,
+         cuando 4 de 5 semanales daban 81% idéntico y Matías se quejó de que
+         parecían todos iguales. Sube los números sin mejorar los picks.
+      2. Ampliar la evidencia: más candidatos enriquecidos con credits, para
+         que director y actores dejen de ser un premio raro y los scores
+         altos se ganen de verdad. Más trabajo, no falsea nada.
+      **Recomendado: el 2.** El 1 se siente bien tres días y después vuelve
+      la queja de "todos iguales".
+
+- [ ] **Un pick de relleno hereda el "why" heurístico y no se distingue**
+      (reportado por Matías 2026-08-02: "¿por qué devolvió el heurístico?",
+      viendo un why de plantilla en Spider-Man: Into the Spider-Verse).
+      **Diagnóstico cerrado contra logs de producción, no hipótesis:** el log
+      decía `refined=True`, o sea que el LLM corrió bien. La línea de arriba
+      explicaba todo: `NVIDIA devolvió 2 título(s) fuera de la lista de
+      candidatos: ['Zodiac', 'Obsession']`.
+      El modelo eligió dos películas que no estaban entre los candidatos. Se
+      descartan, quedan 4 picks válidos, y `llm_client.py:421-427` completa
+      hasta 6 tomando recomendaciones del ranking heurístico **tal cual**,
+      con el `why` de plantilla que ya traían. `refined=True` es del lote
+      entero, no de cada pick: cuatro tienen why real del LLM y dos no, sin
+      forma de distinguirlos en pantalla.
+      Ojo, no es un fallo de matching de títulos: `_title_key` normaliza año,
+      acentos y puntuación antes de comparar, y "Zodiac"/"Obsession" son
+      nombres simples — si hubieran estado en la lista, matcheaban. El modelo
+      las inventó.
+      **Dos arreglos, ninguno grande:** que el prompt sea más estricto en
+      elegir solo de la lista (ataca la causa), y que un pick de relleno
+      reciba un why propio en vez de heredar la plantilla (ataca el síntoma,
+      que es lo que se ve).
+
 - [ ] **Ampliar la semilla de la Fase 4: la muestra está sesgada a anime y
       cine coreano** (detectado 2026-08-02 mirando el picker ya en
       producción, pedido de Matías de dejarlo anotado).
