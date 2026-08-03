@@ -47,20 +47,26 @@ Solo yo (Matías), con posible coordinación multi-agente (Claude, Codex) docume
 ## Estado actual
 _Última actualización: 2026-08-02_
 
-**Qué se hizo (sesión larga, 2 commits — `3f5fac0` docs, `5af2817` código):**
-- Arreglado el bug de `/recommend` mezclando 45%/55%/60%/S/D con picks fuertes: piso real de match en 60 (`recommender.MIN_MATCH_SCORE`), y si eso deja el pool corto, `_finish_recommend` amplía el pool a TMDb antes de resignarse a mostrar menos de 6.
-- Picker "a tu elección" (pedido de Matías, inspirado en un video sobre Flick): `GENRE_OPTIONS` (7 fijas) → `PICK_OPTIONS` (26: 18 géneros + 8 vibras), cada opción con su propio fetch dirigido a TMDb (`fetch_candidates_for_options`) en vez de post-filtrar un pool ajeno. `GET /recommend/options` nuevo. Vibras (MindBender, Feel-Good, Gothic, Lowbrow, Harrowing/Dread, Schlock, Urbanas, Tween) armadas con keywords de TMDb verificadas a mano, no clustering.
-- 2 bugs reales de scoring encontrados y arreglados en el camino: piso de 60 nunca se cruzaba con 1 sola opción matcheada (bonus por tag suelto daba 59), y la cobertura "1 pick por opción" iteraba en orden no determinístico (`PYTHONHASHSEED`).
-- Frontend: picker agrupado por sección, contador, tope de 5, verificado a mano en el browser.
-- 320 tests backend, build de frontend limpio.
+**Qué se hizo (sesión 3 del 2026-08-02 — Fase 4 cerrada y en producción, 8 commits `fc3b2e3`..`0c71a9d`, 320 → 345 tests):**
+- **Fase 4 completa y viva en producción**: 940 títulos embebidos, 6 clusters L1 y 57 L2, **39 movimientos** ofrecidos en el picker de butaca.xyz junto a los 18 géneros y las 8 vibras. El pipeline lo dejó armado Codex; esta sesión resolvió el error que había quedado sin capturar y todo lo que apareció al correrlo de verdad a escala.
+- **Embeddings movidos de Gemini a NVIDIA NIM** (`nvidia/nemotron-3-embed-1b`, 2048-d), a pedido de Matías. El free tier de Gemini cuenta CADA texto de un `batchEmbedContents` como un request (100/min, **1.000/día**), así que la muestra no entraba en un día — con `seed_cap=50` nunca se veía porque era un solo batch. NVIDIA hace 940 en una pasada, con la key que el proyecto ya usaba.
+- **6 bugs encontrados verificando con datos reales** (ninguno lo agarraban los tests): el pool genérico que no se solapaba con los clusters (solo 3 de 52 movimientos juntaban 6 picks); el tag `vibe-l2:N` colgado a todo candidato, que diluía el score de la muestra; la penalización de series hundiendo tandas 100% series bajo el piso de 60; un label roto del LLM que llegó a ser opción clickeable en producción; y **el pool de Neon sirviendo conexiones muertas**, que afectaba producción entera, no solo el job.
+- Board limpiado: dos entradas desactualizadas cerradas (una decía que embeddings+Leiden era inviable, justo lo que se acababa de shippear) y 4 ideas/hallazgos nuevos anotados con detalle.
 
-**Dónde retomar:** Fase 4 (vibes por clustering real: Gemini embeddings + Leiden) queda para Codex — spec completa en `docs/(C) plan-fase4-vibes-embeddings.md`, entrada en `TASKS.md`. Ya verificado con requests reales: `GEMINI_API_KEY` anda, `gemini-embedding-2` responde 200 con vector de 3072-d, `batchEmbedContents` da un embedding distinto por texto (no combinado). Falta confirmar si `python-igraph`/`leidenalg` instalan limpio en Python 3.14 (riesgo real, fallback documentado a `networkx`+`python-louvain`).
+**Dónde retomar:** No hay nada a medio hacer ni bloqueando. Lo más valioso para la calidad del producto es la task **"Los match_score no pueden pasar de 86% salvo que matchee el director"** en `TASKS.md` — está medida con la tabla de escenarios y con los dos caminos evaluados. Ojo con la trampa que quedó anotada ahí: recalibrar la pendiente (el `/40` de `recommender.recommend`) sube los números en una línea pero comprime la parte de abajo, que es exactamente la queja del 2026-07-31 (4 de 5 semanales con 81% idéntico). El camino recomendado es ampliar la evidencia, no la curva.
 
-Aparte, sigue pendiente probar en producción que `/recommend` ya no mezcla matches débiles con fuertes (bug de la primera mitad de esta sesión, deployado pero no verificado en producción todavía).
+Justo abajo en prioridad: el sesgo de la muestra de vibras (13 de 39 movimientos son anime o coreano, medido — es la semilla de `_seed_titles`, no el clustering).
 
-**Bloqueos / decisiones pendientes:** Ninguno propio. `docs/architecture.md` sigue figurando modificado en git status — solo ruido de line endings.
+**Bloqueos / decisiones pendientes:** Ninguno. Todo pusheado, CI verde, deploy live. Pendientes que solo puede hacer Matías: borrar el proyecto viejo de Neon (São Paulo) y renombrar la carpeta local del proyecto.
 
-**Contexto que no es obvio del código:** El modo manual (`ManualRating`) solo tiene título+rating, nunca reseña — sin TMDB_API_KEY el catálogo mock nunca tiene señal de tags, así que con el piso de score siempre devuelve vacío ahí en local; en producción con TMDb real hay señal vía perfil (director/actor/género). El otro sistema de Flick (clusterizar reseñas de usuarios, el que da las vibes "de verdad" tipo MindBender) es inviable en Butaca: solo 68 títulos con reseña real en toda la base — por eso la Fase 4 clusteriza metadata (Sistema 1 de Flick), no reseñas, y las vibes "MindBender"-style de la Fase 3 son curadas a mano con keywords, no descubiertas. `npx tsc --noEmit` no chequea nada por la config de project references; el gate real es `npm run build` (`tsc -b`).
+**Contexto que no es obvio del código:**
+- **La key de NVIDIA es de cuenta, una sola para los 102 modelos** — build.nvidia.com pone un botón "Get API Key" en cada página de modelo y eso confunde. Lo que cambia por modelo es el *entitlement*: `snowflake/arctic-embed-l` da `404 "not found for account"` igual que kimi-k2.6, y eso NO se arregla con otra key.
+- **`title_embeddings` lleva `model` en la PK.** Vectores de dos modelos no comparten espacio (ni dimensión), así que el cache de uno nunca puede contestar por el otro. Si se cambia de modelo de embeddings, el cache viejo simplemente queda sin usar.
+- **El pool de Postgres ahora sondea con `SELECT 1` antes de entregar la conexión** (`db._checkout_live_connection`). Neon cierra las ociosas y `pool.getconn()` las devolvía igual — `closed` solo refleja lo que sabe el proceso. En producción UptimeRobot mantiene el proceso vivo pegándole a `/health`, que no toca la base, así que el pool podía quedarse horas con conexiones muertas. **Candidato sin confirmar del "Load failed" de Bauti.**
+- **La calidad de NVIDIA vs Gemini se midió, no se asumió:** empate (pureza cruzada 0,55/0,60) sobre los mismos 650 títulos. El cine coreano, que era la debilidad de NVIDIA con 650, se reagrupa bien con 940 — era falta de muestra, no del modelo. El cambio se decidió por lo operativo.
+- `refined=True` en los logs es del **lote entero**, no de cada pick: cuando el LLM devuelve títulos fuera de la lista de candidatos, los huecos se rellenan desde el ranking heurístico y esos picks conservan el "why" de plantilla.
+- El modo manual (`ManualRating`) solo tiene título+rating, nunca reseña — sin `TMDB_API_KEY` el catálogo mock no tiene señal de tags, así que con el piso de score devuelve vacío en local. El otro sistema de Flick (clusterizar reseñas) sigue siendo inviable acá: 68 títulos con reseña real en toda la base.
+- `npx tsc --noEmit` no chequea nada por la config de project references; el gate real es `npm run build` (`tsc -b`).
 <!-- SESSION_STATE:END -->
 
 <details>
@@ -374,6 +380,26 @@ Aparte, sigue pendiente probar en producción que `/recommend` ya no mezcla matc
 </details>
 
 ## Historial de sesiones
+
+### 2026-08-02 (sesión 3) — Fase 4 cerrada: vibes por clustering real, en producción
+Retomé donde lo dejó Codex. El error que había quedado sin capturar era cuota
+de Gemini, con una causa que no se veía a escala chica: el free tier cuenta
+cada texto de un `batchEmbedContents` como un request, así que un batch de 100
+gasta la ventana entera y la muestra no entra en un día. Matías preguntó si
+NVIDIA no tenía algo que sirviera y resultó ser mejor — medí la calidad de los
+dos sobre los mismos 650 títulos antes de cambiar (empate) y decidí por lo
+operativo: 940 embeddings en una pasada contra una pared de 1.000 por día.
+Verificar con datos reales encontró 6 bugs que los tests no podían ver, el más
+serio sin relación con vibras: **el pool de Neon servía conexiones que el
+servidor ya había cerrado**, algo que afecta producción entera y es el mejor
+candidato para el "Load failed" de Bauti que estaba sin diagnosticar. Cerró
+con 39 movimientos vivos en butaca.xyz ("Cine mudo romántico", "Cine negro
+francés", "Cine de la Resistencia", "Romance con chaebol"), 345 tests, CI
+verde y deploy live. Matías fue reportando cosas al final que quedaron
+anotadas como tasks en vez de implementadas, por decisión suya: el techo de
+86% del match_score, el why heurístico de relleno, el sesgo anime/coreano de
+la muestra, y dos features nuevas (sección de "qué películas vi" con swipe, y
+juegos dentro del sitio). Commits `fc3b2e3`..`0c71a9d`.
 
 ### 2026-08-02 — piso de match real en /recommend
 Retomé el bug que Matías detectó al cerrar la sesión anterior (picks de 88%
