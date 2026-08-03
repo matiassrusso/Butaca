@@ -1,5 +1,6 @@
+import { AnimatePresence, motion } from "framer-motion";
 import { Film, Loader2 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
 
@@ -14,44 +15,80 @@ import type { OnboardingTitle } from "@/pages/Recommend";
 // Matías, 2026-08-02). Dos pasos por título, calcando DisagreePanel
 // (MovieModal.tsx): ¿la viste? -> si sí, ¿qué te pareció? con las mismas
 // estrellas de siempre. Un "no la vi" no persiste nada -- mejora la
-// exclusión implícitamente (no vuelve a aparecer en esta tanda), no el
-// match_score.
+// exclusión implícitamente (no vuelve a aparecer), no el match_score.
+//
+// Cola infinita (pedido de Matías, 2026-08-03: "no me gusta que hayan
+// tandas, debería ser infinito"): en vez de pedir un lote fijo y mostrar un
+// botón "buscar más" al vaciarse, se pre-fetchea el próximo lote en
+// silencio cuando faltan pocos títulos por delante y se lo pega a la cola.
+// El usuario nunca ve el corte entre lotes.
+const PREFETCH_THRESHOLD = 5;
+
 type Step = "seen" | "rating";
+type Kind = "movie" | "series" | "both";
+
+const KIND_OPTIONS: { value: Kind; label: string }[] = [
+  { value: "movie", label: "Películas" },
+  { value: "series", label: "Series" },
+  { value: "both", label: "Ambas" },
+];
 
 export default function Rate() {
   const { isAuthenticated, loading: authLoading, token } = useAuth();
   const [, navigate] = useLocation();
 
+  const [kind, setKind] = useState<Kind>("movie");
   const [titles, setTitles] = useState<OnboardingTitle[]>([]);
   const [index, setIndex] = useState(0);
   const [rated, setRated] = useState(0);
   const [step, setStep] = useState<Step>("seen");
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [exhausted, setExhausted] = useState(false);
   const [error, setError] = useState("");
+  const fetchingRef = useRef(false);
 
-  const loadBatch = useCallback(() => {
-    if (!token) return;
-    setLoading(true);
-    setError("");
-    fetch(`${API_BASE_URL}/titles/swipe-batch`, { headers: { Authorization: `Bearer ${token}` } })
-      .then((response) => (response.ok ? response.json() : Promise.reject()))
-      .then((body: { titles: OnboardingTitle[] }) => {
-        setTitles(body.titles ?? []);
-        setIndex(0);
-        setStep("seen");
-      })
-      .catch(() => setError("No pude traer pelis para puntuar."))
-      .finally(() => setLoading(false));
-  }, [token]);
+  const fetchMore = useCallback(
+    (replace: boolean) => {
+      if (!token || fetchingRef.current) return;
+      fetchingRef.current = true;
+      if (replace) setLoading(true);
+      setError("");
+      fetch(`${API_BASE_URL}/titles/swipe-batch?kind=${kind}`, { headers: { Authorization: `Bearer ${token}` } })
+        .then((response) => (response.ok ? response.json() : Promise.reject()))
+        .then((body: { titles: OnboardingTitle[] }) => {
+          const fresh = body.titles ?? [];
+          setTitles((prev) => (replace ? fresh : [...prev, ...fresh]));
+          if (replace) {
+            setIndex(0);
+            setStep("seen");
+          }
+          setExhausted(fresh.length === 0);
+        })
+        .catch(() => setError("No pude traer pelis para puntuar."))
+        .finally(() => {
+          setLoading(false);
+          fetchingRef.current = false;
+        });
+    },
+    [token, kind],
+  );
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) navigate("/login");
   }, [authLoading, isAuthenticated, navigate]);
 
   useEffect(() => {
-    loadBatch();
-  }, [loadBatch]);
+    setExhausted(false);
+    fetchMore(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, kind]);
+
+  useEffect(() => {
+    if (!loading && !exhausted && titles.length - index <= PREFETCH_THRESHOLD) {
+      fetchMore(false);
+    }
+  }, [index, titles.length, loading, exhausted, fetchMore]);
 
   const current = titles[index];
 
@@ -84,9 +121,27 @@ export default function Rate() {
   }
 
   const { cardRef, hint, onPointerDown, onPointerMove, onPointerUp } = useSwipeCard({
-    down: skip,
+    left: skip,
     right: () => setStep("rating"),
   });
+
+  // el swipe derecho no saca la card (sigue siendo el mismo título, solo
+  // cambia el paso a "puntuar") -- useSwipeCard vuela la card afuera para
+  // CUALQUIER dirección con handler, así que sin este reset quedaba volada
+  // y desvanecida esperando el rating (reporte de Matías, 2026-08-03).
+  // Split del drag (div interno, sin motion) vs. el slide de avance entre
+  // cards (motion.div externo) evita que este reset compita con esa otra
+  // animación. useLayoutEffect (no useEffect) para que el reset ocurra
+  // antes del primer paint tras el swipe -- si no, se alcanza a ver un
+  // frame de la card totalmente volada antes de empezar a volver.
+  useLayoutEffect(() => {
+    if (step === "rating" && cardRef.current) {
+      const el = cardRef.current;
+      el.style.transition = "transform 0.25s ease, opacity 0.25s ease";
+      el.style.transform = "translate(0px, 0px) rotate(0deg)";
+      el.style.opacity = "1";
+    }
+  }, [step, cardRef]);
 
   if (authLoading || !isAuthenticated) {
     return (
@@ -110,6 +165,22 @@ export default function Rate() {
             Cuanto más puntúes, mejores matches. Te mostramos lo más popular real de TMDb que todavía
             no tenés en tu perfil -- pensado para lo que quizás viste y te olvidaste de anotar.
           </p>
+          <div className="flex gap-2 mt-5">
+            {KIND_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                onClick={() => setKind(option.value)}
+                disabled={loading}
+                className={`px-4 py-2 font-mono text-[10px] uppercase tracking-widest border transition-colors ${
+                  kind === option.value
+                    ? "bg-accent text-accent-foreground border-accent"
+                    : "border-foreground/30 hover:border-foreground"
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
         </header>
 
         {loading && (
@@ -123,16 +194,19 @@ export default function Rate() {
           <div className="p-4 border-2 border-destructive/50 font-mono text-xs text-destructive">{error}</div>
         )}
 
-        {!loading && !error && !current && (
+        {!loading && !error && !current && exhausted && (
           <div className="p-10 border-2 border-dashed border-foreground/20 text-center">
             <h2 className="text-2xl font-black uppercase tracking-tighter mb-2">
-              {rated > 0 ? `Puntuaste ${rated} en esta tanda.` : "Se te acabaron las pelis de esta tanda."}
+              Por ahora no encontramos más pelis populares que no tengas en tu perfil.
             </h2>
             <button
-              onClick={loadBatch}
+              onClick={() => {
+                setExhausted(false);
+                fetchMore(true);
+              }}
               className="mt-4 px-5 py-3 font-mono text-[10px] uppercase tracking-widest bg-accent text-accent-foreground hover:bg-foreground hover:text-background transition-colors"
             >
-              Buscar más
+              Reintentar
             </button>
           </div>
         )}
@@ -140,79 +214,108 @@ export default function Rate() {
         {!loading && !error && current && (
           <div>
             <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground text-center mb-4">
-              {rated} puntuadas en esta tanda
+              {rated} puntuadas
             </div>
 
-            <div className="max-w-xs mx-auto" style={{ touchAction: "none" }}>
-              <div
+            <AnimatePresence mode="wait" initial={false}>
+              {/* wrapper solo anima el avance entre cards (enter/exit) -- el
+                  drag en vivo vive en el div interno, SIN motion, para no
+                  competir por la propiedad transform con esta animación
+                  (bug real: el slide a la derecha quedaba trabado/raro
+                  porque las dos peleaban por el mismo transform en el mismo
+                  elemento, reportado por Matías 2026-08-03) */}
+              <motion.div
                 key={current.title}
-                ref={cardRef}
-                onPointerDown={onPointerDown}
-                onPointerMove={onPointerMove}
-                onPointerUp={onPointerUp}
-                onPointerCancel={onPointerUp}
-                className="relative select-none cursor-grab active:cursor-grabbing border-2 border-foreground bg-secondary"
+                initial={{ x: 60, opacity: 0 }}
+                animate={{ x: 0, opacity: 1 }}
+                exit={{ x: -60, opacity: 0 }}
+                transition={{ duration: 0.25, ease: "easeOut" }}
+                className="max-w-xs mx-auto"
               >
-                {hint && (
-                  <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-background/70">
-                    <span className="font-mono text-xs uppercase tracking-widest px-3 py-2 border-2 border-foreground bg-background">
-                      {hint === "down" ? "No la vi" : "La vi"}
-                    </span>
+                <div
+                  ref={cardRef}
+                  onPointerDown={onPointerDown}
+                  onPointerMove={onPointerMove}
+                  onPointerUp={onPointerUp}
+                  onPointerCancel={onPointerUp}
+                  className="relative select-none cursor-grab active:cursor-grabbing border-2 border-foreground bg-secondary"
+                  style={{ touchAction: "none" }}
+                >
+                  {hint && (
+                    <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-background/70">
+                      <span className="font-mono text-xs uppercase tracking-widest px-3 py-2 border-2 border-foreground bg-background">
+                        {hint === "right" ? "La vi" : "No la vi"}
+                      </span>
+                    </div>
+                  )}
+                  {current.poster_path ? (
+                    <img
+                      src={current.poster_path}
+                      alt={current.title}
+                      draggable={false}
+                      className="w-full aspect-[2/3] object-cover pointer-events-none"
+                    />
+                  ) : (
+                    <div className="w-full aspect-[2/3] flex items-center justify-center pointer-events-none">
+                      <Film className="w-10 h-10 text-muted-foreground/40" />
+                    </div>
+                  )}
+                  <div className="p-4 border-t-2 border-foreground bg-background pointer-events-none">
+                    <div className="font-black uppercase text-lg tracking-tighter leading-tight line-clamp-2 min-h-12">
+                      {current.title}
+                    </div>
+                    <div className="font-mono text-[10px] text-muted-foreground mt-1">{current.year || ""}</div>
                   </div>
-                )}
-                {current.poster_path ? (
-                  <img
-                    src={current.poster_path}
-                    alt={current.title}
-                    draggable={false}
-                    className="w-full aspect-[2/3] object-cover pointer-events-none"
-                  />
-                ) : (
-                  <div className="w-full aspect-[2/3] flex items-center justify-center pointer-events-none">
-                    <Film className="w-10 h-10 text-muted-foreground/40" />
-                  </div>
-                )}
-                <div className="p-4 border-t-2 border-foreground bg-background pointer-events-none">
-                  <div className="font-black uppercase text-lg tracking-tighter leading-none">
-                    {current.title}
-                  </div>
-                  <div className="font-mono text-[10px] text-muted-foreground mt-1">{current.year || ""}</div>
                 </div>
-              </div>
-            </div>
+              </motion.div>
+            </AnimatePresence>
 
-            <div className="max-w-xs mx-auto mt-6">
-              {step === "seen" ? (
-                <>
-                  <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground text-center mb-2">
-                    ¿La viste?
-                  </p>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => setStep("rating")}
-                      className="flex-1 py-3 font-mono text-[10px] uppercase tracking-widest border border-foreground/30 hover:border-accent hover:text-accent transition-colors"
-                    >
-                      Sí, la vi
-                    </button>
-                    <button
-                      onClick={skip}
-                      className="flex-1 py-3 font-mono text-[10px] uppercase tracking-widest border border-foreground/30 hover:border-foreground transition-colors"
-                    >
-                      No la vi
-                    </button>
-                  </div>
-                  <p className="text-center font-mono text-[9px] text-muted-foreground/60 mt-3">
-                    O deslizá: derecha si la viste, abajo si no.
-                  </p>
-                </>
-              ) : (
-                <>
-                  <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground text-center mb-2">
-                    ¿Qué te pareció?
-                  </p>
-                  <StarRating onChange={submitRating} disabled={saving} size="lg" />
-                </>
-              )}
+            <div className="max-w-xs mx-auto mt-6 overflow-hidden">
+              <AnimatePresence mode="wait" initial={false}>
+                {step === "seen" ? (
+                  <motion.div
+                    key="seen"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ x: -30, opacity: 0 }}
+                    transition={{ duration: 0.2, ease: "easeOut" }}
+                  >
+                    <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground text-center mb-2">
+                      ¿La viste?
+                    </p>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setStep("rating")}
+                        className="flex-1 py-3 font-mono text-[10px] uppercase tracking-widest border border-foreground/30 hover:border-accent hover:text-accent transition-colors"
+                      >
+                        Sí, la vi
+                      </button>
+                      <button
+                        onClick={skip}
+                        className="flex-1 py-3 font-mono text-[10px] uppercase tracking-widest border border-foreground/30 hover:border-foreground transition-colors"
+                      >
+                        No la vi
+                      </button>
+                    </div>
+                    <p className="text-center font-mono text-[9px] text-muted-foreground/60 mt-3">
+                      O deslizá: derecha si la viste, izquierda si no.
+                    </p>
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    key="rating"
+                    initial={{ x: 30, opacity: 0 }}
+                    animate={{ x: 0, opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.2, ease: "easeOut" }}
+                  >
+                    <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground text-center mb-2">
+                      ¿Qué te pareció?
+                    </p>
+                    <StarRating onChange={submitRating} disabled={saving} size="lg" />
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           </div>
         )}

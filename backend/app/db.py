@@ -92,6 +92,21 @@ CREATE TABLE IF NOT EXISTS swipe_asked_titles (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- _swipe_popular_pool arrancaba SIEMPRE de la página 1 de TMDb populares y
+-- confiaba en swipe_asked_titles para saltear lo ya visto -- para un usuario
+-- con historial grande (mucho ya visto/ya ofrecido) eso significa: cada
+-- llamada más lenta (rescanea más páginas ya agotadas) y, al llegar al tope
+-- de SWIPE_POPULAR_MAX_PAGES, un muro permanente sin salida ("esto no puede
+-- pasar", reportado por Matías 2026-08-03). Este cursor recuerda por dónde
+-- se quedó cada kind para retomar ahí la próxima vez, en vez de rescanear
+-- desde cero.
+CREATE TABLE IF NOT EXISTS swipe_pool_cursor (
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    kind TEXT NOT NULL,
+    next_page INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (user_id, kind)
+);
+
 -- juego "¿cuál te gustó más?": solo compara títulos que el usuario YA vio y
 -- puntuó (nunca inventa un "vista" falso). Elegir un ganador no le pone un
 -- rating nuevo -- ambos ya tienen uno real -- sino que queda como preferencia
@@ -243,6 +258,13 @@ CREATE TABLE IF NOT EXISTS swipe_asked_titles (
     user_id INTEGER NOT NULL REFERENCES users(id),
     title TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT ({_PG_NOW})
+);
+
+CREATE TABLE IF NOT EXISTS swipe_pool_cursor (
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    kind TEXT NOT NULL,
+    next_page INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (user_id, kind)
 );
 
 CREATE TABLE IF NOT EXISTS pairwise_preferences (
@@ -734,6 +756,26 @@ def record_swipe_asked_titles(user_id: int, titles: list[str]) -> None:
         conn.executemany(
             "INSERT INTO swipe_asked_titles (user_id, title) VALUES (?, ?)",
             [(user_id, title) for title in titles],
+        )
+
+
+def get_swipe_pool_cursor(user_id: int, kind: str) -> int:
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT next_page FROM swipe_pool_cursor WHERE user_id = ? AND kind = ?", (user_id, kind)
+        ).fetchone()
+    return row["next_page"] if row else 1
+
+
+def set_swipe_pool_cursor(user_id: int, kind: str, next_page: int) -> None:
+    with get_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO swipe_pool_cursor (user_id, kind, next_page)
+            VALUES (?, ?, ?)
+            ON CONFLICT(user_id, kind) DO UPDATE SET next_page = excluded.next_page
+            """,
+            (user_id, kind, next_page),
         )
 
 

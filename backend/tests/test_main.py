@@ -1657,11 +1657,48 @@ def test_swipe_batch_resolves_popular_titles(monkeypatch) -> None:
     )
     headers = _auth_headers("swipepopular")
 
-    response = client.get("/titles/swipe-batch", headers=headers)
+    response = client.get("/titles/swipe-batch?kind=both", headers=headers)
 
     assert response.status_code == 200
     titles = {item["title"] for item in response.json()["titles"]}
     assert titles == {"Popular Movie", "Popular Series"}
+
+
+def test_swipe_batch_defaults_to_movies_only(monkeypatch) -> None:
+    # bug real (2026-08-03): sin filtro, la tanda quedaba dominada por
+    # series (populares de TMDb no se solapan con Letterboxd, movie-only).
+    # Matías pidió que por default solo salgan películas.
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.fetch_popular_titles",
+        _fake_popular(
+            movies_by_page={1: [{"tmdb_id": 1, "title": "Popular Movie", "year": 2024, "kind": "movie", "poster_path": None}]},
+            series_by_page={1: [{"tmdb_id": 2, "title": "Popular Series", "year": 2024, "kind": "series", "poster_path": None}]},
+        ),
+    )
+    headers = _auth_headers("swipedefaultkind")
+
+    response = client.get("/titles/swipe-batch", headers=headers)
+
+    titles = {item["title"] for item in response.json()["titles"]}
+    assert titles == {"Popular Movie"}
+
+
+def test_swipe_batch_kind_series_excludes_movies(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.fetch_popular_titles",
+        _fake_popular(
+            movies_by_page={1: [{"tmdb_id": 1, "title": "Popular Movie", "year": 2024, "kind": "movie", "poster_path": None}]},
+            series_by_page={1: [{"tmdb_id": 2, "title": "Popular Series", "year": 2024, "kind": "series", "poster_path": None}]},
+        ),
+    )
+    headers = _auth_headers("swipekindseries")
+
+    response = client.get("/titles/swipe-batch?kind=series", headers=headers)
+
+    titles = {item["title"] for item in response.json()["titles"]}
+    assert titles == {"Popular Series"}
 
 
 def test_swipe_batch_excludes_already_rated_titles(monkeypatch) -> None:
@@ -1721,6 +1758,46 @@ def test_swipe_batch_never_repeats_a_title_across_calls(monkeypatch) -> None:
     # quedó registrado como "ya ofrecido") y pasa a la página 2
     assert first_titles.isdisjoint(second_titles)
     assert second_titles == {"Page Two Movie"}
+
+
+def test_swipe_batch_resumes_past_the_old_page_ceiling(monkeypatch) -> None:
+    # bug real (2026-08-03), reportado por Matías con captura ("esto no
+    # puede pasar"): _swipe_popular_pool arrancaba SIEMPRE en la página 1 y
+    # nunca pasaba de SWIPE_POPULAR_MAX_PAGES -- un usuario con historial
+    # grande que ya vio todo lo de esas páginas quedaba en un muro
+    # permanente. El cursor por kind debe permitir retomar más allá de esa
+    # página en la llamada siguiente, no rescanear desde cero.
+    from backend.app import main as main_module
+
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    max_pages = main_module.SWIPE_POPULAR_MAX_PAGES
+    fresh_page = max_pages + 1
+    movies_by_page = {
+        page: [{"tmdb_id": page, "title": f"Watched Movie {page}", "year": 2020, "kind": "movie", "poster_path": None}]
+        for page in range(1, max_pages + 1)
+    }
+    movies_by_page[fresh_page] = [
+        {"tmdb_id": fresh_page, "title": "Fresh Movie", "year": 2024, "kind": "movie", "poster_path": None}
+    ]
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.fetch_popular_titles",
+        _fake_popular(movies_by_page=movies_by_page, series_by_page={}),
+    )
+    headers = _auth_headers("swipecursor")
+    client.post(
+        "/recommend/manual",
+        headers=headers,
+        json={
+            "ratings": _MANUAL_RATINGS
+            + [{"title": f"Watched Movie {p}", "rating": 4.0} for p in range(1, max_pages + 1)]
+        },
+    )
+
+    first = client.get("/titles/swipe-batch", headers=headers).json()["titles"]
+    assert first == []
+
+    second = client.get("/titles/swipe-batch", headers=headers).json()["titles"]
+    assert {t["title"] for t in second} == {"Fresh Movie"}
 
 
 def test_pairwise_match_requires_auth() -> None:
