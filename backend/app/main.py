@@ -2,6 +2,7 @@ import hmac
 import logging
 import os
 import sqlite3
+import threading
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -21,6 +22,7 @@ from . import (
     onboarding_titles,
     taste_profile,
     tmdb_client,
+    vibes_clustering,
 )
 from .models import (
     AuthResponse,
@@ -64,6 +66,9 @@ MAX_SELECTED_OPTIONS = 5
 MIN_MANUAL_RATINGS = 10  # onboarding without Letterboxd needs at least this many rated seed titles
 DEFAULT_RECOMMEND_DAILY_LIMIT = 20  # per user; protects TMDb/NIM quotas. 0 = off.
 WATCHLIST_MATCH_CAP = 60  # how many watchlist titles to resolve against TMDb per request
+MOVEMENT_MEMBER_CAP = 40  # títulos por movimiento elegido que se resuelven contra TMDb
+MIN_MOVEMENT_SIZE = 6  # un movimiento con menos títulos que una tanda de picks no se ofrece
+_VIBE_RECOMPUTE_LOCK = threading.Lock()
 
 # ponytail: uvicorn only wires handlers for its own "uvicorn.*" loggers, not
 # root — without this, logger.warning() calls below fall back to Python's
@@ -177,11 +182,24 @@ def recommend_options() -> PickOptionsResponse:
     mano (a 7 opciones tolerable, a 25+ garantiza que se desincronice).
     Sin auth, como /catalog/stats: es metadata pública del picker, no datos
     de usuario."""
-    return PickOptionsResponse(
-        options=[
-            PickOption(key=o["key"], label=o["label"], group=o["group"]) for o in PICK_OPTIONS
-        ]
+    options = [PickOption(key=o["key"], label=o["label"], group=o["group"]) for o in PICK_OPTIONS]
+    # un movimiento con menos títulos que una tanda de picks no se puede
+    # ofrecer: por más que se amplíe el pool, el cluster ES el catálogo (en la
+    # muestra real quedaron 10 de 52 clusters con 1 a 5 miembros).
+    movements = db.get_vibe_clusters(level=2, min_size=MIN_MOVEMENT_SIZE)
+    # el LLM etiqueta cada cluster por separado, así que dos pueden terminar
+    # con el mismo nombre (pasó en la muestra real: "Animales con emociones"
+    # y "animales con emociones"). El picker los muestra en mayúsculas: dos
+    # chips idénticos que el usuario no puede distinguir. Se ofrece el más
+    # grande de cada nombre; el tag del otro sigue siendo válido si llega.
+    by_label: dict[str, dict] = {}
+    for row in sorted(movements, key=lambda r: -r["size"]):
+        by_label.setdefault(row["label"].strip().casefold(), row)
+    options.extend(
+        PickOption(key=f"vibe-l2:{row['cluster_id']}", label=row["label"], group="movimientos")
+        for row in sorted(by_label.values(), key=lambda r: r["cluster_id"])
     )
+    return PickOptionsResponse(options=options)
 
 
 @app.get("/catalog/stats", response_model=CatalogStatsResponse)
@@ -349,6 +367,24 @@ def admin_stats(x_admin_token: str | None = Header(default=None)) -> dict:
     if not x_admin_token or not hmac.compare_digest(x_admin_token, expected):
         raise HTTPException(status_code=403, detail="Token de administrador inválido.")
     return db.get_admin_stats()
+
+
+@app.post("/admin/vibes/recompute")
+def recompute_vibes(x_admin_token: str | None = Header(default=None)) -> dict:
+    expected = os.environ.get("BUTACA_ADMIN_TOKEN")
+    if not expected:
+        raise HTTPException(status_code=404, detail="No encontrado.")
+    if not x_admin_token or not hmac.compare_digest(x_admin_token, expected):
+        raise HTTPException(status_code=403, detail="Token de administrador inválido.")
+    if not _VIBE_RECOMPUTE_LOCK.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="El recálculo de vibras ya está corriendo.")
+    try:
+        return vibes_clustering.recompute()
+    except (vibes_clustering.VibeError, tmdb_client.TmdbError) as exc:
+        logger.warning("Vibe recompute failed: %s", exc)
+        raise HTTPException(status_code=502, detail="No se pudo recalcular las vibras.") from exc
+    finally:
+        _VIBE_RECOMPUTE_LOCK.release()
 
 
 def _issue_email_verification(user_id: int, email: str | None) -> str:
@@ -640,6 +676,51 @@ def _watchlist_candidates(titles: list[str]) -> list[dict]:
     return [match for match in results if match]
 
 
+def _movement_candidates(vibe_tags: list[str]) -> list[dict]:
+    """Resuelve contra TMDb los títulos que el clustering puso en cada
+    movimiento elegido.
+
+    No se puede pedir un movimiento a TMDb: los clusters son nuestros, salen
+    de embeddings de metadata. Antes esto traía el pool genérico de discover
+    y esperaba que se solapara con el cluster — medido sobre la muestra real
+    (52 clusters L2, pool de 78 títulos), solo 3 de 52 movimientos juntaban
+    los 6 picks; el resto devolvía casi nada. La membresía ya está en
+    title_clusters, así que se resuelve directo por id (fetch_title_by_id
+    cachea 24h, mismo patrón paralelo que _watchlist_candidates)."""
+    if not tmdb_client.is_configured() or not vibe_tags:
+        return []
+    keys: list[tuple[int, str]] = []
+    for tag in vibe_tags:
+        keys.extend(db.get_cluster_member_keys(int(tag.split(":")[1]), MOVEMENT_MEMBER_CAP))
+
+    def _resolve(key: tuple[int, str]) -> dict | None:
+        try:
+            return tmdb_client.fetch_title_by_id(key[0], kind=key[1])
+        except tmdb_client.TmdbError:
+            return None
+
+    with ThreadPoolExecutor(max_workers=taste_profile.MATCH_WORKERS) as pool:
+        results = pool.map(_resolve, keys)
+    return [item for item in results if item]
+
+
+def _add_vibe_cluster_tags(candidates: list[dict]) -> None:
+    """Attach cached L2 tags without mutating TMDb cache-owned tag lists.
+
+    Solo se llama cuando el usuario eligió un movimiento: el scoring de
+    recommend() divide el match positivo por len(tags), así que un tag que
+    nadie puede matchear DILUYE el score (mismo motivo por el que los keyword
+    tags están capeados en 2 por título). Como solo los títulos de la muestra
+    clusterizada lo reciben, colgarlo siempre penalizaría justo a esos frente
+    a los que quedaron afuera de la muestra."""
+    keys = list({(item["tmdb_id"], item["kind"]) for item in candidates if item.get("tmdb_id") is not None})
+    assignments = db.get_title_clusters_by_tmdb_ids(keys)
+    for item in candidates:
+        cluster_id = assignments.get((item.get("tmdb_id"), item.get("kind")))
+        if cluster_id is not None:
+            item["tags"] = sorted(set(item["tags"]) | {f"vibe-l2:{cluster_id}"})
+
+
 def _finish_recommend(
     ratings: list[RatedItem],
     extra_seen: set[str],
@@ -716,8 +797,15 @@ def _finish_recommend(
     # tupla ordenada (orden de selección), una entrada por opción elegida —
     # no un frozenset aplanado (bug reportado 2026-08-02: cobertura por tag
     # suelto, no por opción, con orden de iteración no determinístico).
+    vibe_labels = {
+        f"vibe-l2:{row['cluster_id']}": row["label"]
+        for row in db.get_vibe_clusters(level=2)
+    }
+    selected_static_options = [key for key in selected_genres if key in GENRE_OPTIONS]
+    selected_vibe_tags = [key for key in selected_genres if key in vibe_labels]
     required_any_groups = tuple(
-        frozenset(GENRE_OPTIONS[key]) for key in selected_genres if key in GENRE_OPTIONS
+        [frozenset(GENRE_OPTIONS[key]) for key in selected_static_options]
+        + [frozenset({tag}) for tag in selected_vibe_tags]
     )
     if mode == "genres" and not required_any_groups:
         raise HTTPException(
@@ -744,7 +832,18 @@ def _finish_recommend(
         candidates = catalog.CATALOG
         if tmdb_client.is_configured():
             try:
-                candidates = tmdb_client.fetch_candidates_for_options(selected_genres, kind_filter)
+                candidates = tmdb_client.fetch_candidates_for_options(selected_static_options, kind_filter)
+                # cada movimiento aporta sus propios títulos (los del cluster),
+                # igual que cada género aporta su propio fetch dirigido.
+                candidates += _movement_candidates(selected_vibe_tags)
+                seen_candidates: set[tuple[int | None, str]] = set()
+                deduped_candidates = []
+                for item in candidates:
+                    key = (item.get("tmdb_id"), item["kind"])
+                    if key not in seen_candidates:
+                        seen_candidates.add(key)
+                        deduped_candidates.append(item)
+                candidates = deduped_candidates
             except tmdb_client.TmdbError as exc:
                 logger.warning("TMDb options fetch failed, falling back to mock catalog: %s", exc)
                 candidates = catalog.CATALOG
@@ -759,6 +858,9 @@ def _finish_recommend(
             except tmdb_client.TmdbError as exc:
                 logger.warning("TMDb candidates fetch failed, falling back to mock catalog: %s", exc)
                 candidates = catalog.CATALOG
+
+    if selected_vibe_tags:
+        _add_vibe_cluster_tags(candidates)
 
     # explicit feedback is a hard exclusion, unlike "already recommended"
     # (relaxed on retry below): a title the user marked seen or not_interested
@@ -816,6 +918,7 @@ def _finish_recommend(
             profile=profile,
             rejected_tags=rejected_tags or None,
             limit=limit,
+            extra_phrases=vibe_labels,
         )
 
     use_llm = refine and llm_client.is_configured()
@@ -837,8 +940,12 @@ def _finish_recommend(
             # 4 páginas enteras: esos ítems no llevan tag de ninguna opción
             # elegida, así que el filtro duro de recommend() los descartaba a
             # todos (bug encontrado 2026-08-02 diseñando este picker).
+            # un movimiento es un set cerrado (los miembros del cluster, ya
+            # traídos enteros arriba): pedir más páginas de discover para él
+            # es el mismo desperdicio que describe el comentario de arriba,
+            # así que solo se ensanchan las opciones estáticas.
             broader = (
-                tmdb_client.fetch_candidates_for_options(selected_genres, kind_filter, pages=3)
+                tmdb_client.fetch_candidates_for_options(selected_static_options, kind_filter, pages=3)
                 if mode == "genres"
                 else tmdb_client.fetch_candidates(mood, pages=4)
             )
@@ -851,6 +958,8 @@ def _finish_recommend(
             candidates = candidates + [
                 item for item in broader if item["title"].casefold() not in existing_titles
             ]
+            if selected_vibe_tags:
+                _add_vibe_cluster_tags(candidates)
             response = _score(candidates, also_seen, candidate_limit)
 
     # Only reintroduce old picks when there aren't six genuinely new ones.

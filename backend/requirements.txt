@@ -3,3 +3,6 @@ uvicorn==0.35.0
 python-multipart==0.0.20
 pytest==8.4.1
 psycopg2-binary==2.9.12
+numpy==2.4.4
+python-igraph==1.0.0
+leidenalg==0.12.0

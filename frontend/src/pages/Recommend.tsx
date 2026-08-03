@@ -71,6 +71,7 @@ type PickOption = { key: string; label: string; group: string };
 const PICK_GROUP_LABELS: Record<string, string> = {
   generos: "Géneros",
   vibras: "Vibras",
+  movimientos: "Movimientos",
 };
 const MAX_SELECTED_OPTIONS = 5; // mismo tope que backend/app/main.py::MAX_SELECTED_OPTIONS
 

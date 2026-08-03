@@ -5,7 +5,12 @@ from fastapi.testclient import TestClient
 
 from backend.app import db, letterboxd_scrape, onboarding_titles
 from backend.app.llm_client import LlmError
-from backend.app.main import TASTE_TAG_LOOKUP_CAP, _enrich_loved_ratings_with_genre_tags, app
+from backend.app.main import (
+    TASTE_TAG_LOOKUP_CAP,
+    _enrich_loved_ratings_with_genre_tags,
+    _movement_candidates,
+    app,
+)
 from backend.app.models import RatedItem
 from backend.app.tmdb_client import TmdbError
 
@@ -2101,3 +2106,155 @@ def test_weekly_falls_back_to_heuristic_when_llm_fails(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert len(response.json()["recommendations"]) == 5
+
+
+def test_admin_vibes_recompute_is_gated_and_calls_the_offline_job(monkeypatch) -> None:
+    assert client.post("/admin/vibes/recompute").status_code == 404
+
+    monkeypatch.setenv("BUTACA_ADMIN_TOKEN", "secret")
+    assert client.post("/admin/vibes/recompute", headers={"X-Admin-Token": "wrong"}).status_code == 403
+    monkeypatch.setattr(
+        "backend.app.main.vibes_clustering.recompute",
+        lambda: {"seeded": 50, "embedded": 50, "l1_clusters": 3, "l2_clusters": 6},
+    )
+
+    response = client.post("/admin/vibes/recompute", headers={"X-Admin-Token": "secret"})
+
+    assert response.status_code == 200
+    assert response.json()["seeded"] == 50
+
+
+def test_vibe_l2_tag_is_injected_and_uses_its_label_in_the_why() -> None:
+    from backend.app.main import _add_vibe_cluster_tags
+    from backend.app.recommender import recommend
+
+    db.save_vibe_clusters(
+        [{"level": 2, "cluster_id": 9, "label": "Crimen nocturno", "sample_titles": ["Pick"], "size": 1}],
+        [{"tmdb_id": 77, "kind": "movie", "l1_cluster_id": 2, "l2_cluster_id": 9}],
+    )
+    candidates = [{"tmdb_id": 77, "title": "Pick", "year": 2000, "kind": "movie", "tags": []}]
+
+    _add_vibe_cluster_tags(candidates)
+    phrases = {f"vibe-l2:{row['cluster_id']}": row["label"] for row in db.get_vibe_clusters(level=2)}
+    response = recommend(
+        [RatedItem(title="Vista", rating=5)],
+        "",
+        catalog=candidates,
+        required_any_groups=(frozenset({"vibe-l2:9"}),),
+        extra_phrases=phrases,
+    )
+
+    assert candidates[0]["tags"] == ["vibe-l2:9"]
+    assert "Crimen nocturno" in response.recommendations[0].why
+    assert "vibe-l2:9" not in response.recommendations[0].why
+
+
+def test_recommend_without_a_selected_movement_does_not_dilute_tags_with_vibe_labels(monkeypatch) -> None:
+    """El scoring divide el match positivo por len(tags): colgar un
+    `vibe-l2:N` que nadie puede matchear le baja el score justo a los títulos
+    que entraron a la muestra clusterizada, frente a los que quedaron afuera."""
+    db.save_vibe_clusters(
+        [{"level": 2, "cluster_id": 9, "label": "Crimen nocturno", "sample_titles": [], "size": 1}],
+        [{"tmdb_id": 77, "kind": "movie", "l1_cluster_id": 2, "l2_cluster_id": 9}],
+    )
+    seen: list[list[str]] = []
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setattr("backend.app.main._enrich_loved_ratings_with_genre_tags", lambda ratings: None)
+    monkeypatch.setattr("backend.app.main.taste_profile.build_taste_profile", lambda watched: {})
+    pool = [{"tmdb_id": 77, "title": "Pick", "year": 2000, "kind": "movie", "tags": ["romantic"]}]
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.fetch_candidates_for_options",
+        lambda keys, kind_filter, pages=1: [item.copy() for item in pool],
+    )
+
+    def spy(*args, **kwargs):
+        seen.append(list(kwargs["catalog"][0]["tags"]))
+        return recommender_recommend(*args, **kwargs)
+
+    from backend.app.recommender import recommend as recommender_recommend
+
+    monkeypatch.setattr("backend.app.main.recommend", spy)
+
+    response = _post_zip(_auth_headers("nomovement"), mode="genres", genres="romance", refine="0")
+
+    assert response.status_code == 200
+    assert seen and all("vibe-l2:9" not in tags for tags in seen)
+
+
+def test_selected_movement_pulls_its_own_cluster_members_not_a_generic_pool(monkeypatch) -> None:
+    """Un movimiento no se puede pedir a TMDb: si el pool sale de discover,
+    casi ningún cluster junta 6 picks (medido: 3 de 52 sobre la muestra real).
+    Los miembros salen de title_clusters y se resuelven por id."""
+    db.save_vibe_clusters(
+        [{"level": 2, "cluster_id": 5, "label": "Cine samurái", "sample_titles": [], "size": 3}],
+        [
+            {"tmdb_id": identifier, "kind": "movie", "l1_cluster_id": 1, "l2_cluster_id": 5}
+            for identifier in (101, 102, 103)
+        ],
+    )
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.fetch_title_by_id",
+        lambda tmdb_id, kind: {"tmdb_id": tmdb_id, "title": f"T{tmdb_id}", "year": 1960, "kind": kind, "tags": []},
+    )
+
+    resolved = _movement_candidates(["vibe-l2:5"])
+
+    assert sorted(item["tmdb_id"] for item in resolved) == [101, 102, 103]
+
+
+def test_recommend_options_includes_persisted_movements_but_hides_tiny_ones() -> None:
+    db.save_vibe_clusters(
+        [
+            {"level": 2, "cluster_id": 3, "label": "Futuro melancólico", "sample_titles": [], "size": 9},
+            {"level": 2, "cluster_id": 4, "label": "Cluster diminuto", "sample_titles": [], "size": 2},
+        ],
+        [],
+    )
+
+    options = client.get("/recommend/options").json()["options"]
+
+    assert {"key": "vibe-l2:3", "label": "Futuro melancólico", "group": "movimientos"} in options
+    # un cluster de 2 títulos nunca puede llenar una tanda de 6 picks
+    assert not any(option["key"] == "vibe-l2:4" for option in options)
+
+
+def test_recommend_options_offers_one_chip_per_movement_name() -> None:
+    """El LLM etiqueta cada cluster por su cuenta y repite nombres; el picker
+    los muestra en mayúsculas, así que dos chips quedan indistinguibles."""
+    db.save_vibe_clusters(
+        [
+            {"level": 2, "cluster_id": 2, "label": "Animales con emociones", "sample_titles": [], "size": 9},
+            {"level": 2, "cluster_id": 8, "label": "animales con emociones", "sample_titles": [], "size": 15},
+        ],
+        [],
+    )
+
+    movements = [o for o in client.get("/recommend/options").json()["options"] if o["group"] == "movimientos"]
+
+    assert [o["key"] for o in movements] == ["vibe-l2:8"]  # gana el cluster más grande
+
+
+def test_recommend_genres_mode_fetches_and_deduplicates_a_selected_movement(monkeypatch) -> None:
+    db.save_vibe_clusters(
+        [{"level": 2, "cluster_id": 9, "label": "Crimen nocturno", "sample_titles": [], "size": 1}],
+        [{"tmdb_id": 77, "kind": "movie", "l1_cluster_id": 2, "l2_cluster_id": 9}],
+    )
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setattr("backend.app.main._enrich_loved_ratings_with_genre_tags", lambda ratings: None)
+    monkeypatch.setattr("backend.app.main.taste_profile.build_taste_profile", lambda watched: {})
+    static = [{"tmdb_id": 77, "title": "Pick", "year": 2000, "kind": "movie", "tags": ["romantic"]}]
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.fetch_candidates_for_options", lambda keys, kind_filter, pages=1: static
+    )
+    # el movimiento trae sus propios miembros por id, no un pool genérico
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.fetch_title_by_id",
+        lambda tmdb_id, kind: {"tmdb_id": tmdb_id, "title": "Pick", "year": 2000, "kind": kind, "tags": []},
+    )
+
+    response = _post_zip(_auth_headers("movementmode"), mode="genres", genres="romance,vibe-l2:9", refine="0")
+
+    assert response.status_code == 200
+    assert [item["title"] for item in response.json()["recommendations"]] == ["Pick"]
+    assert "Crimen nocturno" in response.json()["recommendations"][0]["why"]

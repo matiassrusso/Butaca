@@ -193,8 +193,8 @@ TAG_PHRASES: dict[str, str] = {
 }
 
 
-def _tag_phrases(tags: set[str]) -> str:
-    phrases = [TAG_PHRASES.get(tag, tag) for tag in sorted(tags)]
+def _tag_phrases(tags: set[str], extra_phrases: dict[str, str] | None = None) -> str:
+    phrases = [(extra_phrases or {}).get(tag, TAG_PHRASES.get(tag, tag)) for tag in sorted(tags)]
     if len(phrases) == 1:
         return phrases[0]
     return ", ".join(phrases[:-1]) + " y " + phrases[-1]
@@ -363,6 +363,7 @@ def recommend(
     exclude_seen: bool = True,
     limit: int = 6,
     min_score: int = MIN_MATCH_SCORE,
+    extra_phrases: dict[str, str] | None = None,
 ) -> RecommendResponse:
     taste_ratings = ratings if preference_ratings is None else preference_ratings
     positive_tags, negative_tags = _collect_preference_tags(taste_ratings)
@@ -388,6 +389,18 @@ def recommend(
     # threshold is the guard against overreacting to one-off dismissals.
     effective_rejected = (
         {tag for tag, count in rejected_tags.items() if count >= 2} if rejected_tags else set()
+    )
+
+    # la penalización de series existe para que no desplacen películas en un
+    # pool mixto; si no hay ninguna película con la que competir, se aplica a
+    # todos por igual — no cambia el orden de nada y solo empuja la tanda
+    # entera abajo de MIN_MATCH_SCORE. Encontrado 2026-08-02: un movimiento
+    # 100% series ("Romance escolar", 36 títulos) daba 57 en los seis y
+    # devolvía cero picks, con perfil afín y no afín por igual.
+    pool_has_movies = any(
+        item["kind"] == "movie"
+        for item in catalog
+        if kind_filter == "both" or item["kind"] == kind_filter
     )
 
     scored: list[tuple[float, Recommendation, set[str], str]] = []
@@ -431,7 +444,7 @@ def recommend(
             # 1 opción -> 62, 2 -> 73 (verificado con la fórmula de abajo).
             matched_options = sum(1 for group in required_any_groups if tags & group)
             points += 20 * min(matched_options, 2) / 2
-        if item["kind"] == "series":
+        if item["kind"] == "series" and pool_has_movies:
             points -= 4
         if matched_director:
             points += 25
@@ -467,15 +480,15 @@ def recommend(
             # cap how many tags get named: a broad taste profile can match
             # most of a movie's tags at once, and citing all of them reads as
             # a generic tag dump instead of a specific reason
-            phrase = _tag_phrases(set(sorted(matched_positive)[:3]))
+            phrase = _tag_phrases(set(sorted(matched_positive)[:3]), extra_phrases)
             if reference:
                 reasons.append(f"tira para {phrase}, como lo que valoraste en «{reference}»")
             else:
                 reasons.append(f"tira para {phrase}, que es lo que venís premiando")
         if matched_mood:
-            reasons.append(f"tiene {_tag_phrases(matched_mood)}, la vibra '{mood_text}' que pediste hoy")
+            reasons.append(f"tiene {_tag_phrases(matched_mood, extra_phrases)}, la vibra '{mood_text}' que pediste hoy")
         if matched_genre:
-            reasons.append(f"cae dentro de {_tag_phrases(matched_genre)}, el género que elegiste")
+            reasons.append(f"cae dentro de {_tag_phrases(matched_genre, extra_phrases)}, el género que elegiste")
         if matched_director:
             reasons.append(f"la dirige {matched_director}, uno de tus directores más repetidos")
         if matched_actors:
@@ -490,7 +503,7 @@ def recommend(
             # empty set — falls back to a tag-free sentence instead of crashing.
             candidate_tags = set(item["tags"][:3]) or tags
             if candidate_tags:
-                own_phrase = _tag_phrases(candidate_tags)
+                own_phrase = _tag_phrases(candidate_tags, extra_phrases)
                 reasons.append(f"es una apuesta distinta, con aire a {own_phrase}, para ampliar tu mapa")
             else:
                 reasons.append("es una apuesta distinta para ampliar tu mapa")

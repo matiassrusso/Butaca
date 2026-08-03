@@ -124,6 +124,34 @@ CREATE TABLE IF NOT EXISTS watchlist_items (
     user_id INTEGER NOT NULL REFERENCES users(id),
     title TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS title_embeddings (
+    tmdb_id INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    model TEXT NOT NULL,
+    vector_json TEXT NOT NULL,
+    computed_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (tmdb_id, kind, model)
+);
+
+CREATE TABLE IF NOT EXISTS title_clusters (
+    tmdb_id INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    l1_cluster_id INTEGER NOT NULL,
+    l2_cluster_id INTEGER NOT NULL,
+    computed_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (tmdb_id, kind)
+);
+
+CREATE TABLE IF NOT EXISTS cluster_labels (
+    level INTEGER NOT NULL,
+    cluster_id INTEGER NOT NULL,
+    label TEXT NOT NULL,
+    sample_titles TEXT NOT NULL DEFAULT '',
+    size INTEGER NOT NULL DEFAULT 0,
+    computed_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (level, cluster_id)
+);
 """
 
 # same tables as SCHEMA_SQLITE, adapted for Postgres (Neon): SERIAL instead of
@@ -227,6 +255,34 @@ CREATE TABLE IF NOT EXISTS watchlist_items (
     id SERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL REFERENCES users(id),
     title TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS title_embeddings (
+    tmdb_id INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    model TEXT NOT NULL,
+    vector_json TEXT NOT NULL,
+    computed_at TEXT NOT NULL DEFAULT ({_PG_NOW}),
+    PRIMARY KEY (tmdb_id, kind, model)
+);
+
+CREATE TABLE IF NOT EXISTS title_clusters (
+    tmdb_id INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    l1_cluster_id INTEGER NOT NULL,
+    l2_cluster_id INTEGER NOT NULL,
+    computed_at TEXT NOT NULL DEFAULT ({_PG_NOW}),
+    PRIMARY KEY (tmdb_id, kind)
+);
+
+CREATE TABLE IF NOT EXISTS cluster_labels (
+    level INTEGER NOT NULL,
+    cluster_id INTEGER NOT NULL,
+    label TEXT NOT NULL,
+    sample_titles TEXT NOT NULL DEFAULT '',
+    size INTEGER NOT NULL DEFAULT 0,
+    computed_at TEXT NOT NULL DEFAULT ({_PG_NOW}),
+    PRIMARY KEY (level, cluster_id)
 );
 """
 
@@ -977,6 +1033,125 @@ def get_taste_profile(user_id: int) -> dict | None:
             "SELECT profile_json FROM taste_profiles WHERE user_id = ?", (user_id,)
         ).fetchone()
     return json.loads(row["profile_json"]) if row is not None else None
+
+
+def get_title_embeddings(keys: list[tuple[int, str]], model: str) -> dict[tuple[int, str], list[float]]:
+    """Fetch cached embeddings in chunks; TMDb ids overlap between movie and TV.
+
+    `model` es parte de la clave a propósito: los vectores de dos modelos
+    distintos no viven en el mismo espacio, así que mezclarlos daría clusters
+    sin sentido (y acá, con dimensiones distintas, un crash al armar la
+    matriz). Cambiar de modelo simplemente deja el cache viejo sin usar.
+    """
+    found: dict[tuple[int, str], list[float]] = {}
+    for start in range(0, len(keys), 400):
+        chunk = keys[start:start + 400]
+        if not chunk:
+            continue
+        where = " OR ".join("(tmdb_id = ? AND kind = ?)" for _ in chunk)
+        params = [value for key in chunk for value in key] + [model]
+        with get_connection() as conn:
+            rows = conn.execute(
+                f"SELECT tmdb_id, kind, vector_json FROM title_embeddings WHERE ({where}) AND model = ?",
+                params,
+            ).fetchall()
+        found.update({(row["tmdb_id"], row["kind"]): json.loads(row["vector_json"]) for row in rows})
+    return found
+
+
+def save_title_embeddings(entries: list[tuple[int, str, list[float]]], model: str) -> None:
+    if not entries:
+        return
+    with get_connection() as conn:
+        conn.executemany(
+            """
+            INSERT INTO title_embeddings (tmdb_id, kind, model, vector_json)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(tmdb_id, kind, model) DO UPDATE SET vector_json = excluded.vector_json
+            """,
+            [(tmdb_id, kind, model, json.dumps(vector)) for tmdb_id, kind, vector in entries],
+        )
+
+
+def save_vibe_clusters(labels: list[dict], assignments: list[dict]) -> None:
+    """Replace one offline clustering snapshot atomically."""
+    with get_connection() as conn:
+        conn.execute("DELETE FROM title_clusters")
+        conn.execute("DELETE FROM cluster_labels")
+        if assignments:
+            conn.executemany(
+                """
+                INSERT INTO title_clusters (tmdb_id, kind, l1_cluster_id, l2_cluster_id)
+                VALUES (?, ?, ?, ?)
+                """,
+                [
+                    (row["tmdb_id"], row["kind"], row["l1_cluster_id"], row["l2_cluster_id"])
+                    for row in assignments
+                ],
+            )
+        if labels:
+            conn.executemany(
+                """
+                INSERT INTO cluster_labels (level, cluster_id, label, sample_titles, size)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        row["level"], row["cluster_id"], row["label"],
+                        json.dumps(row.get("sample_titles", [])), row["size"],
+                    )
+                    for row in labels
+                ],
+            )
+
+
+def get_title_clusters_by_tmdb_ids(keys: list[tuple[int, str]]) -> dict[tuple[int, str], int]:
+    """Return L2 assignments in batches, preserving movie/TV id identity."""
+    found: dict[tuple[int, str], int] = {}
+    for start in range(0, len(keys), 400):
+        chunk = keys[start:start + 400]
+        if not chunk:
+            continue
+        where = " OR ".join("(tmdb_id = ? AND kind = ?)" for _ in chunk)
+        params = [value for key in chunk for value in key]
+        with get_connection() as conn:
+            rows = conn.execute(
+                f"SELECT tmdb_id, kind, l2_cluster_id FROM title_clusters WHERE {where}", params
+            ).fetchall()
+        found.update({(row["tmdb_id"], row["kind"]): row["l2_cluster_id"] for row in rows})
+    return found
+
+
+def get_cluster_member_keys(cluster_id: int, limit: int) -> list[tuple[int, str]]:
+    """Los (tmdb_id, kind) que cayeron en un cluster L2."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT tmdb_id, kind FROM title_clusters WHERE l2_cluster_id = ? ORDER BY tmdb_id LIMIT ?",
+            (cluster_id, limit),
+        ).fetchall()
+    return [(row["tmdb_id"], row["kind"]) for row in rows]
+
+
+def get_vibe_clusters(level: int | None = None, min_size: int = 0) -> list[dict]:
+    filters = []
+    params: list[int] = []
+    if level is not None:
+        filters.append("level = ?")
+        params.append(level)
+    if min_size > 0:
+        filters.append("size >= ?")
+        params.append(min_size)
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT level, cluster_id, label, sample_titles, size FROM cluster_labels"
+            + (" WHERE " + " AND ".join(filters) if filters else "")
+            + " ORDER BY level, cluster_id",
+            tuple(params),
+        ).fetchall()
+    return [
+        {**dict(row), "sample_titles": json.loads(row["sample_titles"] or "[]")}
+        for row in rows
+    ]
 
 
 def save_watchlist_items(user_id: int, titles: list[str]) -> None:

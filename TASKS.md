@@ -33,20 +33,128 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
 
 ## Pending
 
-- [ ] **[Fase 4: vibes por clustering real (embeddings + Leiden), 2026-08-02]**
-      — owner: Codex. Spec completa y autocontenida en
-      `docs/(C) plan-fase4-vibes-embeddings.md` — leerlo entero antes de
-      arrancar, tiene el diseño, lo ya verificado (GEMINI_API_KEY real y
-      probada, `gemini-embedding-2` confirmado con requests reales,
-      `batchEmbedContents` confirmado que da un embedding distinto por
-      texto), el riesgo a resolver primero (Python 3.14 + `python-igraph`/
-      `leidenalg` sin garantía de wheel — fallback a `networkx` +
-      `python-louvain` si hace falta), y un checklist de retomada al final.
-      Contexto de negocio (por qué esto y no el otro sistema de Flick) en
-      `CLAUDE.md`, "Historial de sesiones" 2026-08-02. Fases 1/2/3/5 de ese
-      mismo trabajo (géneros ampliados + vibras curadas a mano + frontend)
-      ya están en `main`, commit `5af2817` — no las toques, esto es la
-      pieza que falta arriba de eso.
+- [x] **[Fase 4: vibes por clustering real (embeddings + Leiden), 2026-08-02]**
+      — arrancada por Codex (todo el pipeline: tablas, `vibes_clustering.py`,
+      endpoint admin, `extra_phrases`, tests), cerrada por Claude el mismo día
+      resolviendo el error que había quedado sin capturar y los 3 problemas
+      que aparecieron al correrla de verdad a escala. Detalle en `CLAUDE.md`
+      ("Historial de sesiones", 2026-08-02 sesión 3). Resumen:
+      1. **El error que Codex no llegó a capturar era cuota de Gemini.** El
+         free tier cuenta CADA texto de un `batchEmbedContents` como un
+         request: un batch de 100 gasta la ventana entera de 100/min, así que
+         el segundo batch arranca con 429 garantizado. Por eso con
+         `seed_cap=50` (un solo batch) nunca se veía. Hay además un tope
+         diario de 1.000, que es el que hace que ~940 títulos no entren en un
+         día. `_embed_batch` ahora espera el `retryDelay` que Gemini devuelve
+         en el cuerpo del 429 y reintenta; si no cede, `QuotaExhausted`.
+      2. **Quedarse sin cuota ya no tira la corrida entera:** `recompute()`
+         clusteriza con lo que sí se embebió y devuelve `pending_embeddings` /
+         `quota_exhausted`. Como `title_embeddings` ya persistía batch por
+         batch, la corrida siguiente completa el resto. Corrida real:
+         650 embeddings, 290 pendientes, 7 clusters L1 y 52 L2, labels
+         coherentes ("Cine samurái", "Cine italiano de autor", "Charlie
+         Chaplin", "Cine coreano oscuro"), 6,5 min.
+      3. **Un movimiento elegido devolvía casi nada.** El pool salía de
+         `fetch_candidates("", pages=2)` esperando que se solapara con el
+         cluster — medido sobre la muestra real: **3 de 52 movimientos**
+         juntaban los 6 picks. La membresía ya estaba en `title_clusters`, así
+         que `_movement_candidates` la resuelve directo por id
+         (`fetch_title_by_id`, cacheado). Ahora 42 de 52 son viables; los 10
+         restantes son clusters de 1 a 5 títulos y no se ofrecen
+         (`MIN_MOVEMENT_SIZE`).
+      4. **Dos bugs propios encontrados revisando lo de Codex:** el tag
+         `vibe-l2:N` se colgaba a TODO candidato aunque no hubiera movimiento
+         elegido — como el scoring divide el match positivo por `len(tags)`,
+         eso diluía el score justo de los títulos de la muestra frente a los
+         que quedaron afuera (mismo trap documentado del cap de 2 keyword
+         tags); y el LLM etiquetó dos clusters distintos igual ("Animales con
+         emociones" / "animales con emociones"), que el picker muestra en
+         mayúsculas como dos chips idénticos.
+      Verificado end-to-end en el browser local con datos reales: elegir
+      "Cine samurái" devuelve Seven Samurai, Yojimbo, Harakiri, The Sword of
+      Doom, Ran y The Hidden Fortress (62-88%), con el label en el why y sin
+      slugs `vibe-l2:N` a la vista. 337 tests backend + `npm run build`
+      limpio.
+
+- [x] **Embeddings movidos de Gemini a NVIDIA NIM (2026-08-02)** — pedido de
+      Matías ("¿no hay ninguna AI en la página de NVIDIA que haga esto?").
+      Resuelve de raíz el racionamiento: el free tier de Gemini cuenta cada
+      texto de un `batchEmbedContents` como un request (100/min, 1.000/día),
+      así que la muestra no entraba en un día. `nvidia/nemotron-3-embed-1b`
+      (2048-d) embebió los mismos 650 títulos en **15,6s**, con la
+      `NVIDIA_API_KEY` que el proyecto ya usaba para el LLM — una key menos.
+      - **Calidad medida antes de cambiar, no asumida:** se clusterizaron los
+        mismos 650 títulos con los dos y se comparó. Empate. NVIDIA separa
+        mejor el neo-noir (Chinatown/Gone Girl/Deep Red, contra el de Gemini
+        que juntaba Silence of the Lambs con The Green Mile) y el suspenso de
+        Hitchcock (Dial M for Murder/Strangers on a Train/Rear Window);
+        Gemini agrupa mejor el cine coreano, que NVIDIA desarma en 9 pedazos.
+        Pureza cruzada 0,55/0,60. El cambio se decidió por lo operativo.
+      - De los 12 modelos de embedding que lista la cuenta, 3 responden:
+        `nemotron-3-embed-1b`, `llama-nemotron-embed-1b-v2` (2048-d) y
+        `nv-embedqa-e5-v5` (1024-d). `baai/bge-m3` da 500 y
+        `snowflake/arctic-embed-l` el mismo `404 "not found for account"` que
+        kimi-k2.6 — es entitlement de cuenta, no la key.
+      - **Aclaración que costó una vuelta:** la key de NVIDIA es de cuenta,
+        una sola para los 102 modelos, aunque build.nvidia.com ponga un botón
+        "Get API Key" en la página de cada modelo. Lo que cambia por modelo
+        es el entitlement — de ahí los 404, que no se arreglan con otra key.
+      - `title_embeddings` ahora lleva `model` en la PK: los vectores de dos
+        modelos no comparten espacio (ni dimensión), así que el cache de uno
+        nunca puede contestar por el otro. La tabla nunca se deployó, así que
+        no hizo falta migración.
+      - `_embed_batch` ordena la respuesta por `index`: la API no garantiza
+        devolver los embeddings en el orden en que se mandaron, y tomarlos
+        tal cual asignaría cada película al cluster de otra sin fallar.
+      - `igraph`/`leidenalg` se importan adentro de las funciones que los
+        usan, no a nivel módulo. Son extensiones en C y `main.py` importa
+        `vibes_clustering` al arrancar: arriba, una wheel que no resuelva en
+        Render no rompería el job offline de vibras, no dejaría levantar la
+        API entera. Test que lo fija bloqueando los dos imports.
+      - Corrida real con la muestra completa: **940 de 940 embebidos en una
+        sola pasada**, sin un solo 429, 6 clusters L1 y 55 L2 (46 con ≥6
+        títulos, 44 ofrecidos tras deduplicar nombres). El cine coreano, que
+        era la debilidad de NVIDIA con 650 títulos, vuelve a agruparse limpio
+        con 940 ("Cine coreano de venganza") — era falta de muestra, no del
+        modelo. Aparecieron movimientos que el mapa de géneros no da, como
+        "Cine de la Resistencia" (Casablanca, To Be or Not to Be,
+        Inglourious Basterds).
+
+- [x] **Los movimientos 100% de series nunca llegaban al piso de 60**
+      (encontrado y resuelto 2026-08-02 verificando la Fase 4). Fix elegido:
+      no aplicar la penalización de series cuando el pool no tiene películas
+      con las que competir (`pool_has_movies` en `recommender.recommend()`).
+      En un pool homogéneo esa resta se aplica a todos por igual, así que no
+      ordenaba nada — solo empujaba la tanda entera abajo del piso. En pool
+      mixto sigue igual que siempre, con test que lo fija. Verificado con
+      datos reales: los 6 movimientos más grandes devuelven 6 picks cada uno,
+      incluidos los tres que son 100% series y antes daban cero.
+      Diagnóstico original, para el registro:
+      Medido: "Romance escolar" (36 títulos, todos series) da **57 en los
+      seis** candidatos, con perfil afín y con perfil no afín por igual. La
+      cuenta: 1 opción matcheada suma 10 puntos (`20 * min(n,2)/2`), la
+      penalización de series resta 4, total 6 → `50 + 49*tanh(6/40)` = 57.
+      Es exactamente el mismo bug del 2026-08-02 ("piso de 60 nunca se
+      cruzaba con 1 sola opción matcheada") en otra forma: aquel fix dejó
+      "1 opción → 62", pero eso vale **solo para películas** — para una serie
+      el -4 se come el margen y quedan 57, en silencio.
+      Se nota recién ahora porque un fetch de género trae mayoría de
+      películas, mientras que un cluster puede salir 100% series (con esta
+      muestra, buena parte del anime).
+      Detalle que hace la decisión más fácil: en un pool homogéneo (todas
+      series) el -4 se aplica a todos por igual, así que **no cambia el orden
+      de nada** — lo único que hace es empujar la tanda entera abajo del piso.
+      Opciones: no aplicar la penalización cuando el pool no tiene películas
+      con las que competir, o subir el bonus por opción. Las dos tocan
+      `recommender.recommend()`, que es tuyo y lo calibraste a mano, así que
+      lo dejo reportado en vez de retocarlo por mi cuenta.
+
+- [ ] **`POST /admin/vibes/recompute` corre sincrónico y tarda minutos** (6,5
+      min medidos con cuota agotada; con cuota disponible son ~10 min solo de
+      esperas de rate limit, más el labeling). Sobre Render es muy probable
+      que el request se corte antes de terminar — el job igual persiste todo
+      lo que va haciendo, pero el cliente no ve el resultado. Decisión de
+      Matías si vale la pena moverlo a background o correrlo como script.
 
 - [x] **[/recommend debe devolver los mejores matches reales, no completar con películas flojas (feedback 2026-07-31)]** — resuelto 2026-08-02. Causa raíz: `recommender.recommend()` no tenía piso de score a propósito ("we always want a full set of picks... even if some are weak matches"), así que rellenaba hasta 6 con lo que hubiera. Decisión de Matías: piso real en 60 (no solo descartar ≤50), y si eso deja el pool corto, `_finish_recommend` primero pide un pool más grande a TMDb (`fetch_candidates(mood, pages=4)`) antes de resignarse a mostrar menos de 6 — nunca rellena con picks flojos. `/weekly` y `/titles/{id}/verdict` quedan afuera (`min_score=0`): ahí el catálogo es fijo (las semanales de la semana, o el título que el usuario buscó), no hay pool del que elegir. 308 tests (33 nuevos/reescritos en `test_recommender.py`/`test_main.py`).
 

@@ -523,3 +523,39 @@ def test_recommend_untagged_catalog_items_default_to_profile_source() -> None:
     response = recommend(ratings=ratings, mood="", catalog=catalog)
 
     assert len(response.recommendations) == 5
+
+
+def test_series_only_pool_is_not_penalised_below_the_match_floor() -> None:
+    # la penalización de series existe para que no desplacen películas; en un
+    # pool sin películas se aplica a todas por igual, así que no ordena nada y
+    # solo empuja la tanda entera abajo de MIN_MATCH_SCORE. Medido con datos
+    # reales el 2026-08-02: un movimiento 100% series daba 57 en los seis
+    # candidatos y devolvía cero picks, con perfil afín y no afín por igual.
+    catalog = [
+        {"title": f"Serie {i}", "year": 2020, "kind": "series", "tags": ["light", "stylized", "vibe-l2:44"]}
+        for i in range(6)
+    ]
+
+    response = recommend(
+        ratings=[],
+        mood="",
+        catalog=catalog,
+        required_any_groups=(frozenset({"vibe-l2:44"}),),
+    )
+
+    assert len(response.recommendations) == 6
+    assert all(item.match_score >= MIN_MATCH_SCORE for item in response.recommendations)
+
+
+def test_series_still_lose_the_tiebreak_against_movies_in_a_mixed_pool() -> None:
+    # el fix de arriba no puede desactivar la penalización donde sí importa
+    catalog = [
+        {"title": "Serie", "year": 2020, "kind": "series", "tags": ["dark"]},
+        {"title": "Peli", "year": 2020, "kind": "movie", "tags": ["dark"]},
+    ]
+    ratings = [RatedItem(title="Vieja", rating=5, review="dark and moody")]
+
+    response = recommend(ratings=ratings, mood="", catalog=catalog, min_score=0)
+
+    by_title = {item.title: item.match_score for item in response.recommendations}
+    assert by_title["Peli"] > by_title["Serie"]

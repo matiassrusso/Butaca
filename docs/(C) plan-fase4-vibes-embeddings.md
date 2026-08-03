@@ -1,5 +1,33 @@
 # Fase 4 — Sistema 1 real: metadata → embeddings → Leiden
 
+> **IMPLEMENTADO — 2026-08-02. Lo que sigue es el plan original; leer primero
+> este bloque, porque una decisión central cambió al ejecutarlo.**
+>
+> **Los embeddings NO los hace Gemini, los hace NVIDIA NIM**
+> (`nvidia/nemotron-3-embed-1b`, 2048-d, vía `https://integrate.api.nvidia.com/v1/embeddings`,
+> con la `NVIDIA_API_KEY` que el proyecto ya usaba para el LLM).
+>
+> El plan de abajo dice que batchear ~100 textos por request deja el job
+> "ni cerca de ningún límite de rate". **Esa premisa era falsa:** el free tier
+> de Gemini cuenta CADA texto de un `batchEmbedContents` como un request
+> aparte, contra un tope de 100/minuto y 1.000/día. Un batch lleno consume la
+> ventana entera, el siguiente arranca con 429 garantizado, y una muestra de
+> ~940 títulos no entra en un día. Con `seed_cap=50` nunca se veía (un solo
+> batch), y por eso la muestra chica pasó y la grande murió.
+>
+> Se midió la calidad de los dos antes de cambiar, clusterizando los mismos
+> 650 títulos: **empate**. NVIDIA separa mejor el neo-noir (Chinatown/Gone
+> Girl/Deep Red vs. el de Gemini que mezclaba Silence of the Lambs con The
+> Green Mile) y el suspenso de Hitchcock; Gemini agrupa mejor el cine
+> coreano, que NVIDIA desarma en nueve pedazos. Pureza cruzada 0,55/0,60 —
+> son taxonomías distintas, no una mejor versión de la otra. **Lo que decidió
+> el cambio fue operativo, no de calidad:** 650 embeddings en 15,6s contra
+> ~10 minutos de esperas y una pared diaria, con una key menos que mantener.
+>
+> Consecuencia de diseño: `title_embeddings` lleva `model` en la PK. Vectores
+> de dos modelos no viven en el mismo espacio (acá ni siquiera comparten
+> dimensión), así que el cache de uno nunca puede contestar por el otro.
+>
 > Documento de handoff (2026-08-02). Contexto completo de por qué existe esto:
 > ver "Historial de sesiones" en `CLAUDE.md`, entrada 2026-08-02 ("picker 'a
 > tu elección'"). Fases 1, 2, 3 y 5 de ese trabajo ya están en `main`
