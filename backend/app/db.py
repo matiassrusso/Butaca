@@ -1174,6 +1174,19 @@ def get_cluster_member_keys(cluster_id: int, limit: int) -> list[tuple[int, str]
     return [(row["tmdb_id"], row["kind"]) for row in rows]
 
 
+def get_random_cluster_keys(limit: int) -> list[tuple[int, str]]:
+    """Muestra random de (tmdb_id, kind) de toda la semilla clusterizada de
+    la Fase 4, sin filtrar por movimiento -- para el swipe de "marcá lo que
+    viste": variada por construcción, a diferencia de un discover por
+    popularidad. RANDOM() anda igual en SQLite y Postgres."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT tmdb_id, kind FROM title_clusters ORDER BY RANDOM() LIMIT ?",
+            (limit,),
+        ).fetchall()
+    return [(row["tmdb_id"], row["kind"]) for row in rows]
+
+
 def get_vibe_clusters(level: int | None = None, min_size: int = 0) -> list[dict]:
     filters = []
     params: list[int] = []

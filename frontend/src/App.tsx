@@ -13,6 +13,7 @@ import Home from "./pages/Home";
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
 import Profile from "./pages/Profile";
+import Rate from "./pages/Rate";
 import Recommend from "./pages/Recommend";
 import ResetPassword from "./pages/ResetPassword";
 import VerifyEmail from "./pages/VerifyEmail";
@@ -25,6 +26,7 @@ function Router() {
       <Route path="/reset-password" component={ResetPassword} />
       <Route path="/verify-email" component={VerifyEmail} />
       <Route path="/recommend" component={Recommend} />
+      <Route path="/rate" component={Rate} />
       <Route path="/history" component={History} />
       <Route path="/profile" component={Profile} />
       <Route component={NotFound} />

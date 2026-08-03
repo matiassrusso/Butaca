@@ -87,6 +87,9 @@ export function Navbar() {
                 <Link to="/profile" role="menuitem" className={menuItemCls}>
                   Perfil
                 </Link>
+                <Link to="/rate" role="menuitem" className={menuItemCls}>
+                  Puntuar más
+                </Link>
                 <Link to="/history" role="menuitem" className={menuItemCls}>
                   Archivo
                 </Link>

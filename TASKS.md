@@ -149,7 +149,7 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
       `recommender.recommend()`, que es tuyo y lo calibraste a mano, así que
       lo dejo reportado en vez de retocarlo por mi cuenta.
 
-- [ ] **Sección para ir marcando qué películas viste, estilo swipe con
+- [x] **Sección para ir marcando qué películas viste, estilo swipe con
       títulos random** (idea de Matías, 2026-08-02). Hoy la única forma de
       alimentar el perfil es el onboarding (una vez) o el import de
       Letterboxd; falta un lugar donde volver cuando querés y sumar de a
@@ -175,6 +175,23 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
       puntuado todavía.
       Se cruza con la task del techo de 86%: más títulos puntuados = mejor
       perfil = matches más altos ganados de verdad.
+      **Resuelto 2026-08-03 — Matías eligió el camino de dos pasos (calcar
+      DisagreePanel).** Nueva pantalla `/rate` (link "Puntuar más" en el
+      dropdown del navbar). Backend: `GET /titles/swipe-batch` arma una
+      tanda de 20 títulos random de `title_clusters` (nuevo
+      `db.get_random_cluster_keys`, `ORDER BY RANDOM()`) resueltos contra
+      TMDb en paralelo, excluyendo lo ya puntuado por el usuario; si el
+      cluster no alcanza, rellena con `onboarding_titles.py`. Reusa
+      `OnboardingTitle`/`OnboardingTitlesResponse` tal cual, sin modelos
+      nuevos. Frontend: mismo estilo visual que `SwipeRating`
+      (`Recommend.tsx`), pero con el gate de dos pasos real (¿la viste? →
+      estrellas) en vez de puntuar directo; "No la vi" no persiste nada.
+      Swipe derecha = "la vi" (abre el paso de rating), abajo = "no la vi",
+      reusando `useSwipeCard` tal cual. 5 tests nuevos de backend (356 en
+      total). **Verificado end-to-end en el dev server local** con
+      TMDb real: cargó un título real del cluster, "Sí, la vi" → estrellas
+      → `POST /profile/rate` 201, "No la vi" avanzó sin persistir nada, y
+      una tanda nueva ya no ofreció el título recién puntuado.
 
 - [ ] **Juegos dentro del sitio** (idea de Matías, 2026-08-02, sin scope
       todavía). Anotada tal cual para no perderla; hay que definir qué juego

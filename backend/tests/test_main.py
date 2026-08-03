@@ -1622,6 +1622,87 @@ def test_onboarding_titles_merges_previously_rated_titles(monkeypatch) -> None:
     assert titles[next(iter(unrated_seed_titles))]["rating"] is None
 
 
+def test_swipe_batch_requires_auth() -> None:
+    assert client.get("/titles/swipe-batch").status_code == 401
+
+
+def test_swipe_batch_returns_empty_without_tmdb_key(monkeypatch) -> None:
+    monkeypatch.delenv("TMDB_API_KEY", raising=False)
+    headers = _auth_headers("swipenokey")
+
+    response = client.get("/titles/swipe-batch", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json()["titles"] == []
+
+
+def test_swipe_batch_resolves_random_cluster_titles(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        "backend.app.main.db.get_random_cluster_keys",
+        lambda limit: [(1, "movie"), (2, "movie")],
+    )
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.fetch_title_by_id",
+        lambda tmdb_id, kind="movie": {
+            "tmdb_id": tmdb_id, "title": f"Cluster Movie {tmdb_id}", "year": 2010, "kind": "movie",
+            "poster_path": f"p{tmdb_id}.jpg",
+        },
+    )
+    headers = _auth_headers("swipecluster")
+
+    response = client.get("/titles/swipe-batch", headers=headers)
+
+    assert response.status_code == 200
+    titles = {item["title"] for item in response.json()["titles"]}
+    assert titles == {"Cluster Movie 1", "Cluster Movie 2"}
+
+
+def test_swipe_batch_excludes_already_rated_titles(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        "backend.app.main.db.get_random_cluster_keys",
+        lambda limit: [(1, "movie"), (2, "movie")],
+    )
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.fetch_title_by_id",
+        lambda tmdb_id, kind="movie": {
+            "tmdb_id": tmdb_id, "title": f"Cluster Movie {tmdb_id}", "year": 2010, "kind": "movie",
+            "poster_path": None,
+        },
+    )
+    headers = _auth_headers("swipeexclude")
+    client.post(
+        "/recommend/manual",
+        headers=headers,
+        json={"ratings": _MANUAL_RATINGS + [{"title": "Cluster Movie 1", "rating": 4.0}]},
+    )
+
+    response = client.get("/titles/swipe-batch", headers=headers)
+
+    titles = {item["title"] for item in response.json()["titles"]}
+    assert "Cluster Movie 1" not in titles
+    assert "Cluster Movie 2" in titles
+
+
+def test_swipe_batch_falls_back_to_onboarding_seeds_when_cluster_is_empty(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setattr("backend.app.main.db.get_random_cluster_keys", lambda limit: [])
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.search_title",
+        lambda title, year=None: {
+            "tmdb_id": 42, "title": title, "year": year or 2000, "kind": "movie", "poster_path": "p.jpg",
+        },
+    )
+    headers = _auth_headers("swipefallback")
+
+    response = client.get("/titles/swipe-batch", headers=headers)
+
+    assert response.status_code == 200
+    titles = {item["title"] for item in response.json()["titles"]}
+    assert titles  # el fallback de onboarding_titles.py lo llenó
+
+
 def test_onboarding_search_returns_matches(monkeypatch) -> None:
     monkeypatch.setenv("TMDB_API_KEY", "fake-key")
     monkeypatch.setattr(

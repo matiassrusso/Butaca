@@ -1,6 +1,7 @@
 import hmac
 import logging
 import os
+import random
 import sqlite3
 import threading
 from collections import Counter
@@ -68,6 +69,8 @@ DEFAULT_RECOMMEND_DAILY_LIMIT = 20  # per user; protects TMDb/NIM quotas. 0 = of
 WATCHLIST_MATCH_CAP = 60  # how many watchlist titles to resolve against TMDb per request
 MOVEMENT_MEMBER_CAP = 40  # títulos por movimiento elegido que se resuelven contra TMDb
 MIN_MOVEMENT_SIZE = 6  # un movimiento con menos títulos que una tanda de picks no se ofrece
+SWIPE_BATCH_SIZE = 20  # cuántos títulos sin puntuar se ofrecen por tanda en la sección de swipe
+SWIPE_CLUSTER_OVERSAMPLE = 3  # margen para sobrevivir el filtro de "ya puntuado"
 _VIBE_RECOMPUTE_LOCK = threading.Lock()
 
 # ponytail: uvicorn only wires handlers for its own "uvicorn.*" loggers, not
@@ -1210,6 +1213,78 @@ def onboarding_search_endpoint(
     except tmdb_client.TmdbError:
         return OnboardingTitlesResponse(titles=[])
     return OnboardingTitlesResponse(titles=[OnboardingTitle(**r) for r in results])
+
+
+@app.get("/titles/swipe-batch", response_model=OnboardingTitlesResponse)
+def swipe_batch(user: sqlite3.Row = Depends(auth.get_current_user)) -> OnboardingTitlesResponse:
+    """Tanda random de títulos sin puntuar para la sección de swipe "marcá lo
+    que viste" (idea de Matías, 2026-08-02): un lugar donde volver cuando
+    quiera y sumar de a poco, sin depender del onboarding (una vez) o un
+    reimport de Letterboxd.
+
+    Sale de title_clusters (la muestra clusterizada de la Fase 4, variada por
+    construcción) en vez de discover por popularidad — mismo motivo que la
+    semilla de vibras: discover ordenado por popularidad muestra siempre los
+    mismos blockbusters. Se completa con onboarding_titles.py si el cluster
+    no alcanza (usuario con casi todo puntuado, o title_clusters vacío/sin
+    correr la Fase 4 en este ambiente)."""
+    if not tmdb_client.is_configured():
+        return OnboardingTitlesResponse(titles=[])
+
+    watched_titles = {item["title"].strip().lower() for item in db.get_watched_items(user["id"])}
+
+    def _resolve_by_id(key: tuple[int, str]) -> dict | None:
+        try:
+            return tmdb_client.fetch_title_by_id(key[0], kind=key[1])
+        except tmdb_client.TmdbError:
+            return None
+
+    cluster_keys = db.get_random_cluster_keys(SWIPE_BATCH_SIZE * SWIPE_CLUSTER_OVERSAMPLE)
+    with ThreadPoolExecutor(max_workers=taste_profile.MATCH_WORKERS) as pool:
+        resolved = list(pool.map(_resolve_by_id, cluster_keys))
+
+    candidates = [item for item in resolved if item]
+    seen_titles = set(watched_titles)
+    picked = []
+    for item in candidates:
+        key = item["title"].strip().lower()
+        if key in seen_titles:
+            continue
+        seen_titles.add(key)
+        picked.append(item)
+
+    if len(picked) < SWIPE_BATCH_SIZE:
+        extra_seed = [t for t in onboarding_titles.ONBOARDING_TITLES if t["title"].strip().lower() not in seen_titles]
+
+        def _match_curated(entry: dict) -> dict | None:
+            try:
+                return tmdb_client.search_title(entry["title"], entry.get("year"))
+            except tmdb_client.TmdbError:
+                return None
+
+        with ThreadPoolExecutor(max_workers=taste_profile.MATCH_WORKERS) as pool:
+            extra_resolved = list(pool.map(_match_curated, extra_seed))
+        for item in extra_resolved:
+            if not item:
+                continue
+            key = item["title"].strip().lower()
+            if key in seen_titles:
+                continue
+            seen_titles.add(key)
+            picked.append(item)
+
+    random.shuffle(picked)
+    titles = [
+        OnboardingTitle(
+            title=item["title"],
+            year=item.get("year") or 0,
+            kind=item.get("kind") or "movie",
+            tmdb_id=item.get("tmdb_id"),
+            poster_path=item.get("poster_path"),
+        )
+        for item in picked[:SWIPE_BATCH_SIZE]
+    ]
+    return OnboardingTitlesResponse(titles=titles)
 
 
 @app.post("/recommend/manual", response_model=RecommendResponse)

@@ -78,7 +78,7 @@ const MAX_SELECTED_OPTIONS = 5; // mismo tope que backend/app/main.py::MAX_SELEC
 type ImportMethod = "zip" | "username" | "manual";
 
 // onboarding without Letterboxd: rate seed titles by hand
-type OnboardingTitle = {
+export type OnboardingTitle = {
   title: string;
   year: number;
   kind: string;
