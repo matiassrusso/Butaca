@@ -384,7 +384,7 @@ export default function Profile() {
               Todavía no hay suficiente para armar tu perfil
             </h2>
             <p className="font-mono text-xs uppercase text-muted-foreground mb-5">
-              Subí tu export de Letterboxd desde la pantalla de recomendaciones.
+              Importá tu Letterboxd o puntuá pelis desde la pantalla de recomendaciones.
             </p>
             <button
               onClick={() => navigate("/recommend")}

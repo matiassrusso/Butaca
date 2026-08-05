@@ -30,13 +30,13 @@ const WEEKLY_POLL_MAX_ATTEMPTS = 6;
 const STEPS = [
   {
     number: "01",
-    title: "Subí tu export de Letterboxd",
-    desc: "Settings → Data → Export en Letterboxd. Subí tu ratings.csv o reviews.csv acá.",
+    title: "Contanos qué viste",
+    desc: "Subí tu export de Letterboxd, importalo por usuario, o puntuá a mano en un minuto, sin cuenta si querés.",
   },
   {
     number: "02",
-    title: "Leemos tus ratings y reviews",
-    desc: "Buscamos patrones de tono, ritmo y sensibilidad en lo que venís premiando o rechazando.",
+    title: "Leemos tus patrones",
+    desc: "Ratings, reviews cuando las hay, género, director. Buscamos el patrón real detrás de lo que premiás o rechazás.",
   },
   {
     number: "03",
@@ -262,7 +262,7 @@ export default function Home() {
             className="flex items-center gap-3 mb-10 font-mono text-[10px] uppercase tracking-[0.3em] text-foreground"
           >
             <span className="size-2 bg-accent rounded-full animate-pulse" />
-            <span>Basado en tu historial de Letterboxd</span>
+            <span>Basado en tu gusto real, no en un ranking</span>
           </motion.div>
 
           <h1 className="text-[15vw] md:text-[11vw] font-black tracking-tighter leading-[0.85] uppercase mb-10">
@@ -287,9 +287,10 @@ export default function Home() {
               transition={{ delay: 0.7 }}
               className="max-w-md font-mono text-xs uppercase leading-relaxed text-muted-foreground"
             >
-              [Teoría] Subí tu export de Letterboxd. Leemos tus ratings, tus reviews, tus
-              patrones. Después recomendamos con explicaciones basadas en tu gusto real,
-              no en un ranking genérico.
+              [Método] Importás tu Letterboxd o puntuás a mano, sin cuenta si querés.
+              Leemos tus ratings, tus reviews cuando las hay, tus patrones. Después
+              recomendamos con explicaciones basadas en tu gusto real, no en un ranking
+              genérico.
             </motion.p>
             <motion.div
               initial={{ opacity: 0, y: 20 }}

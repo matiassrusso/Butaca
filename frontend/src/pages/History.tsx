@@ -222,7 +222,7 @@ export default function History() {
               Todavía no importaste vistas
             </h2>
             <p className="font-mono text-xs uppercase text-muted-foreground">
-              Subí tu export de Letterboxd para verlas acá.
+              Importá tu Letterboxd o puntuá pelis para verlas acá.
             </p>
           </div>
         )}
