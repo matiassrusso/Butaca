@@ -31,6 +31,8 @@ CREATE TABLE IF NOT EXISTS users (
     password_salt TEXT NOT NULL,
     email TEXT,
     email_verified INTEGER NOT NULL DEFAULT 0,
+    is_guest INTEGER NOT NULL DEFAULT 0,
+    google_sub TEXT UNIQUE,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -210,6 +212,8 @@ CREATE TABLE IF NOT EXISTS users (
     password_salt TEXT NOT NULL,
     email TEXT,
     email_verified INTEGER NOT NULL DEFAULT 0,
+    is_guest INTEGER NOT NULL DEFAULT 0,
+    google_sub TEXT UNIQUE,
     created_at TEXT NOT NULL DEFAULT ({_PG_NOW})
 );
 
@@ -433,6 +437,19 @@ def _run_migrations(conn) -> None:
         # te pisaba el tuyo. Con esto seteado, un username distinto genera
         # recomendaciones sin guardar nada.
         conn.execute("ALTER TABLE users ADD COLUMN letterboxd_username TEXT")
+    if not _has_column(conn, "users", "is_guest"):
+        # Columna explícita en vez de deducirlo de email IS NULL: la migración
+        # que agregó `email` dejó en NULL a los usuarios pre-existentes, así
+        # que hay cuentas reales sin email que no son invitados.
+        conn.execute("ALTER TABLE users ADD COLUMN is_guest INTEGER NOT NULL DEFAULT 0")
+    if not _has_column(conn, "users", "google_sub"):
+        # el `sub` de Google, no el mail: el mail de una cuenta de Google puede
+        # cambiar, el sub no. UNIQUE va aparte porque ALTER TABLE ADD COLUMN no
+        # lo acepta en SQLite.
+        conn.execute("ALTER TABLE users ADD COLUMN google_sub TEXT")
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_sub ON users(google_sub)"
+        )
     if not _has_column(conn, "sessions", "expires_at"):
         # Las filas preexistentes quedan con expires_at=0 → expiradas. A la vez
         # se pasó a guardar el token hasheado, así que esas filas viejas (token
@@ -557,14 +574,58 @@ def get_connection():
             conn.close()
 
 
-def create_user(username: str, password_hash: str, password_salt: str, email: str) -> int:
+def create_user(
+    username: str,
+    password_hash: str,
+    password_salt: str,
+    email: str | None,
+    is_guest: bool = False,
+) -> int:
     with get_connection() as conn:
         cursor = conn.execute(
-            "INSERT INTO users (username, password_hash, password_salt, email) VALUES (?, ?, ?, ?)"
+            "INSERT INTO users (username, password_hash, password_salt, email, is_guest)"
+            " VALUES (?, ?, ?, ?, ?)"
             + (" RETURNING id" if _is_postgres() else ""),
-            (username, password_hash, password_salt, email),
+            (username, password_hash, password_salt, email, int(is_guest)),
         )
         return _last_insert_id(conn, cursor)
+
+
+def get_user_by_google_sub(google_sub: str) -> sqlite3.Row | None:
+    with get_connection() as conn:
+        return conn.execute(
+            "SELECT * FROM users WHERE google_sub = ?", (google_sub,)
+        ).fetchone()
+
+
+def get_user_by_email(email: str) -> sqlite3.Row | None:
+    with get_connection() as conn:
+        return conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
+
+
+def link_google_account(user_id: int, google_sub: str, email: str) -> None:
+    """Ata una cuenta existente a Google. Marca el mail como verificado porque
+    Google ya lo verificó (y solo llegamos acá con email_verified del token)."""
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE users SET google_sub = ?, email = ?, email_verified = 1, is_guest = 0"
+            " WHERE id = ?",
+            (google_sub, email, user_id),
+        )
+
+
+def claim_guest_account(
+    user_id: int, username: str, password_hash: str, password_salt: str, email: str
+) -> None:
+    """Convierte al invitado en cuenta real sobre la MISMA fila, para que su
+    historial y sus ratings sobrevivan — registrarse de cero crearía un
+    usuario nuevo y el invitado perdería todo lo que puntuó."""
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE users SET username = ?, password_hash = ?, password_salt = ?,"
+            " email = ?, is_guest = 0 WHERE id = ?",
+            (username, password_hash, password_salt, email, user_id),
+        )
 
 
 def get_user_by_username(username: str) -> sqlite3.Row | None:

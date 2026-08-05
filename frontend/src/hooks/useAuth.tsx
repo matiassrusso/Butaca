@@ -17,6 +17,9 @@ type User = {
   // tu cuenta de Letterboxd: la reclama el primer import por username y decide
   // si un import escribe en tu perfil o no (ver /profile/letterboxd)
   letterboxdUsername: string | null;
+  // sesión de invitado: cuenta real pero sin usuario ni mail, y sin forma de
+  // volver a entrar si se pierde el token. La convierte claimAccount().
+  isGuest: boolean;
 };
 
 type AuthState = {
@@ -27,6 +30,9 @@ type AuthState = {
   isAuthenticated: boolean;
   login: (username: string, password: string) => Promise<void>;
   register: (username: string, password: string, email: string) => Promise<void>;
+  guestLogin: () => Promise<void>;
+  claimAccount: (username: string, password: string, email: string) => Promise<void>;
+  googleLogin: (idToken: string) => Promise<void>;
   saveLetterboxdUsername: (letterboxdUsername: string) => Promise<void>;
   logout: () => Promise<void>;
   deleteAccount: (password: string) => Promise<void>;
@@ -70,6 +76,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             email: data.email ?? null,
             emailVerified: Boolean(data.email_verified),
             letterboxdUsername: data.letterboxd_username ?? null,
+            isGuest: Boolean(data.is_guest),
           });
       })
       .catch(() => {
@@ -88,6 +95,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [token]);
 
+  // minimal until the /auth/me effect (fired by setToken) fills in email +
+  // verification status
+  const applySession = useCallback((body: { token: string; username: string }) => {
+    localStorage.setItem(TOKEN_KEY, body.token);
+    setUser({
+      username: body.username,
+      email: null,
+      emailVerified: false,
+      letterboxdUsername: null,
+      isGuest: false,
+    });
+    setToken(body.token);
+  }, []);
+
   const authenticate = useCallback(
     async (endpoint: "login" | "register", username: string, password: string, email?: string) => {
       setError(null);
@@ -105,18 +126,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw err;
       }
 
-      localStorage.setItem(TOKEN_KEY, body.token);
-      // minimal until the /auth/me effect (fired by setToken) fills in email +
-      // verification status
-      setUser({
-        username: body.username,
-        email: null,
-        emailVerified: false,
-        letterboxdUsername: null,
-      });
-      setToken(body.token);
+      applySession(body);
     },
-    [],
+    [applySession],
   );
 
   const login = useCallback(
@@ -128,6 +140,63 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     (username: string, password: string, email: string) =>
       authenticate("register", username, password, email),
     [authenticate],
+  );
+
+  const guestLogin = useCallback(async () => {
+    setError(null);
+    const response = await fetch(`${API_BASE_URL}/auth/guest`, { method: "POST" });
+    const body = await response.json().catch(() => null);
+    if (!response.ok) {
+      const message = body?.detail ?? "No pude crear una sesión de invitado.";
+      const err = new Error(message);
+      setError(err);
+      throw err;
+    }
+    applySession(body);
+  }, [applySession]);
+
+  const googleLogin = useCallback(
+    async (idToken: string) => {
+      setError(null);
+      const response = await fetch(`${API_BASE_URL}/auth/google`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          // si hay sesión de invitado, el backend le ata la cuenta de Google
+          // a ESA cuenta en vez de crear una nueva y perderle el historial
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ id_token: idToken }),
+      });
+      const body = await response.json().catch(() => null);
+      if (!response.ok) {
+        const err = new Error(body?.detail ?? "No pude entrar con Google.");
+        setError(err);
+        throw err;
+      }
+      applySession(body);
+    },
+    [token, applySession],
+  );
+
+  const claimAccount = useCallback(
+    async (username: string, password: string, email: string) => {
+      setError(null);
+      const response = await fetch(`${API_BASE_URL}/auth/claim`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ username, password, email }),
+      });
+      const body = await response.json().catch(() => null);
+      if (!response.ok) {
+        const err = new Error(body?.detail ?? "No pude registrar la cuenta.");
+        setError(err);
+        throw err;
+      }
+      // el backend rota el token al ponerle contraseña a la cuenta
+      applySession(body);
+    },
+    [token, applySession],
   );
 
   const logout = useCallback(async () => {
@@ -189,6 +258,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isAuthenticated: Boolean(user),
         login,
         register,
+        guestLogin,
+        claimAccount,
+        googleLogin,
         logout,
         deleteAccount,
         saveLetterboxdUsername,

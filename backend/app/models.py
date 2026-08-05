@@ -191,6 +191,11 @@ class RegisterRequest(UserCredentials):
     email: str = Field(pattern=EMAIL_PATTERN, max_length=200)
 
 
+class GoogleAuthRequest(BaseModel):
+    # access token que devuelve el popup de Google Identity Services
+    access_token: str = Field(min_length=1, max_length=4000)
+
+
 class AuthResponse(BaseModel):
     token: str
     username: str

@@ -3,10 +3,10 @@ import { SpeedInsights } from "@vercel/speed-insights/react";
 import { Toaster } from "sonner";
 import { Route, Switch } from "wouter";
 
+import { AccountBanner } from "./components/AccountBanner";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { Footer } from "./components/Footer";
 import { Navbar } from "./components/Navbar";
-import { VerifyEmailBanner } from "./components/VerifyEmailBanner";
 import { AuthProvider } from "./hooks/useAuth";
 import Games from "./pages/Games";
 import History from "./pages/History";
@@ -54,7 +54,7 @@ export default function App() {
         />
         <div className="min-h-screen flex flex-col bg-background text-foreground">
           <Navbar />
-          <VerifyEmailBanner />
+          <AccountBanner />
           <div className="flex-1">
             <Router />
           </div>

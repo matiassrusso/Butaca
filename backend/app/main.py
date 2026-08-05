@@ -2,6 +2,7 @@ import hmac
 import logging
 import os
 import random
+import secrets
 import sqlite3
 import threading
 from collections import Counter
@@ -16,6 +17,7 @@ from . import (
     auth,
     catalog,
     db,
+    google_auth,
     letterboxd_scrape,
     letterboxd_zip,
     llm_client,
@@ -31,6 +33,7 @@ from .models import (
     DeleteAccountRequest,
     EmailVerificationConfirmRequest,
     FeedbackRequest,
+    GoogleAuthRequest,
     ManualRecommendRequest,
     MovieDetails,
     OnboardingTitle,
@@ -466,6 +469,99 @@ def register(payload: RegisterRequest) -> RegisterResponse:
     return RegisterResponse(token=token, username=payload.username, verification_token=exposed)
 
 
+@app.post("/auth/guest", response_model=AuthResponse, status_code=201)
+def guest_login() -> AuthResponse:
+    """Cuenta real (mismo user/session que login/register) con username
+    generado y sin password recuperable — reusa todo el resto de la app
+    (perfil, historial, juegos) sin pedirle nada al usuario. Si limpia el
+    localStorage pierde el acceso: no hay flujo de "reclamar" esta cuenta."""
+    username = f"invitado-{secrets.token_hex(4)}"
+    password_hash, password_salt = auth.hash_password(secrets.token_urlsafe(24))
+    user_id = db.create_user(username, password_hash, password_salt, None, is_guest=True)
+    token = auth.create_token()
+    db.create_session(token, user_id)
+    return AuthResponse(token=token, username=username)
+
+
+def _unique_username(preferred: str) -> str:
+    base = "".join(c for c in preferred.lower() if c.isalnum() or c in "-_")[:40] or "cinefilo"
+    base = base.rjust(3, "0")
+    if db.get_user_by_username(base) is None:
+        return base
+    while True:
+        candidate = f"{base}-{secrets.token_hex(3)}"
+        if db.get_user_by_username(candidate) is None:
+            return candidate
+
+
+@app.post("/auth/google", response_model=AuthResponse)
+def google_login(
+    payload: GoogleAuthRequest, current: sqlite3.Row | None = Depends(auth.get_optional_user)
+) -> AuthResponse:
+    """Login/registro con Google. Manda el access token del popup de Google.
+
+    Si hay una sesión de invitado abierta, la cuenta de Google se ata a ESA
+    cuenta en vez de crear una nueva, por lo mismo que /auth/claim: el
+    historial que juntó probando no se tira.
+    """
+    if not google_auth.is_configured():
+        raise HTTPException(status_code=503, detail="El login con Google no está habilitado.")
+
+    try:
+        profile = google_auth.verify_access_token(payload.access_token)
+    except google_auth.GoogleAuthError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+    user = db.get_user_by_google_sub(profile["sub"])
+
+    if user is None:
+        # una cuenta local con ese mismo mail es del dueño del mail: Google ya
+        # lo verificó, así que atarlas es correcto y evita cuentas duplicadas
+        existing = db.get_user_by_email(profile["email"])
+        if existing is not None:
+            db.link_google_account(existing["id"], profile["sub"], profile["email"])
+            user = db.get_user_by_username(existing["username"])
+        elif current is not None and current["is_guest"]:
+            db.link_google_account(current["id"], profile["sub"], profile["email"])
+            user = db.get_user_by_username(current["username"])
+        else:
+            username = _unique_username(profile["email"].split("@")[0])
+            password_hash, password_salt = auth.hash_password(secrets.token_urlsafe(24))
+            user_id = db.create_user(username, password_hash, password_salt, profile["email"])
+            db.link_google_account(user_id, profile["sub"], profile["email"])
+            user = db.get_user_by_username(username)
+
+    token = auth.create_token()
+    db.create_session(token, user["id"])
+    return AuthResponse(token=token, username=user["username"])
+
+
+@app.post("/auth/claim", response_model=AuthResponse)
+def claim_guest_account(
+    payload: RegisterRequest, user: sqlite3.Row = Depends(auth.get_current_user)
+) -> AuthResponse:
+    """Le pone usuario/mail/contraseña a una cuenta de invitado sin migrar
+    datos: es la misma fila, así que el historial que juntó probando no se
+    pierde. Registrarse de cero sí lo perdería."""
+    if not user["is_guest"]:
+        raise HTTPException(status_code=409, detail="Esta cuenta ya está registrada.")
+
+    existing = db.get_user_by_username(payload.username)
+    if existing is not None and existing["id"] != user["id"]:
+        raise HTTPException(status_code=409, detail="Ese usuario ya existe.")
+
+    password_hash, password_salt = auth.hash_password(payload.password)
+    db.claim_guest_account(user["id"], payload.username, password_hash, password_salt, payload.email)
+    _issue_email_verification(user["id"], payload.email)
+
+    # sesión nueva por la misma razón que reset_password: la cuenta pasó a
+    # tener contraseña, así que los tokens de la etapa de invitado se cortan
+    db.delete_sessions_for_user(user["id"])
+    token = auth.create_token()
+    db.create_session(token, user["id"])
+    return AuthResponse(token=token, username=payload.username)
+
+
 @app.post("/auth/login", response_model=AuthResponse)
 def login(payload: UserCredentials) -> AuthResponse:
     now = auth.now_ts()
@@ -564,6 +660,7 @@ def me(user: sqlite3.Row = Depends(auth.get_current_user)) -> dict:
         # never block features on this (see plan): it's a non-blocking prompt
         "email_verified": bool(user["email_verified"]),
         "letterboxd_username": user["letterboxd_username"],
+        "is_guest": bool(user["is_guest"]),
     }
 
 

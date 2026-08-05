@@ -1,6 +1,7 @@
 import { FormEvent, useRef, useState } from "react";
 import { useLocation } from "wouter";
 
+import { GoogleSignInButton } from "@/components/GoogleSignInButton";
 import { PageTransition } from "@/components/PageTransition";
 import { API_BASE_URL, useAuth } from "@/hooks/useAuth";
 import { PRIMARY_QUOTE } from "@/lib/quotes";
@@ -11,12 +12,17 @@ import { PRIMARY_QUOTE } from "@/lib/quotes";
 const COLD_START_HINT_MS = 4000;
 
 export default function Login() {
-  const { login, register } = useAuth();
+  const { login, register, guestLogin, claimAccount, googleLogin, user } = useAuth();
   const [, navigate] = useLocation();
   // ?register=1 (CTA "Empezar gratis" del home) abre directo en modo registro.
-  const [mode, setMode] = useState<"login" | "register" | "forgot">(() =>
-    new URLSearchParams(window.location.search).has("register") ? "register" : "login",
-  );
+  // ?claim=1 (banner de invitado) usa el mismo form, pero conservando la
+  // cuenta de invitado en vez de crear una nueva y perder su historial.
+  const [mode, setMode] = useState<"login" | "register" | "forgot" | "claim">(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.has("claim")) return "claim";
+    return params.has("register") ? "register" : "login";
+  });
+  const isClaiming = mode === "claim" && Boolean(user?.isGuest);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [email, setEmail] = useState("");
@@ -27,14 +33,47 @@ export default function Login() {
   const [fieldErrors, setFieldErrors] = useState<{ username?: string; email?: string; password?: string }>({});
   const slowTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const needsEmail = mode === "register" || mode === "claim";
+
   function validate(): boolean {
     const errs: typeof fieldErrors = {};
     if (username.trim().length < 3) errs.username = "Mínimo 3 caracteres.";
-    if (mode === "register" && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email))
+    if (needsEmail && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email))
       errs.email = "Ingresá un email válido.";
     if (mode !== "forgot" && password.length < 8) errs.password = "Mínimo 8 caracteres.";
     setFieldErrors(errs);
     return Object.keys(errs).length === 0;
+  }
+
+  async function handleGoogle(idToken: string) {
+    setLoading(true);
+    setError("");
+    try {
+      await googleLogin(idToken);
+      navigate("/recommend");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No pude entrar con Google.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleGuest() {
+    setLoading(true);
+    setError("");
+    setSlowHint(false);
+    slowTimer.current = setTimeout(() => setSlowHint(true), COLD_START_HINT_MS);
+
+    try {
+      await guestLogin();
+      navigate("/recommend");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No pude crear una sesión de invitado.");
+    } finally {
+      if (slowTimer.current) clearTimeout(slowTimer.current);
+      setLoading(false);
+      setSlowHint(false);
+    }
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -57,6 +96,8 @@ export default function Login() {
       }
       if (mode === "login") {
         await login(username, password);
+      } else if (isClaiming) {
+        await claimAccount(username, password, email);
       } else {
         await register(username, password, email);
       }
@@ -119,15 +160,29 @@ export default function Login() {
             <form onSubmit={handleSubmit} noValidate className="w-full max-w-sm space-y-8">
               <div>
                 <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-2">
-                  {mode === "register" ? "[Registro nuevo]" : mode === "forgot" ? "[Recuperación]" : "[Volvés]"}
+                  {isClaiming
+                    ? "[Guardá tu cuenta]"
+                    : needsEmail
+                      ? "[Registro nuevo]"
+                      : mode === "forgot"
+                        ? "[Recuperación]"
+                        : "[Volvés]"}
                 </div>
                 <h2 className="text-3xl font-black uppercase tracking-tighter">
-                  {mode === "register" ? "Creá tu cuenta" : mode === "forgot" ? "Recuperá tu clave" : "Entrá"}
+                  {isClaiming
+                    ? "Quedátela"
+                    : needsEmail
+                      ? "Creá tu cuenta"
+                      : mode === "forgot"
+                        ? "Recuperá tu clave"
+                        : "Entrá"}
                 </h2>
                 <p className="text-sm text-muted-foreground mt-2">
-                  {mode === "forgot"
-                    ? "Ingresá tu usuario y te mandamos un link para elegir una nueva contraseña."
-                    : "Necesitamos un usuario para guardar tu historial y tus recomendaciones."}
+                  {isClaiming
+                    ? "Elegí usuario y contraseña. Todo lo que puntuaste como invitado queda igual — es la misma cuenta, ahora con forma de volver a entrar."
+                    : mode === "forgot"
+                      ? "Ingresá tu usuario y te mandamos un link para elegir una nueva contraseña."
+                      : "Necesitamos un usuario para guardar tu historial y tus recomendaciones."}
                 </p>
               </div>
 
@@ -154,7 +209,7 @@ export default function Login() {
                   )}
                 </label>
 
-                {mode === "register" && (
+                {needsEmail && (
                   <label className="block">
                     <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
                       Email
@@ -212,11 +267,13 @@ export default function Login() {
               >
                 {loading
                   ? "..."
-                  : mode === "register"
-                    ? "Crear cuenta →"
-                    : mode === "forgot"
-                      ? "Mandar mail →"
-                      : "Entrar →"}
+                  : isClaiming
+                    ? "Guardar mi cuenta →"
+                    : needsEmail
+                      ? "Crear cuenta →"
+                      : mode === "forgot"
+                        ? "Mandar mail →"
+                        : "Entrar →"}
               </button>
 
               {slowHint && (
@@ -239,20 +296,55 @@ export default function Login() {
                 </button>
               )}
 
-              <button
-                type="button"
-                onClick={() => {
-                  setMode(mode === "login" ? "register" : "login");
-                  setError("");
-                }}
-                className="w-full font-mono text-[10px] uppercase tracking-widest text-muted-foreground hover:text-accent transition-colors"
-              >
-                {mode === "register"
-                  ? "¿Ya tenés cuenta? Entrá"
-                  : mode === "forgot"
-                    ? "← Volver a entrar"
-                    : "¿Primera vez? Registrate"}
-              </button>
+              {!isClaiming && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode(mode === "login" ? "register" : "login");
+                    setError("");
+                  }}
+                  className="w-full font-mono text-[10px] uppercase tracking-widest text-muted-foreground hover:text-accent transition-colors"
+                >
+                  {mode === "register"
+                    ? "¿Ya tenés cuenta? Entrá"
+                    : mode === "forgot"
+                      ? "← Volver a entrar"
+                      : "¿Primera vez? Registrate"}
+                </button>
+              )}
+
+              {mode !== "forgot" && (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-3 font-mono text-[10px] uppercase tracking-widest text-muted-foreground/60">
+                    <span className="h-px flex-1 bg-foreground/10" />
+                    o
+                    <span className="h-px flex-1 bg-foreground/10" />
+                  </div>
+
+                  <GoogleSignInButton onCredential={handleGoogle} disabled={loading} />
+
+                  {isClaiming ? (
+                    <p className="font-mono text-[10px] uppercase leading-relaxed tracking-widest text-muted-foreground/60">
+                      Con Google también conservás lo que puntuaste.
+                    </p>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        onClick={handleGuest}
+                        disabled={loading}
+                        className="w-full py-4 border-2 border-foreground/30 font-mono text-xs uppercase tracking-widest hover:border-accent hover:text-accent transition-colors disabled:opacity-60"
+                      >
+                        Entrar como invitado →
+                      </button>
+                      <p className="font-mono text-[10px] uppercase leading-relaxed tracking-widest text-muted-foreground/60">
+                        Sin usuario ni mail. Vale para probar, pero si borrás los datos del
+                        navegador perdés el acceso.
+                      </p>
+                    </>
+                  )}
+                </div>
+              )}
 
               {error ? (
                 <div className="p-4 border-2 border-destructive/50 font-mono text-xs text-destructive">

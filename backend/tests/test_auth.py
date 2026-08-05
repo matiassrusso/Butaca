@@ -1,12 +1,35 @@
 import io
 import zipfile
 
+import pytest
 from fastapi.testclient import TestClient
 
-from backend.app import auth, db
+from backend.app import auth, db, google_auth
 from backend.app.main import app
 
 client = TestClient(app)
+
+
+@pytest.fixture
+def google_configured(monkeypatch):
+    """Google Sign-In activo con un tokeninfo falso, para no pegarle a la API
+    real. Devuelve una función para fijar qué contesta Google."""
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "butaca-test.apps.googleusercontent.com")
+    payloads: dict[str, dict] = {}
+
+    def fake_verify(access_token: str) -> dict:
+        # el verificador real chequea aud/email_verified; acá reproducimos solo
+        # el resultado, y los chequeos se testean aparte contra el módulo
+        if access_token not in payloads:
+            raise google_auth.GoogleAuthError("El token de Google no es válido.")
+        return payloads[access_token]
+
+    monkeypatch.setattr(google_auth, "verify_access_token", fake_verify)
+
+    def register_token(token: str, *, sub: str, email: str, name: str = "") -> None:
+        payloads[token] = {"sub": sub, "email": email, "name": name, "email_verified": True}
+
+    return register_token
 
 
 def _register(username: str, monkeypatch=None) -> dict:
@@ -36,6 +59,280 @@ def test_register_creates_user_and_returns_token() -> None:
     body = response.json()
     assert body["username"] == "mati"
     assert body["token"]
+
+
+def test_guest_login_creates_usable_session() -> None:
+    response = client.post("/auth/guest")
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["username"].startswith("invitado-")
+    assert body["token"]
+
+    me = client.get("/auth/me", headers={"Authorization": f"Bearer {body['token']}"})
+    assert me.status_code == 200
+    assert me.json()["username"] == body["username"]
+    assert me.json()["email"] is None
+
+
+def test_google_login_creates_an_account(google_configured) -> None:
+    google_configured("tok-nuevo", sub="google-1", email="nuevo@gmail.com")
+
+    response = client.post("/auth/google", json={"access_token": "tok-nuevo"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["username"] == "nuevo"
+    me = client.get("/auth/me", headers={"Authorization": f"Bearer {body['token']}"}).json()
+    assert me["email"] == "nuevo@gmail.com"
+    assert me["email_verified"] is True
+    assert me["is_guest"] is False
+
+
+def test_google_login_twice_reuses_the_same_account(google_configured) -> None:
+    google_configured("tok-repe", sub="google-repe", email="repe@gmail.com")
+
+    first = client.post("/auth/google", json={"access_token": "tok-repe"}).json()
+    second = client.post("/auth/google", json={"access_token": "tok-repe"}).json()
+
+    assert first["username"] == second["username"]
+    assert first["token"] != second["token"]
+
+
+def test_google_login_adopts_a_guest_session_so_history_survives(google_configured) -> None:
+    guest = client.post("/auth/guest").json()
+    guest_id = db.get_user_by_username(guest["username"])["id"]
+    google_configured("tok-invitado", sub="google-inv", email="invitado@gmail.com")
+
+    body = client.post(
+        "/auth/google",
+        headers={"Authorization": f"Bearer {guest['token']}"},
+        json={"access_token": "tok-invitado"},
+    ).json()
+
+    claimed = db.get_user_by_username(body["username"])
+    assert claimed["id"] == guest_id
+    assert not claimed["is_guest"]
+
+
+def test_google_login_links_an_existing_local_account(google_configured) -> None:
+    client.post(
+        "/auth/register",
+        json={"username": "local", "password": "supersecret", "email": "local@gmail.com"},
+    )
+    local_id = db.get_user_by_username("local")["id"]
+    google_configured("tok-local", sub="google-local", email="local@gmail.com")
+
+    body = client.post("/auth/google", json={"access_token": "tok-local"}).json()
+
+    assert body["username"] == "local"
+    assert db.get_user_by_username("local")["id"] == local_id
+    # y la contraseña original sigue sirviendo
+    assert client.post(
+        "/auth/login", json={"username": "local", "password": "supersecret"}
+    ).status_code == 200
+
+
+def test_google_login_rejects_an_invalid_token(google_configured) -> None:
+    response = client.post("/auth/google", json={"access_token": "basura"})
+
+    assert response.status_code == 401
+
+
+def test_google_login_is_disabled_without_a_client_id(monkeypatch) -> None:
+    monkeypatch.delenv("GOOGLE_CLIENT_ID", raising=False)
+
+    response = client.post("/auth/google", json={"access_token": "cualquiera"})
+
+    assert response.status_code == 503
+
+
+def test_verify_access_token_rejects_a_token_issued_for_another_app(monkeypatch) -> None:
+    """El agujero clásico de esta integración: sin chequear `aud`/`azp`, un
+    access token de cualquier otra app de Google entraría como usuario
+    válido."""
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "butaca.apps.googleusercontent.com")
+    monkeypatch.setattr(
+        google_auth,
+        "_fetch_tokeninfo",
+        lambda _token: {
+            "aud": "otra-app.apps.googleusercontent.com",
+            "azp": "otra-app.apps.googleusercontent.com",
+            "sub": "123",
+            "email": "atacante@gmail.com",
+            "email_verified": "true",
+        },
+    )
+
+    with pytest.raises(google_auth.GoogleAuthError):
+        google_auth.verify_access_token("token-de-otra-app")
+
+
+def test_verify_access_token_rejects_an_unverified_email(monkeypatch) -> None:
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "butaca.apps.googleusercontent.com")
+    monkeypatch.setattr(
+        google_auth,
+        "_fetch_tokeninfo",
+        lambda _token: {
+            "aud": "butaca.apps.googleusercontent.com",
+            "sub": "123",
+            "email": "sinverificar@gmail.com",
+            "email_verified": "false",
+        },
+    )
+
+    with pytest.raises(google_auth.GoogleAuthError):
+        google_auth.verify_access_token("token-sin-verificar")
+
+
+def test_verify_access_token_accepts_a_good_token(monkeypatch) -> None:
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "butaca.apps.googleusercontent.com")
+    monkeypatch.setattr(
+        google_auth,
+        "_fetch_tokeninfo",
+        lambda _token: {
+            "aud": "butaca.apps.googleusercontent.com",
+            "sub": "sub-ok",
+            "email": "ok@gmail.com",
+            "email_verified": "true",
+            "name": "Matías",
+        },
+    )
+
+    profile = google_auth.verify_access_token("token-bueno")
+
+    assert profile["sub"] == "sub-ok"
+    assert profile["email"] == "ok@gmail.com"
+
+
+def test_verify_access_token_accepts_azp_when_aud_differs(monkeypatch) -> None:
+    """Google puede devolver nuestro client id en `azp` en vez de `aud`."""
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "butaca.apps.googleusercontent.com")
+    monkeypatch.setattr(
+        google_auth,
+        "_fetch_tokeninfo",
+        lambda _token: {
+            "aud": "otro-recurso",
+            "azp": "butaca.apps.googleusercontent.com",
+            "sub": "sub-azp",
+            "email": "azp@gmail.com",
+            "email_verified": "true",
+        },
+    )
+
+    assert google_auth.verify_access_token("token-azp")["sub"] == "sub-azp"
+
+
+def test_verify_access_token_falls_back_to_userinfo(monkeypatch) -> None:
+    """tokeninfo no siempre trae el perfil; ahí se pide a userinfo con el
+    mismo token en vez de fallar."""
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "butaca.apps.googleusercontent.com")
+    monkeypatch.setattr(
+        google_auth,
+        "_fetch_tokeninfo",
+        lambda _token: {"aud": "butaca.apps.googleusercontent.com", "scope": "openid email"},
+    )
+    monkeypatch.setattr(
+        google_auth,
+        "_fetch_userinfo",
+        lambda _token: {"sub": "sub-ui", "email": "ui@gmail.com", "email_verified": True},
+    )
+
+    profile = google_auth.verify_access_token("token-sin-perfil")
+
+    assert profile["sub"] == "sub-ui"
+    assert profile["email"] == "ui@gmail.com"
+
+
+def test_claim_keeps_the_same_account_so_history_survives() -> None:
+    guest = client.post("/auth/guest").json()
+    headers = {"Authorization": f"Bearer {guest['token']}"}
+    guest_id = db.get_user_by_username(guest["username"])["id"]
+
+    response = client.post(
+        "/auth/claim",
+        headers=headers,
+        json={"username": "reclamada", "password": "supersecret", "email": "reclamada@example.com"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["username"] == "reclamada"
+    # misma fila: lo que el invitado haya puntuado sigue colgando de este id
+    claimed = db.get_user_by_username("reclamada")
+    assert claimed["id"] == guest_id
+    assert not claimed["is_guest"]
+    assert db.get_user_by_username(guest["username"]) is None
+
+    # y la contraseña nueva sirve para entrar
+    assert client.post(
+        "/auth/login", json={"username": "reclamada", "password": "supersecret"}
+    ).status_code == 200
+
+
+def test_claim_rotates_the_session_token() -> None:
+    guest = client.post("/auth/guest").json()
+    old_headers = {"Authorization": f"Bearer {guest['token']}"}
+
+    body = client.post(
+        "/auth/claim",
+        headers=old_headers,
+        json={"username": "rotada", "password": "supersecret", "email": "rotada@example.com"},
+    ).json()
+
+    assert client.get("/auth/me", headers=old_headers).status_code == 401
+    assert client.get("/auth/me", headers={"Authorization": f"Bearer {body['token']}"}).status_code == 200
+
+
+def test_claim_rejects_a_username_taken_by_someone_else() -> None:
+    client.post(
+        "/auth/register",
+        json={"username": "ocupado", "password": "supersecret", "email": "ocupado@example.com"},
+    )
+    guest = client.post("/auth/guest").json()
+
+    response = client.post(
+        "/auth/claim",
+        headers={"Authorization": f"Bearer {guest['token']}"},
+        json={"username": "ocupado", "password": "otrosecret", "email": "otro@example.com"},
+    )
+
+    assert response.status_code == 409
+
+
+def test_claim_rejects_an_already_registered_account() -> None:
+    registered = client.post(
+        "/auth/register",
+        json={"username": "yaesta", "password": "supersecret", "email": "yaesta@example.com"},
+    ).json()
+
+    response = client.post(
+        "/auth/claim",
+        headers={"Authorization": f"Bearer {registered['token']}"},
+        json={"username": "otronombre", "password": "supersecret", "email": "otro2@example.com"},
+    )
+
+    assert response.status_code == 409
+
+
+def test_me_reports_guest_flag() -> None:
+    guest = client.post("/auth/guest").json()
+    registered = client.post(
+        "/auth/register",
+        json={"username": "noinvitado", "password": "supersecret", "email": "no@example.com"},
+    ).json()
+
+    def me(token: str) -> dict:
+        return client.get("/auth/me", headers={"Authorization": f"Bearer {token}"}).json()
+
+    assert me(guest["token"])["is_guest"] is True
+    assert me(registered["token"])["is_guest"] is False
+
+
+def test_guest_login_generates_distinct_usernames() -> None:
+    first = client.post("/auth/guest").json()
+    second = client.post("/auth/guest").json()
+
+    assert first["username"] != second["username"]
 
 
 def test_register_rejects_malformed_email() -> None:
