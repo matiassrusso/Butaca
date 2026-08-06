@@ -60,7 +60,7 @@ from .models import (
     UserCredentials,
     WatchedHistoryResponse,
 )
-from .recommender import GENRE_OPTIONS, PICK_OPTIONS, recommend
+from .recommender import GENRE_OPTIONS, MIN_MATCH_SCORE, PICK_OPTIONS, recommend
 
 MAX_ZIP_SIZE = 20 * 1024 * 1024  # 20MB — real Letterboxd exports run in the tens of KB
 VALID_MODES = {"profile", "recent", "genres", "watchlist"}
@@ -1144,6 +1144,15 @@ def _finish_recommend(
         except llm_client.LlmError as exc:
             logger.warning("LLM refine failed, falling back to heuristic why: %s", exc)
 
+    # el piso de MIN_MATCH_SCORE es un invariante de /recommend (a diferencia
+    # de /weekly): el heurístico ya lo garantiza, pero refine_recommendations
+    # solo descarta <=50 (dejaba pasar 51-59) y predict_fit -- el camino de
+    # filled_with_old -- no tiene piso, así que el LLM podía devolver 35-40%
+    # sin que nada lo frenara (reportado por Matías, 2026-08-05: picks
+    # mezclados con 82%/78% junto a 35%/40%).
+    response.recommendations = [
+        rec for rec in response.recommendations if rec.match_score >= MIN_MATCH_SCORE
+    ]
     response.recommendations = response.recommendations[:6]
 
     session_id = None

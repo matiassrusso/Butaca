@@ -45,31 +45,25 @@ Solo yo (Matías), con posible coordinación multi-agente (Claude, Codex) docume
 
 <!-- SESSION_STATE:START -->
 ## Estado actual
-_Última actualización: 2026-08-03_
+_Última actualización: 2026-08-05_
 
-**Qué se hizo (2026-08-03 — sesión larga: se vació el board y después se pulió todo contra feedback en vivo. 17 commits `c60f70c`..`d09f734`, 345 → 376 tests):**
+**Qué se hizo (2026-08-05 — sesión corta, un bug reportado con capturas de `/recommend`, sin commitear todavía):**
 
-- **Se cerraron los pendientes que venían del board:** el **techo de 86%** del match_score (causa real: los parámetros de `discover` de TMDb se combinan con AND, así que el pool venía sesgado por género y las de Nolan ni aparecían — se agregó una segunda pasada solo-persona), el **sesgo anime/coreano** de la muestra de vibras (mezcla de top-rated por década en `_seed_titles`; medido en prod: 39 → **46 movimientos** con menos sesgo), el recompute pasado a **background**, un **badge** para distinguir los picks de relleno heurístico, y refuerzo contra alucinar títulos fuera de la lista.
-- **Se construyó lo que estaba propuesto y nunca hecho:** la sección `/rate` ("puntuar más") y dos juegos (pairwise "¿cuál te gustó más?" y trivia).
-- **Matías los probó y no le gustaron — se rediseñaron los tres.** El más grave: el pairwise **marcaba como vista y gustada** cualquier peli que votaras, aunque no la hubieras visto ("grave error"). Se rediseñó de raíz: ahora compara dos títulos que **ya viste y puntuaste igual**, y elegir un ganador no escribe ningún rating — queda como preferencia relativa (`pairwise_preferences`) que desempata entre favoritas. La trivia pasó a preguntar sobre **pelis que ya viste**, con un tercer tipo de pregunta (actor) y años incorrectos cercanos al real.
-- **"Puntuar más" recibió tres reportes más y quedó bastante distinto:** filtro películas/series/ambas (salían casi solo series), **cola infinita** en vez de tandas, y el arreglo del **muro permanente** ("esto no puede pasar") con la tabla `swipe_pool_cursor`. Más: no ofrecer **estrenos futuros** (salió "Avengers: Doomsday" 2026 para puntuar), swipe solo horizontal con cartel en ambos lados, y animaciones.
-- **`/weekly` salió del camino crítico del LLM.** Medido, no estimado: tardaba **7,3s** en frío contra NVIDIA real, y por eso la home se veía vacía y "de la nada aparecía". Ahora responde el heurístico al toque y el veredicto del LLM llega por polling silencioso.
+- Matías mandó capturas de `/recommend` (modo "Perfil completo") con picks de 82%/78% mezclados con **35%/40%/55%** en la misma tanda, más una palabra inventada por el LLM ("Zodiacomodoro") en un "why". Primero pensé que las capturas eran de `/weekly` (que sí es floor-free a propósito) — Matías corrigió: eran de `/recommend`, donde el piso de 60 sí es un invariante.
+- **Causa real encontrada:** cuando "Nuevos picks" agota el pool nuevo y cae a `filled_with_old` (relleno con picks fuertes ya mostrados antes), el código llama a `llm_client.predict_fit` en vez de `refine_recommendations` — `predict_fit` es la misma función de `/weekly`, sin piso de score a propósito ahí. Además `refine_recommendations` (el camino normal) solo descartaba `match_score <= 50`, dejando pasar el hueco 51-59 (de ahí el 55%).
+- **Fix:** un filtro único después de la llamada al LLM en `_finish_recommend` ([main.py:1147](backend/app/main.py:1147)) que descarta cualquier pick devuelto con `match_score < MIN_MATCH_SCORE`, cubre los dos caminos. Puede devolver menos de 6 picks si el LLM le baja el puntaje a varios — preferible a mostrar un match flojo disfrazado de fuerte.
+- **"Zodiacomodoro"** no era un bug de renderizado (no hay highlighting en el frontend, era el find-in-page del navegador) — es una palabra inventada por el LLM (nemotron o el fallback llama). Se agregó una regla dura al `WRITING_RULES` compartido ([llm_client.py:198](backend/app/llm_client.py:198)) prohibiendo palabras pegadas/inventadas — mitiga, no elimina (comportamiento probabilístico, mismo patrón que el fix de "tenés chances de encantarte").
+- Test nuevo `test_recommend_zip_filled_with_old_still_respects_match_floor` en `test_main.py` — verificado a mano que falla sin el fix (reproduce el escenario real: agota el pool con dos llamadas seguidas, mockea el LLM devolviendo 35%). 395 tests en verde.
 
-**Dónde retomar:** Nada a medio hacer. Lo siguiente en valor es lo que Matías aprobó al cierre: las **tres features "wow"** anotadas en `TASKS.md` (`wow-features-2026-08-03`) — mapa interactivo de embeddings, "Tu año en Butaca", y chat con tu perfil de gusto. Dijo *"esas 3 me gustan, le agregaría más cosas"*, así que **antes de codear falta que defina qué más sumar y por cuál arrancar**.
+**Dónde retomar:** Nada a medio hacer en el fix. Falta: (1) commitear (`CLAUDE.md`, `backend/app/llm_client.py`, `backend/app/main.py`, `backend/tests/test_main.py` están modificados sin stagear), (2) verificar el prompt nuevo contra la API real de NVIDIA como se hace siempre con cambios de prompt (los tests no atrapan "sigue inventando palabras"), (3) deployar y confirmar en producción que "Nuevos picks" repetido varias veces ya no mezcla scores bajos.
 
-**Bloqueos / decisiones pendientes:** Ninguno técnico. Pendientes que solo puede hacer Matías: borrar el proyecto viejo de Neon (São Paulo) y renombrar la carpeta local del proyecto.
+**Bloqueos / decisiones pendientes:** Ninguno técnico. Sigue pendiente lo de la sesión anterior: definir qué sumar a las 3 features "wow" (`TASKS.md`, `wow-features-2026-08-03`) antes de codearlas — Matías no lo tocó esta sesión.
 
 **Contexto que no es obvio del código:**
-- **Los parámetros de `discover` de TMDb se combinan con AND, no con OR** (el pipe `|` dentro de un mismo parámetro sí es OR). Confirmado contra la API real. Eso era la causa del techo de 86%: pedir género + persona juntos devolvía un pool sesgado donde faltaban las películas obvias del director.
-- **El pairwise NO escribe ratings, a propósito.** Es la corrección de un bug real: fabricar un "vista + gustada" para algo que el usuario nunca vio es peor que no tener el dato. Si alguna vez se quiere que aporte al scoring, el camino es `pairwise_preferences` como señal relativa, nunca un rating inventado.
-- **`_VERDICT_CACHE` es global al módulo, no aislado por test como la DB.** Dos tests con el mismo catálogo/perfil comparten clave — y como `isolated_db` resetea el autoincrement, hasta el `user_id` puede coincidir. Hay un fixture autouse en `conftest.py` que lo limpia; sin eso, un test lee el resultado cacheado de otro.
-- **`SWIPE_POPULAR_MAX_PAGES` es 40 y eso tiene un costo conocido:** con el pool agotado son hasta 40 requests secuenciales a TMDb en un pedido (80 con "Ambas"). Se aceptó porque el muro permanente era el problema real; detalle y salidas en `TASKS.md` (`swipe-latency-2026-08-03`).
-- **La key de NVIDIA es de cuenta, una sola para los 102 modelos** — build.nvidia.com pone un botón "Get API Key" en cada página de modelo y eso confunde. Lo que cambia por modelo es el *entitlement*: `snowflake/arctic-embed-l` da `404 "not found for account"` igual que kimi-k2.6, y eso NO se arregla con otra key.
-- **`title_embeddings` lleva `model` en la PK.** Vectores de dos modelos no comparten espacio (ni dimensión), así que el cache de uno nunca puede contestar por el otro. Si se cambia de modelo de embeddings, el cache viejo simplemente queda sin usar.
-- **El pool de Postgres sondea con `SELECT 1` antes de entregar la conexión** (`db._checkout_live_connection`). Neon cierra las ociosas y `pool.getconn()` las devolvía igual — `closed` solo refleja lo que sabe el proceso. En producción UptimeRobot mantiene el proceso vivo pegándole a `/health`, que no toca la base, así que el pool podía quedarse horas con conexiones muertas. **Candidato sin confirmar del "Load failed" de Bauti.**
-- `refined` a nivel de **lote** (`RecommendResponse.refined`) ahora lo usa `/weekly` para avisarle al frontend que ya pasó por el LLM. El `refined` **por pick** sigue quedando en `False` aunque el LLM conteste — visto en vivo verificando; es la task del "why heurístico de relleno", sin resolver.
-- El modo manual (`ManualRating`) solo tiene título+rating, nunca reseña — sin `TMDB_API_KEY` el catálogo mock no tiene señal de tags, así que con el piso de score devuelve vacío en local. El otro sistema de Flick (clusterizar reseñas) sigue siendo inviable acá: 68 títulos con reseña real en toda la base.
-- `npx tsc --noEmit` no chequea nada por la config de project references; el gate real es `npm run build` (`tsc -b`).
+- **`predict_fit` y `refine_recommendations` tienen semánticas de piso distintas a propósito** (`llm_client.py`): `predict_fit` nunca pierde un título porque `/weekly` necesita el set fijo completo aunque el match sea malo; `refine_recommendations` elige y puede descartar. Mezclarlas (usar `predict_fit` dentro de `/recommend` vía `filled_with_old`) fue lo que rompió el invariante de piso — el fix vive en `main.py`, no en `llm_client.py`, justamente para no tocar el comportamiento de `/weekly`.
+- **`/recommend/sessions/{id}/refine`** (usado para el refine progresivo de una sesión ya mostrada, no activamente enganchado en el frontend hoy) también llama a `predict_fit` directo, sin el filtro nuevo — mismo hueco potencial, pero fuera de alcance porque no era lo reportado y ese endpoint depende a propósito de nunca perder un pick ya mostrado. Si en algún momento se vuelve a enganchar en el frontend, revisar si necesita el mismo piso.
+- **La captura que mandó Matías tenía dos causas superpuestas**: el 55% venía del hueco 51-59 de `refine_recommendations` (camino normal), el 35%/40% del `predict_fit` sin piso (camino `filled_with_old`) — ambas se acumulan porque "Nuevos picks" clickeado varias veces agota el pool nuevo rápido con el catálogo real de TMDb.
+- **Los tests de `test_main.py` corren desde la raíz del repo, no desde `backend/`** — `python -m pytest` (no `cd backend && pytest`), porque los imports son `from backend.app import ...`.
 <!-- SESSION_STATE:END -->
 
 <details>
@@ -383,6 +377,22 @@ _Última actualización: 2026-08-03_
 </details>
 
 ## Historial de sesiones
+
+### 2026-08-05 — piso de match roto en "Nuevos picks", y una palabra inventada por el LLM
+Matías mandó capturas de `/recommend` con 35%/40%/55% mezclados con 78%/82% y un
+"why" con una palabra inventada ("Zodiacomodoro"). Al principio asumí que las
+capturas eran de `/weekly` (floor-free a propósito) — se equivocó mi lectura,
+Matías corrigió que eran de `/recommend`, donde el piso de 60 sí es un
+invariante. La causa real: cuando "Nuevos picks" agota el pool nuevo y cae a
+`filled_with_old`, el código usa `predict_fit` (la función floor-free de
+`/weekly`) en vez de `refine_recommendations`, y de paso `refine_recommendations`
+tampoco reforzaba el piso real (solo descartaba `<=50`, dejando pasar 51-59).
+Un filtro único después del LLM en `_finish_recommend` cierra los dos caminos.
+La palabra inventada no era un bug de renderizado (sin highlighting en el
+frontend, era el find-in-page del navegador) — se le agregó una regla al
+prompt compartido contra palabras pegadas, mitigación probabilística, no
+garantía. Test nuevo verificado a mano fallando sin el fix. 395 tests en
+verde, **sin commitear todavía** — queda para la próxima sesión.
 
 ### 2026-08-03 — se vació el board, y después el feedback en vivo reescribió medio trabajo
 Arranqué cerrando lo que quedaba anotado: el techo de 86% (la causa real era

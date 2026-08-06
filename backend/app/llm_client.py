@@ -196,7 +196,10 @@ WRITING_RULES = (
     "o que le gustaría. Si no hay un título que te sirva, describí el patrón sin nombrar "
     "ninguno. Nunca aclares entre paréntesis que estás suponiendo.\n"
     "- Citá siempre algo concreto de su perfil o su historial — nada de elogios genéricos "
-    "que podrían aplicar a cualquier usuario."
+    "que podrían aplicar a cualquier usuario.\n"
+    "- Escribí SOLO palabras reales de español, separadas por espacios. Prohibido pegar "
+    "dos palabras o títulos en una sola (ej: \"Zodiacomodoro\") — si dudás de un título, no "
+    "lo nombres."
 )
 
 SCORE_RULE = (

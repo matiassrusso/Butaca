@@ -641,6 +641,36 @@ def test_recommend_zip_prioritizes_new_titles_then_fills_to_six() -> None:
     assert second_titles - first_titles
 
 
+def test_recommend_zip_filled_with_old_still_respects_match_floor(monkeypatch) -> None:
+    # bug reportado por Matías (2026-08-05): "Nuevos picks" agotaba el pool
+    # nuevo y caía a filled_with_old -> predict_fit, que a diferencia de
+    # refine_recommendations no tiene piso de score -- el LLM devolvía 35-40%
+    # y esos picks se colaban junto a otros de 78-82%.
+    monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
+    broad_tags_csv = (
+        "Name,Rating,Review,Tags\n"
+        'An Old Favorite,5,,"dialogue-heavy,romantic,intimate,walking,'
+        "psychological,dark,stylized,thriller,quiet,architectural,"
+        "melancholic,slow,kinetic,action,loud,blockbuster,mysterious,drama,"
+        'light,indie,restless,character,existential,sad,prestige,mystery,'
+        'funny,sharp,messy"'
+    )
+    headers = _auth_headers("floorfilledold")
+
+    def fake_predict(user_id, ratings, heuristic):
+        picks = [
+            rec.model_copy(update={"match_score": 35 if i == 0 else rec.match_score})
+            for i, rec in enumerate(heuristic.recommendations)
+        ]
+        return heuristic.model_copy(update={"recommendations": picks})
+
+    _post_zip(headers, zip_files={"reviews.csv": broad_tags_csv})
+    monkeypatch.setattr("backend.app.main.llm_client.predict_fit", fake_predict)
+    second = _post_zip(headers, zip_files={"reviews.csv": broad_tags_csv}).json()["recommendations"]
+
+    assert all(item["match_score"] >= 60 for item in second)
+
+
 def test_recommend_zip_rejects_invalid_mode() -> None:
     headers = _auth_headers("badmode")
     response = _post_zip(headers, mode="bogus")
