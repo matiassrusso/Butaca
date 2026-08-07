@@ -174,29 +174,41 @@ mood: psychological           (opcional, legacy — sesga qué página de TMDb s
 mode: profile | recent | genres   (default: profile)
 kind_filter: movie | series | both   (default: both)
 genres: "action,romance"      (obligatorio si mode=genres, claves separadas por coma)
-lang: es | en                 (default: es — idioma de los "why" y el taste_summary)
 file: <el .zip como binario>
 ```
 
-### `lang` (agregado 2026-08-06)
+### Idioma: header `Accept-Language` (agregado 2026-08-06)
 
-Define el idioma de los textos generados: el `why` de cada pick y el
-`taste_summary`. Lo aceptan todos los endpoints que devuelven esos campos —
-`/recommend/zip`, `/recommend/letterboxd` (form field), `/recommend/manual`,
-`/recommend/profile` (campo del JSON), y `/weekly`, `/titles/{id}/verdict`,
-`/recommend/sessions/{id}/refine` (query param). Cualquier valor que no sea
-`en` cae a `es`.
+**Todos** los endpoints leen el idioma de `Accept-Language`. Es la única
+fuente: no hay query param, form field ni campo de JSON para esto. Cualquier
+valor que no empiece con `en` cae a `es`, incluido el header ausente. Se
+parsea el primer tag, así que un `Accept-Language` de browser real
+(`en-US,en;q=0.9,es;q=0.8`) resuelve a `en`.
 
-Cubre los dos caminos, no solo el del LLM: `llm_client` arma sus prompts con
-la voz y las reglas de escritura en el idioma pedido, y `recommender` tiene
-su propio vocabulario de frases y plantillas por idioma para el `why`
-heurístico (el que se muestra sin sesión, cuando el LLM falla, y en los picks
-que el LLM no llega a cubrir).
+```
+Accept-Language: en
+```
+
+Define dos cosas:
+
+1. **Los textos generados** — el `why` de cada pick y el `taste_summary`.
+   Cubre los dos caminos, no solo el del LLM: `llm_client` arma sus prompts
+   con la voz y las reglas de escritura en el idioma pedido, y `recommender`
+   tiene su propio vocabulario de frases y plantillas por idioma para el
+   `why` heurístico (el que se muestra sin sesión, cuando el LLM falla, y en
+   los picks que el LLM no llega a cubrir).
+2. **El `detail` de los errores** (`backend/app/errors.py`) — se muestra tal
+   cual en pantalla, así que en inglés tiene que salir en inglés. Aplica
+   también a los endpoints de auth, que no generan texto pero sí devuelven
+   errores que el usuario lee ("Wrong username or password.").
 
 El idioma **es parte de la clave de caché** de los dos caches del
 `llm_client` (`_REFINE_CACHE` y `_VERDICT_CACHE`). Sin eso, el primer usuario
 que pide `/weekly` en español dejaría cacheado ese resultado y el siguiente
 que lo pide en inglés recibiría los `why` en español.
+
+El frontend lo manda solo, en cada request: `frontend/src/lib/apiLang.ts`
+envuelve `fetch` una vez al arrancar en vez de tocar las ~40 llamadas sueltas.
 
 `mode` controla de dónde sale la señal de gusto para puntuar candidatos:
 

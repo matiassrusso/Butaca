@@ -580,7 +580,6 @@ export default function Recommend() {
         formData.append("kind_filter", kindFilter);
         formData.append("genres", mode === "genres" ? selectedGenres.join(",") : "");
         formData.append("refine", "1");
-        formData.append("lang", lang);
 
         let endpoint = `${API_BASE_URL}/recommend/zip`;
         if (importMethod === "zip") {

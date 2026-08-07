@@ -98,7 +98,7 @@ export function SearchBox() {
     setVerdictFor(item.tmdb_id);
     try {
       const response = await fetch(
-        `${API_BASE_URL}/titles/${item.tmdb_id}/verdict?kind=${encodeURIComponent(item.kind)}&lang=${lang}`,
+        `${API_BASE_URL}/titles/${item.tmdb_id}/verdict?kind=${encodeURIComponent(item.kind)}`,
         { headers: { Authorization: `Bearer ${token}` } },
       );
       if (!response.ok) throw new Error();

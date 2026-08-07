@@ -2785,7 +2785,7 @@ def test_recommend_genres_mode_fetches_and_deduplicates_a_selected_movement(monk
 
 
 def test_weekly_lang_en_returns_english_heuristic_text(monkeypatch) -> None:
-    # end-to-end por HTTP: el query param lang tiene que llegar hasta el motor
+    # end-to-end por HTTP: el Accept-Language tiene que llegar hasta el motor
     # heurístico, no solo hasta el prompt del LLM. Sin NVIDIA configurada este
     # es EXACTAMENTE el camino que ve un visitante sin sesión.
     monkeypatch.setenv("TMDB_API_KEY", "fake-key")
@@ -2794,7 +2794,7 @@ def test_weekly_lang_en_returns_english_heuristic_text(monkeypatch) -> None:
         "backend.app.main.tmdb_client.fetch_weekly_trending", lambda: _WEEKLY_TRENDING
     )
 
-    response = client.get("/weekly?lang=en")
+    response = client.get("/weekly", headers={"Accept-Language": "en"})
 
     assert response.status_code == 200
     body = response.json()
@@ -2815,7 +2815,7 @@ def test_weekly_defaults_to_spanish(monkeypatch) -> None:
 
 
 def test_recommend_manual_passes_lang_through_to_the_llm(monkeypatch) -> None:
-    # el lang del body JSON tiene que llegar a refine_recommendations: si se
+    # el Accept-Language tiene que llegar a refine_recommendations: si se
     # pierde en el camino, la página en inglés muestra why en español.
     monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
     seen_langs = []
@@ -2829,8 +2829,54 @@ def test_recommend_manual_passes_lang_through_to_the_llm(monkeypatch) -> None:
 
     client.post(
         "/recommend/manual",
-        headers=headers,
-        json={"ratings": _MANUAL_RATINGS, "lang": "en"},
+        headers={**headers, "Accept-Language": "en"},
+        json={"ratings": _MANUAL_RATINGS},
     )
 
     assert seen_langs == ["en"]
+
+
+def _login_error(username: str, headers: dict[str, str] | None = None) -> str:
+    # un usuario distinto por assert: el lockout por intentos fallidos es por
+    # usuario, y reusar uno solo devuelve "demasiados intentos" en vez del
+    # error que se quiere medir
+    client.post(
+        "/auth/register",
+        json={"username": username, "password": "supersecret", "email": f"{username}@example.com"},
+    )
+    response = client.post(
+        "/auth/login",
+        json={"username": username, "password": "wrongpassword"},
+        headers=headers or {},
+    )
+    assert response.status_code == 401
+    return response.json()["detail"]
+
+
+def test_error_detail_follows_accept_language() -> None:
+    # los `detail` de las HTTPException se muestran tal cual en pantalla, así
+    # que en modo inglés tienen que salir en inglés (2026-08-06). Accept-Language
+    # es la ÚNICA fuente de idioma del backend — ver backend/app/errors.py.
+    assert _login_error("langerres") == "Usuario o contraseña incorrectos."
+    assert _login_error("langerren", {"Accept-Language": "en"}) == "Wrong username or password."
+
+    # un Accept-Language de browser real ("en-US,en;q=0.9,es;q=0.8") también
+    # tiene que resolver a inglés, no caer al default por no ser un "en" pelado
+    real = _login_error("langerrreal", {"Accept-Language": "en-US,en;q=0.9,es;q=0.8"})
+    assert real == "Wrong username or password."
+
+    # sin header: español, el idioma por defecto del sitio
+    assert _login_error("langerrnone") == "Usuario o contraseña incorrectos."
+
+
+def test_recommend_zip_error_detail_follows_accept_language() -> None:
+    headers = _auth_headers("langerrzip")
+    files = {"file": ("notes.txt", b"nope", "text/plain")}
+
+    es = client.post("/recommend/zip", headers=headers, files=files)
+    assert es.json()["detail"] == "Subí el .zip que exporta Letterboxd."
+
+    en = client.post(
+        "/recommend/zip", headers={**headers, "Accept-Language": "en"}, files=files
+    )
+    assert en.json()["detail"] == "Upload the .zip that Letterboxd exports."

@@ -17,6 +17,7 @@ from . import (
     auth,
     catalog,
     db,
+    errors,
     google_auth,
     letterboxd_scrape,
     letterboxd_zip,
@@ -132,7 +133,7 @@ def _rebuild_ratings(user_id: int) -> list[RatedItem]:
     ]
 
 
-def _enforce_recommend_rate_limit(user_id: int) -> None:
+def _enforce_recommend_rate_limit(user_id: int, lang: str = "es") -> None:
     limit = _recommend_daily_limit()
     if limit <= 0:
         return
@@ -140,7 +141,7 @@ def _enforce_recommend_rate_limit(user_id: int) -> None:
     if db.count_sessions_since(user_id, today_start) >= limit:
         raise HTTPException(
             status_code=429,
-            detail="Llegaste al límite de recomendaciones de hoy. Probá de nuevo mañana.",
+            detail=errors.msg("rate_limited", lang),
         )
 
 
@@ -217,7 +218,7 @@ def recommend_options() -> PickOptionsResponse:
 @app.get("/catalog/stats", response_model=CatalogStatsResponse)
 def catalog_stats() -> CatalogStatsResponse:
     if not tmdb_client.is_configured():
-        raise HTTPException(status_code=503, detail="Catálogo de TMDb no configurado.")
+        raise HTTPException(status_code=503, detail=errors.msg("tmdb_unconfigured", lang))
     try:
         stats = tmdb_client.fetch_catalog_stats()
     except tmdb_client.TmdbError as exc:
@@ -249,7 +250,8 @@ def _adjust_match_scores(heuristic: RecommendResponse) -> RecommendResponse:
 
 @app.get("/weekly", response_model=RecommendResponse)
 def weekly_picks(
-    lang: str = "es", user: sqlite3.Row | None = Depends(auth.get_optional_user)
+    user: sqlite3.Row | None = Depends(auth.get_optional_user),
+    lang: str = Depends(errors.request_lang),
 ) -> RecommendResponse:
     """Pedido de Matías (2026-07-30): 5 recomendaciones semanales, iguales
     para todos — 3 de TMDb /trending/movie/week real + 2 de variedad de
@@ -266,13 +268,13 @@ def weekly_picks(
     alguna de esas 5 no puede hacerla desaparecer — solo afecta el
     match_score/why, nunca cuáles 5 se muestran."""
     if not tmdb_client.is_configured():
-        raise HTTPException(status_code=503, detail="Catálogo de TMDb no configurado.")
+        raise HTTPException(status_code=503, detail=errors.msg("tmdb_unconfigured", lang))
     try:
         trending = tmdb_client.fetch_weekly_trending()
     except tmdb_client.TmdbError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     if not trending:
-        raise HTTPException(status_code=502, detail="TMDb no devolvió películas en tendencia esta semana.")
+        raise HTTPException(status_code=502, detail=errors.msg("weekly_empty", lang))
 
     ratings = _rebuild_ratings(user["id"]) if user else []
     profile = db.get_taste_profile(user["id"]) if user else None
@@ -333,8 +335,8 @@ def titles_search(
 def title_verdict(
     tmdb_id: int,
     kind: str = "movie",
-    lang: str = "es",
     user: sqlite3.Row = Depends(auth.get_current_user),
+    lang: str = Depends(errors.request_lang),
 ) -> Recommendation:
     """El veredicto de Butaca sobre UN título que el usuario buscó: cuánto le
     va a gustar (match_score) y qué opina el agente (why).
@@ -345,16 +347,16 @@ def title_verdict(
     /recommend. Ese es el pedido de Matías (2026-07-31): "que siempre sea lo
     mismo no importa dónde estés"."""
     if not tmdb_client.is_configured():
-        raise HTTPException(status_code=503, detail="Catálogo de TMDb no configurado.")
+        raise HTTPException(status_code=503, detail=errors.msg("tmdb_unconfigured", lang))
     if kind not in ("movie", "series"):
-        raise HTTPException(status_code=400, detail="Tipo de título inválido.")
+        raise HTTPException(status_code=400, detail=errors.msg("invalid_kind", lang))
 
     try:
         item = tmdb_client.fetch_title_by_id(tmdb_id, kind=kind)
     except tmdb_client.TmdbError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     if item is None:
-        raise HTTPException(status_code=404, detail="No encontré ese título en TMDb.")
+        raise HTTPException(status_code=404, detail=errors.msg("title_not_found", lang))
 
     tmdb_client.enrich_with_keyword_tags(item, kind)
 
@@ -369,7 +371,7 @@ def title_verdict(
         exclude_seen=False, min_score=0, lang=lang,
     )
     if not heuristic.recommendations:
-        raise HTTPException(status_code=502, detail="No pude analizar ese título.")
+        raise HTTPException(status_code=502, detail=errors.msg("title_unanalyzable", lang))
     heuristic = _adjust_match_scores(heuristic)
 
     if ratings and llm_client.is_configured():
@@ -460,9 +462,11 @@ def _issue_email_verification(user_id: int, email: str | None) -> str:
 
 
 @app.post("/auth/register", response_model=RegisterResponse, status_code=201)
-def register(payload: RegisterRequest) -> RegisterResponse:
+def register(
+    payload: RegisterRequest, lang: str = Depends(errors.request_lang)
+) -> RegisterResponse:
     if db.get_user_by_username(payload.username) is not None:
-        raise HTTPException(status_code=409, detail="Ese usuario ya existe.")
+        raise HTTPException(status_code=409, detail=errors.msg("user_exists", lang))
 
     password_hash, password_salt = auth.hash_password(payload.password)
     user_id = db.create_user(payload.username, password_hash, password_salt, payload.email)
@@ -501,7 +505,9 @@ def _unique_username(preferred: str) -> str:
 
 @app.post("/auth/google", response_model=AuthResponse)
 def google_login(
-    payload: GoogleAuthRequest, current: sqlite3.Row | None = Depends(auth.get_optional_user)
+    payload: GoogleAuthRequest,
+    current: sqlite3.Row | None = Depends(auth.get_optional_user),
+    lang: str = Depends(errors.request_lang),
 ) -> AuthResponse:
     """Login/registro con Google. Manda el access token del popup de Google.
 
@@ -510,7 +516,7 @@ def google_login(
     historial que juntó probando no se tira.
     """
     if not google_auth.is_configured():
-        raise HTTPException(status_code=503, detail="El login con Google no está habilitado.")
+        raise HTTPException(status_code=503, detail=errors.msg("google_disabled", lang))
 
     try:
         profile = google_auth.verify_access_token(payload.access_token)
@@ -543,17 +549,19 @@ def google_login(
 
 @app.post("/auth/claim", response_model=AuthResponse)
 def claim_guest_account(
-    payload: RegisterRequest, user: sqlite3.Row = Depends(auth.get_current_user)
+    payload: RegisterRequest,
+    user: sqlite3.Row = Depends(auth.get_current_user),
+    lang: str = Depends(errors.request_lang),
 ) -> AuthResponse:
     """Le pone usuario/mail/contraseña a una cuenta de invitado sin migrar
     datos: es la misma fila, así que el historial que juntó probando no se
     pierde. Registrarse de cero sí lo perdería."""
     if not user["is_guest"]:
-        raise HTTPException(status_code=409, detail="Esta cuenta ya está registrada.")
+        raise HTTPException(status_code=409, detail=errors.msg("account_exists", lang))
 
     existing = db.get_user_by_username(payload.username)
     if existing is not None and existing["id"] != user["id"]:
-        raise HTTPException(status_code=409, detail="Ese usuario ya existe.")
+        raise HTTPException(status_code=409, detail=errors.msg("user_exists", lang))
 
     password_hash, password_salt = auth.hash_password(payload.password)
     db.claim_guest_account(user["id"], payload.username, password_hash, password_salt, payload.email)
@@ -568,14 +576,16 @@ def claim_guest_account(
 
 
 @app.post("/auth/login", response_model=AuthResponse)
-def login(payload: UserCredentials) -> AuthResponse:
+def login(
+    payload: UserCredentials, lang: str = Depends(errors.request_lang)
+) -> AuthResponse:
     now = auth.now_ts()
     attempt = db.get_login_attempt(payload.username)
     if attempt is not None and attempt["locked_until"] > now:
         wait_seconds = attempt["locked_until"] - now
         raise HTTPException(
             status_code=429,
-            detail=f"Demasiados intentos fallidos. Probá de nuevo en {wait_seconds}s.",
+            detail=errors.msg("too_many_attempts", lang, seconds=wait_seconds),
         )
 
     user = db.get_user_by_username(payload.username)
@@ -588,9 +598,9 @@ def login(payload: UserCredentials) -> AuthResponse:
         if lock_seconds:
             raise HTTPException(
                 status_code=429,
-                detail=f"Demasiados intentos fallidos. Probá de nuevo en {lock_seconds}s.",
+                detail=errors.msg("too_many_attempts", lang, seconds=lock_seconds),
             )
-        raise HTTPException(status_code=401, detail="Usuario o contraseña incorrectos.")
+        raise HTTPException(status_code=401, detail=errors.msg("bad_credentials", lang))
 
     db.clear_login_attempts(payload.username)
     token = auth.create_token()
@@ -624,10 +634,12 @@ def forgot_password(payload: PasswordResetRequest) -> PasswordResetStartResponse
 
 
 @app.post("/auth/reset-password", status_code=204)
-def reset_password(payload: PasswordResetConfirmRequest) -> None:
+def reset_password(
+    payload: PasswordResetConfirmRequest, lang: str = Depends(errors.request_lang)
+) -> None:
     token_record = db.get_password_reset_token(auth.hash_token(payload.token))
     if token_record is None or token_record["expires_at"] < auth.now_ts():
-        raise HTTPException(status_code=400, detail="Token de recuperación inválido o expirado.")
+        raise HTTPException(status_code=400, detail=errors.msg("reset_token_invalid", lang))
 
     password_hash, password_salt = auth.hash_password(payload.password)
     db.update_user_password(token_record["user_id"], password_hash, password_salt)
@@ -637,12 +649,14 @@ def reset_password(payload: PasswordResetConfirmRequest) -> None:
 
 
 @app.post("/auth/verify-email", status_code=204)
-def verify_email(payload: EmailVerificationConfirmRequest) -> None:
+def verify_email(
+    payload: EmailVerificationConfirmRequest, lang: str = Depends(errors.request_lang)
+) -> None:
     # public like /auth/reset-password: the user clicks a mailed link and may
     # not have a live session in that tab
     token_record = db.get_email_verification_token(auth.hash_token(payload.token))
     if token_record is None or token_record["expires_at"] < auth.now_ts():
-        raise HTTPException(status_code=400, detail="Token de verificación inválido o expirado.")
+        raise HTTPException(status_code=400, detail=errors.msg("verify_token_invalid", lang))
     db.mark_email_verified(token_record["user_id"])
 
 
@@ -691,11 +705,12 @@ def logout(authorization: str | None = Header(default=None)) -> None:
 def delete_account(
     payload: DeleteAccountRequest,
     user: sqlite3.Row = Depends(auth.get_current_user),
+    lang: str = Depends(errors.request_lang),
 ) -> None:
     # re-confirm with the password: a leaked/borrowed session token must not be
     # enough to irreversibly wipe the account
     if not auth.verify_password(payload.password, user["password_hash"], user["password_salt"]):
-        raise HTTPException(status_code=401, detail="Contraseña incorrecta.")
+        raise HTTPException(status_code=401, detail=errors.msg("wrong_password", lang))
     db.delete_user_completely(user["id"], user["username"])
 
 
@@ -721,9 +736,10 @@ def watched_history(
 @app.get("/profile/taste", response_model=TasteProfileResponse)
 def taste_profile_endpoint(
     user: sqlite3.Row = Depends(auth.get_current_user),
+    lang: str = Depends(errors.request_lang),
 ) -> TasteProfileResponse:
     if not tmdb_client.is_configured():
-        raise HTTPException(status_code=503, detail="Catálogo de TMDb no configurado.")
+        raise HTTPException(status_code=503, detail=errors.msg("tmdb_unconfigured", lang))
 
     # ponytail: reuse the profile persisted by the last /recommend/zip or
     # /recommend/letterboxd call (see _finish_recommend) instead of redoing
@@ -759,11 +775,11 @@ def profile_summary(user: sqlite3.Row = Depends(auth.get_current_user)) -> dict:
     return summary
 
 
-def _validate_recommend_params(mode: str, kind_filter: str) -> None:
+def _validate_recommend_params(mode: str, kind_filter: str, lang: str = "es") -> None:
     if mode not in VALID_MODES:
-        raise HTTPException(status_code=400, detail="Modo de recomendación inválido.")
+        raise HTTPException(status_code=400, detail=errors.msg("invalid_mode", lang))
     if kind_filter not in VALID_KIND_FILTERS:
-        raise HTTPException(status_code=400, detail="Filtro de tipo inválido.")
+        raise HTTPException(status_code=400, detail=errors.msg("invalid_kind_filter", lang))
 
 
 def _enrich_loved_ratings_with_genre_tags(ratings: list[RatedItem]) -> None:
@@ -886,12 +902,12 @@ def _finish_recommend(
     swap in the LLM-written reasons without blocking the first render.
     persist=False when ratings were just read back from the DB (the "usar mi
     perfil" shortcut) — re-saving them would insert duplicate rated_items."""
-    _enforce_recommend_rate_limit(user["id"])
+    _enforce_recommend_rate_limit(user["id"], lang)
 
     if not ratings:
         raise HTTPException(
             status_code=400,
-            detail="No encontré ratings ni reviews usables para armar recomendaciones.",
+            detail=errors.msg("no_usable_ratings", lang),
         )
 
     _enrich_loved_ratings_with_genre_tags(ratings)
@@ -936,7 +952,7 @@ def _finish_recommend(
     if len(selected_genres) > MAX_SELECTED_OPTIONS:
         raise HTTPException(
             status_code=400,
-            detail=f"Elegí como mucho {MAX_SELECTED_OPTIONS} opciones.",
+            detail=errors.msg("too_many_options", lang, n=MAX_SELECTED_OPTIONS),
         )
     # tupla ordenada (orden de selección), una entrada por opción elegida —
     # no un frozenset aplanado (bug reportado 2026-08-02: cobertura por tag
@@ -953,7 +969,7 @@ def _finish_recommend(
     )
     if mode == "genres" and not required_any_groups:
         raise HTTPException(
-            status_code=400, detail="Elegí al menos un género para este modo."
+            status_code=400, detail=errors.msg("no_genre_selected", lang)
         )
 
     if mode == "watchlist":
@@ -964,13 +980,13 @@ def _finish_recommend(
         if not watchlist:
             raise HTTPException(
                 status_code=400,
-                detail="Tu watchlist está vacía. Importá el zip de Letterboxd (el import por username no la trae).",
+                detail=errors.msg("watchlist_empty", lang),
             )
         candidates = _watchlist_candidates(watchlist)
         if not candidates:
             raise HTTPException(
                 status_code=400,
-                detail="No pude matchear tu watchlist contra el catálogo de TMDb.",
+                detail=errors.msg("watchlist_unmatched", lang),
             )
     elif mode == "genres":
         candidates = catalog.CATALOG
@@ -1202,18 +1218,18 @@ async def recommend_titles_from_zip(
     kind_filter: str = Form("both"),
     genres: str = Form(""),
     refine: str = Form("1"),
-    lang: str = Form("es"),
     file: UploadFile = File(...),
     user: sqlite3.Row = Depends(auth.get_current_user),
+    lang: str = Depends(errors.request_lang),
 ) -> RecommendResponse:
-    _validate_recommend_params(mode, kind_filter)
+    _validate_recommend_params(mode, kind_filter, lang)
 
     if not (file.filename or "").lower().endswith(".zip"):
-        raise HTTPException(status_code=400, detail="Subí el .zip que exporta Letterboxd.")
+        raise HTTPException(status_code=400, detail=errors.msg("not_a_zip", lang))
 
     data = await file.read()
     if len(data) > MAX_ZIP_SIZE:
-        raise HTTPException(status_code=400, detail="Ese zip es demasiado grande.")
+        raise HTTPException(status_code=400, detail=errors.msg("zip_too_big", lang))
 
     try:
         ratings, extra_seen, discarded_rows = letterboxd_zip.parse_letterboxd_zip(data)
@@ -1241,10 +1257,10 @@ def recommend_titles_from_letterboxd(
     kind_filter: str = Form("both"),
     genres: str = Form(""),
     refine: str = Form("1"),
-    lang: str = Form("es"),
     user: sqlite3.Row = Depends(auth.get_current_user),
+    lang: str = Depends(errors.request_lang),
 ) -> RecommendResponse:
-    _validate_recommend_params(mode, kind_filter)
+    _validate_recommend_params(mode, kind_filter, lang)
 
     try:
         ratings, extra_seen = letterboxd_scrape.fetch_letterboxd_diary(username)
@@ -1684,15 +1700,16 @@ def trivia_question(user: sqlite3.Row = Depends(auth.get_current_user)) -> Trivi
 def recommend_titles_manual(
     payload: ManualRecommendRequest,
     user: sqlite3.Row = Depends(auth.get_current_user),
+    lang: str = Depends(errors.request_lang),
 ) -> RecommendResponse:
     """Onboarding without Letterboxd: the user rated a handful of seed titles
     by hand. Build RatedItems and hand off to the shared _finish_recommend."""
-    _validate_recommend_params(payload.mode, payload.kind_filter)
+    _validate_recommend_params(payload.mode, payload.kind_filter, lang)
 
     if len(payload.ratings) < MIN_MANUAL_RATINGS:
         raise HTTPException(
             status_code=400,
-            detail=f"Puntuá al menos {MIN_MANUAL_RATINGS} títulos para armar tu perfil.",
+            detail=errors.msg("not_enough_ratings", lang, n=MIN_MANUAL_RATINGS),
         )
 
     ratings = [
@@ -1710,7 +1727,7 @@ def recommend_titles_manual(
         payload.genres,
         user,
         refine=payload.refine,
-        lang=payload.lang,
+        lang=lang,
     )
 
 
@@ -1718,28 +1735,31 @@ def recommend_titles_manual(
 def recommend_titles_from_profile(
     payload: ProfileRecommendRequest,
     user: sqlite3.Row = Depends(auth.get_current_user),
+    lang: str = Depends(errors.request_lang),
 ) -> RecommendResponse:
     """Regenerar picks con el perfil ya guardado, sin pedir la fuente de
     nuevo — feedback: los usuarios de modo manual tenían que re-puntuar las
     mismas pelis cada vez que volvían, aunque el perfil ya estaba guardado."""
-    _validate_recommend_params(payload.mode, payload.kind_filter)
+    _validate_recommend_params(payload.mode, payload.kind_filter, lang)
 
     ratings = _rebuild_ratings(user["id"])
     if len(ratings) < MIN_MANUAL_RATINGS:
         raise HTTPException(
             status_code=400,
-            detail="Todavía no tenés un perfil guardado — importá tu historial primero.",
+            detail=errors.msg("no_saved_profile", lang),
         )
 
     return _finish_recommend(
         ratings, set(), payload.mood, payload.mode, payload.kind_filter, payload.genres,
-        user, refine=payload.refine, persist=False, lang=payload.lang,
+        user, refine=payload.refine, persist=False, lang=lang,
     )
 
 
 @app.post("/recommend/sessions/{session_id}/refine", response_model=RecommendResponse)
 def refine_session(
-    session_id: int, lang: str = "es", user: sqlite3.Row = Depends(auth.get_current_user)
+    session_id: int,
+    user: sqlite3.Row = Depends(auth.get_current_user),
+    lang: str = Depends(errors.request_lang),
 ) -> RecommendResponse:
     """Second half of progressive rendering: re-run the LLM over a session's
     already-served heuristic picks and persist the rewritten reasons. Returns
@@ -1755,7 +1775,7 @@ def refine_session(
     con voz del LLM y 2 con el texto genérico del motor."""
     session = db.get_recommendation_session(session_id, user["id"])
     if session is None:
-        raise HTTPException(status_code=404, detail="Sesión no encontrada.")
+        raise HTTPException(status_code=404, detail=errors.msg("session_not_found", lang))
 
     rec_rows = db.get_session_recommendations(session_id, user["id"])
     recommendations = [Recommendation(**row) for row in rec_rows]
@@ -1795,9 +1815,10 @@ def movie_details(
     kind: str = "movie",
     title: str = "",
     user: sqlite3.Row = Depends(auth.get_current_user),
+    lang: str = Depends(errors.request_lang),
 ) -> MovieDetails:
     if not tmdb_client.is_configured():
-        raise HTTPException(status_code=503, detail="Catálogo de TMDb no configurado.")
+        raise HTTPException(status_code=503, detail=errors.msg("tmdb_unconfigured", lang))
 
     try:
         cast = tmdb_client.fetch_credits(tmdb_id, kind=kind)
@@ -1824,7 +1845,10 @@ def movie_details(
 
 @app.get("/movies/{tmdb_id}/similar", response_model=OnboardingTitlesResponse)
 def similar_titles(
-    tmdb_id: int, kind: str = "movie", user: sqlite3.Row = Depends(auth.get_current_user)
+    tmdb_id: int,
+    kind: str = "movie",
+    user: sqlite3.Row = Depends(auth.get_current_user),
+    lang: str = Depends(errors.request_lang),
 ) -> OnboardingTitlesResponse:
     """Botón "no estoy de acuerdo con el match" del modal (pedido de
     Matías, 2026-07-31): si un título llega sin evidencia real en el
@@ -1832,7 +1856,7 @@ def similar_titles(
     ofrece similares de TMDb para votar — mismo shape que
     /onboarding/titles, así el frontend reusa la misma grilla de rating."""
     if not tmdb_client.is_configured():
-        raise HTTPException(status_code=503, detail="Catálogo de TMDb no configurado.")
+        raise HTTPException(status_code=503, detail=errors.msg("tmdb_unconfigured", lang))
     try:
         similar = tmdb_client.fetch_similar_titles(tmdb_id, kind=kind)
     except tmdb_client.TmdbError as exc:
@@ -1853,11 +1877,13 @@ def similar_titles(
 
 @app.post("/feedback", status_code=201)
 def submit_feedback(
-    payload: FeedbackRequest, user: sqlite3.Row = Depends(auth.get_current_user)
+    payload: FeedbackRequest,
+    user: sqlite3.Row = Depends(auth.get_current_user),
+    lang: str = Depends(errors.request_lang),
 ) -> dict[str, str]:
     recommendation = db.get_recommendation(payload.recommendation_id, user["id"])
     if recommendation is None:
-        raise HTTPException(status_code=404, detail="Recomendación no encontrada.")
+        raise HTTPException(status_code=404, detail=errors.msg("recommendation_not_found", lang))
 
     db.save_feedback(user["id"], payload.recommendation_id, payload.status)
     return {"status": "ok"}

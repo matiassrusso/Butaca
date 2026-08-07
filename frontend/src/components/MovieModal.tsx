@@ -312,7 +312,7 @@ export function MovieModal({
   function recalculate() {
     if (rec.tmdb_id == null || !token) return;
     setRecalculating(true);
-    fetch(`${API_BASE_URL}/titles/${rec.tmdb_id}/verdict?kind=${encodeURIComponent(rec.kind)}&lang=${lang}`, {
+    fetch(`${API_BASE_URL}/titles/${rec.tmdb_id}/verdict?kind=${encodeURIComponent(rec.kind)}`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((response) => (response.ok ? response.json() : null))

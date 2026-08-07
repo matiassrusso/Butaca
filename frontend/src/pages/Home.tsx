@@ -181,9 +181,10 @@ export default function Home() {
     let pollTimer: ReturnType<typeof setTimeout> | undefined;
 
     function loadWeekly(): Promise<RecommendResponse | null> {
-      // el idioma va al backend: los "why" los escribe el LLM allá
+      // el idioma lo manda apiLang.ts en el header Accept-Language: los
+      // "why" los escribe el LLM en el backend
       return fetch(
-        `${API_BASE_URL}/weekly?lang=${lang}`,
+        `${API_BASE_URL}/weekly`,
         token ? { headers: { Authorization: `Bearer ${token}` } } : {},
       ).then((response) => (response.ok ? response.json() : null));
     }
