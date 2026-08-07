@@ -390,6 +390,32 @@ def test_feedback_accepts_own_recommendation() -> None:
     assert response.status_code == 201
 
 
+def test_interested_feedback_reaches_the_scoring_engine() -> None:
+    """El botón "Me interesa" se guardaba pero recommend() nunca lo leía
+    (preguntado por Matías, 2026-08-07: "¿tiene impacto?"). Recorre el camino
+    real por HTTP y verifica que la señal llegue a lo que consume el motor."""
+    headers = _auth_headers("interestedsignal")
+    user_id = db.get_user_by_username("interestedsignal")["id"]
+    picks = _post_zip(headers).json()["recommendations"]
+
+    assert db.get_feedback_signals(user_id)["interested"] == []
+
+    marked = picks[:2]
+    for pick in marked:
+        assert client.post(
+            "/feedback",
+            headers=headers,
+            json={"recommendation_id": pick["id"], "status": "interested"},
+        ).status_code == 201
+
+    signals = db.get_feedback_signals(user_id)
+    # antes del fix esta clave no existía y el motor nunca veía la señal
+    assert {item["title"] for item in signals["interested"]} == {p["title"] for p in marked}
+    # y no se excluye: que algo te interese no es motivo para dejar de mostrarlo
+    assert all(p["title"] not in signals["seen_titles"] for p in marked)
+    assert all(p["title"] not in {i["title"] for i in signals["not_interested"]} for p in marked)
+
+
 def test_feedback_rejects_recommendation_from_another_user() -> None:
     headers_a = _auth_headers("owner")
     headers_b = _auth_headers("intruder")

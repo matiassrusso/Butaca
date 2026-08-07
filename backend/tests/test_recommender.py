@@ -622,3 +622,55 @@ def test_unknown_lang_falls_back_to_spanish() -> None:
 
     assert response.recommendations
     assert "Todavía no tengo historial" in response.taste_summary
+
+
+def test_recommend_boosts_tags_marked_interesting_twice() -> None:
+    # "Me interesa" se guardaba pero el motor lo ignoraba: el botón se pintaba
+    # como elegido y no movía nada (preguntado por Matías, 2026-08-07). Es el
+    # espejo de test_recommend_penalizes_tags_rejected_twice.
+    catalog = [
+        {"title": "Dark Pick", "year": 2020, "kind": "movie", "tags": ["dark"]},
+        {"title": "Light Pick", "year": 2020, "kind": "movie", "tags": ["light"]},
+    ]
+
+    response = recommend(
+        ratings=[], mood="", catalog=catalog, preferred_tags=Counter({"dark": 2}), min_score=0
+    )
+
+    by_title = {item.title: item for item in response.recommendations}
+    assert by_title["Dark Pick"].match_score > by_title["Light Pick"].match_score
+
+
+def test_recommend_ignores_tag_marked_interesting_only_once() -> None:
+    # mismo umbral de 2 que el negativo: un click suelto no reescribe el gusto
+    catalog = [
+        {"title": "Dark Pick", "year": 2020, "kind": "movie", "tags": ["dark"]},
+        {"title": "Light Pick", "year": 2020, "kind": "movie", "tags": ["light"]},
+    ]
+
+    response = recommend(
+        ratings=[], mood="", catalog=catalog, preferred_tags=Counter({"dark": 1}), min_score=0
+    )
+
+    by_title = {item.title: item for item in response.recommendations}
+    assert by_title["Dark Pick"].match_score == by_title["Light Pick"].match_score == 50
+
+
+def test_recommend_cancels_a_tag_marked_both_ways() -> None:
+    # sumar y restar el mismo tag a la vez es ruido con forma de señal
+    catalog = [
+        {"title": "Dark Pick", "year": 2020, "kind": "movie", "tags": ["dark"]},
+        {"title": "Light Pick", "year": 2020, "kind": "movie", "tags": ["light"]},
+    ]
+
+    response = recommend(
+        ratings=[],
+        mood="",
+        catalog=catalog,
+        preferred_tags=Counter({"dark": 2}),
+        rejected_tags=Counter({"dark": 2}),
+        min_score=0,
+    )
+
+    by_title = {item.title: item for item in response.recommendations}
+    assert by_title["Dark Pick"].match_score == by_title["Light Pick"].match_score == 50

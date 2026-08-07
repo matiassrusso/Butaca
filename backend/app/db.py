@@ -1182,12 +1182,24 @@ def get_feedback_signals(user_id: int) -> dict:
 
     seen_titles: list[str] = []
     not_interested: list[dict] = []
+    interested: list[dict] = []
     for entry in latest.values():
         if entry["status"] == "seen":
             seen_titles.append(entry["title"])
         elif entry["status"] == "not_interested":
             not_interested.append({"title": entry["title"], "tags": entry["tags"]})
-    return {"seen_titles": seen_titles, "not_interested": not_interested}
+        elif entry["status"] == "interested":
+            # 'interested' se guardaba desde siempre pero nadie lo leía: el
+            # botón se pintaba como elegido y no movía el motor (preguntado por
+            # Matías, 2026-08-07). Ahora es el espejo de not_interested — mismo
+            # umbral, mismo peso, signo opuesto. NO excluye el título: que algo
+            # te interese no es razón para dejar de mostrártelo.
+            interested.append({"title": entry["title"], "tags": entry["tags"]})
+    return {
+        "seen_titles": seen_titles,
+        "not_interested": not_interested,
+        "interested": interested,
+    }
 
 
 def get_admin_stats() -> dict:

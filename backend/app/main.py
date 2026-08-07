@@ -1044,7 +1044,7 @@ def _finish_recommend(
     # must never resurface, so fold it into extra_seen up front. The tags of
     # not_interested picks feed a scoring penalty in recommend().
     feedback = (
-        {"seen_titles": [], "not_interested": []}
+        {"seen_titles": [], "not_interested": [], "interested": []}
         if ephemeral
         else db.get_feedback_signals(user["id"])
     )
@@ -1054,6 +1054,12 @@ def _finish_recommend(
     rejected_tags: Counter[str] = Counter()
     for item in feedback["not_interested"]:
         rejected_tags.update(item["tags"])
+    # "me interesa" es el espejo de "no me interesa" — ver recommender.recommend.
+    # A diferencia del negativo, NO entra en extra_seen: que algo te interese no
+    # es motivo para dejar de mostrártelo.
+    preferred_tags: Counter[str] = Counter()
+    for item in feedback["interested"]:
+        preferred_tags.update(item["tags"])
 
     # exclude titles already recommended to this user before, so hitting
     # "nuevos picks" and regenerating with the same source+mood surfaces
@@ -1097,6 +1103,7 @@ def _finish_recommend(
             preference_ratings=preference_ratings,
             profile=profile,
             rejected_tags=rejected_tags or None,
+            preferred_tags=preferred_tags or None,
             limit=limit,
             extra_phrases=vibe_labels,
             pairwise_win_counts=pairwise_win_counts,

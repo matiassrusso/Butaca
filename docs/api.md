@@ -431,7 +431,19 @@ Requiere auth. Guarda feedback explícito sobre un pick ya servido.
 }
 ```
 
-`status` es uno de `interested`, `not_interested`, `seen`.
+`status` es uno de `interested`, `not_interested`, `seen`. Qué hace cada uno
+en la próxima tanda de picks:
+
+| status | efecto |
+| --- | --- |
+| `seen` | el título no se recomienda nunca más |
+| `not_interested` | el título no se recomienda nunca más, **y** sus tags restan hasta 15 puntos |
+| `interested` | los tags del título suman hasta 15 puntos (el título sigue siendo recomendable) |
+
+Los dos efectos de tags son simétricos y **necesitan el mismo tag marcado 2+
+veces** para activarse: un click suelto no reescribe el gusto del usuario
+(`recommender.recommend`, `effective_rejected` / `effective_preferred`). Un tag
+marcado en los dos sentidos se anula.
 
 `201` si se guardó. `404` si la `recommendation_id` no existe o no es del
 usuario autenticado (no distinguimos "no existe" de "es de otro usuario" para

@@ -482,6 +482,7 @@ def recommend(
     preference_ratings: list[RatedItem] | None = None,
     profile: dict | None = None,
     rejected_tags: Counter | None = None,
+    preferred_tags: Counter | None = None,
     exclude_seen: bool = True,
     limit: int = 6,
     min_score: int = MIN_MATCH_SCORE,
@@ -516,6 +517,16 @@ def recommend(
     effective_rejected = (
         {tag for tag, count in rejected_tags.items() if count >= 2} if rejected_tags else set()
     )
+    # espejo exacto del de arriba: mismo umbral de 2, mismo peso, signo
+    # opuesto. "Me interesa" se guardaba pero no movía nada (2026-08-07).
+    effective_preferred = (
+        {tag for tag, count in preferred_tags.items() if count >= 2} if preferred_tags else set()
+    )
+    # un tag marcado en los dos sentidos se anula: sin esto sumaría y restaría
+    # a la vez, que es ruido con forma de señal
+    contradictory = effective_rejected & effective_preferred
+    effective_rejected -= contradictory
+    effective_preferred -= contradictory
 
     # la penalización de series existe para que no desplacen películas en un
     # pool mixto; si no hay ninguna película con la que competir, se aplica a
@@ -560,6 +571,7 @@ def recommend(
         points += 30 * len(tags & positive_tags) / tag_count
         points -= 25 * len(tags & negative_tags) / tag_count
         points -= 15 * len(tags & effective_rejected) / tag_count
+        points += 15 * len(tags & effective_preferred) / tag_count
         if mood_tags:
             points += 20 * len(tags & set(mood_tags)) / len(mood_tags)
         if required_any_groups:
