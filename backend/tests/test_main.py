@@ -1,4 +1,5 @@
 import io
+import json
 import zipfile
 
 from fastapi.testclient import TestClient
@@ -2990,3 +2991,41 @@ def test_watchlist_add_does_not_invent_a_rating() -> None:
     client.post("/profile/watchlist", headers=headers, json={"title": "Unseen Movie"})
 
     assert db.get_watched_items(user_id) == []
+
+
+def test_retag_served_adds_new_tags_without_dropping_the_old_ones(monkeypatch) -> None:
+    """Migración de tags viejos (2026-08-07, autorizada por Matías). Lo crítico
+    es que sea ADITIVA: las filas viejas traen keyword tags y tags de vibras
+    (vibe-l2:N) que TMDb no devuelve al re-resolver el título, así que
+    reemplazar en vez de sumar los borraría."""
+    from backend.app.main import _retag_served_rows
+
+    headers = _auth_headers("retagmig")
+    user_id = db.get_user_by_username("retagmig")["id"]
+    session_id = db.create_recommendation_session(user_id, "", "resumen")
+    inserted = db.save_recommendations(
+        session_id,
+        user_id,
+        "",
+        [{
+            "tmdb_id": 4242, "title": "Anime Viejo", "year": 2020, "kind": "movie",
+            "why": "", "match_score": 80,
+            # vocabulario viejo: sin "animation", pero CON un keyword tag y una vibra
+            "tags": ["stylized", "revenge", "vibe-l2:7"],
+            "poster_path": None, "backdrop_path": None, "overview": "", "vote_average": None,
+        }],
+    )
+
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.fetch_title_by_id",
+        lambda tmdb_id, kind="movie": {"tags": ["animation", "stylized"]},
+    )
+
+    result = _retag_served_rows()
+
+    assert result["rows_updated"] == 1
+    row = db.get_recommendation(inserted[0], user_id)
+    tags = json.loads(row["tags"]) if isinstance(row["tags"], str) else row["tags"]
+    assert "animation" in tags                      # el tag nuevo entra...
+    assert {"revenge", "vibe-l2:7"} <= set(tags)     # ...y no se pierde nada
+    assert tags.count("stylized") == 1               # sin duplicar lo que ya estaba

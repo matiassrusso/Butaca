@@ -1414,6 +1414,31 @@ def save_watchlist_items(user_id: int, titles: list[str]) -> None:
             )
 
 
+def get_served_rows_for_retag() -> list[dict]:
+    """Filas de recommendations_served con tmdb_id, para la migración de tags
+    (ver main.py::retag_served). Se traen todas y no solo las que tienen
+    feedback: los tags también se muestran en /history, así que dejar la mitad
+    con el vocabulario viejo sería un estado raro difícil de razonar después."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT id, tmdb_id, kind, tags FROM recommendations_served WHERE tmdb_id IS NOT NULL"
+        ).fetchall()
+    return [
+        {"id": row["id"], "tmdb_id": row["tmdb_id"], "kind": row["kind"], "tags": json.loads(row["tags"])}
+        for row in rows
+    ]
+
+
+def update_served_tags(updates: list[tuple[int, list[str]]]) -> None:
+    if not updates:
+        return
+    with get_connection() as conn:
+        conn.executemany(
+            "UPDATE recommendations_served SET tags = ? WHERE id = ?",
+            [(json.dumps(tags), row_id) for row_id, tags in updates],
+        )
+
+
 def add_watchlist_item(user_id: int, title: str) -> None:
     """Suma UN título sin tocar el resto — al revés que save_watchlist_items,
     que es replace-all porque un import de Letterboxd ES el estado completo.

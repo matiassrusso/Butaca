@@ -439,6 +439,85 @@ def vibe_recompute_status(x_admin_token: str | None = Header(default=None)) -> d
     return _VIBE_RECOMPUTE_STATE
 
 
+def _retag_served_rows() -> dict:
+    """Rellena los tags de vocabulario NUEVO en filas viejas de
+    recommendations_served.
+
+    Los tags se guardan congelados al momento de servir el pick, y
+    get_feedback_signals los lee de ahí — así que cuando se agrega un tag al
+    vocabulario (2026-08-07: "animation", que antes no existía y hacía que
+    rechazar anime penalizara "stylized"), todo el feedback anterior queda
+    contado contra el vocabulario viejo y no cuenta para el nuevo.
+
+    ADITIVA a propósito: suma los tags de género que falten y NO pisa los que
+    ya están. Las filas viejas pueden traer keyword tags
+    (_enrich_with_keyword_tags) y tags de vibras (vibe-l2:N) que TMDb no
+    devuelve al re-resolver el título — reemplazar en vez de sumar los
+    borraría."""
+    rows = db.get_served_rows_for_retag()
+    updates: list[tuple[int, list[str]]] = []
+    resolved: dict[tuple[int, str], list[str]] = {}
+    failed = 0
+
+    for row in rows:
+        key = (row["tmdb_id"], row["kind"])
+        if key not in resolved:
+            try:
+                item = tmdb_client.fetch_title_by_id(row["tmdb_id"], kind=row["kind"])
+            except tmdb_client.TmdbError:
+                item = None
+            if item is None:
+                failed += 1
+                resolved[key] = []
+            else:
+                resolved[key] = item.get("tags", [])
+        missing = [tag for tag in resolved[key] if tag not in row["tags"]]
+        if missing:
+            updates.append((row["id"], row["tags"] + missing))
+
+    db.update_served_tags(updates)
+    return {
+        "rows_scanned": len(rows),
+        "titles_resolved": len(resolved),
+        "rows_updated": len(updates),
+        "titles_unresolved": failed,
+    }
+
+
+_RETAG_STATE: dict = {"status": "idle"}
+_RETAG_LOCK = threading.Lock()
+
+
+def _run_retag() -> None:
+    global _RETAG_STATE
+    try:
+        _RETAG_STATE = {"status": "done", "result": _retag_served_rows()}
+    except Exception as exc:  # noqa: BLE001 - mismo criterio que _run_vibe_recompute
+        logger.warning("Retag of served rows failed: %s", exc, exc_info=True)
+        _RETAG_STATE = {"status": "error", "error": str(exc)}
+    finally:
+        _RETAG_LOCK.release()
+
+
+@app.post("/admin/retag-served")
+def retag_served(x_admin_token: str | None = Header(default=None)) -> dict:
+    """Migración one-off, en background por lo mismo que el recálculo de
+    vibras: son N requests a TMDb y Render corta el request antes."""
+    _require_admin_token(x_admin_token)
+    if not _RETAG_LOCK.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="El retag ya está corriendo.")
+    global _RETAG_STATE
+    _RETAG_STATE = {"status": "running"}
+    threading.Thread(target=_run_retag, daemon=True).start()
+    return {"status": "started"}
+
+
+@app.get("/admin/retag-served/status")
+def retag_served_status(x_admin_token: str | None = Header(default=None)) -> dict:
+    _require_admin_token(x_admin_token)
+    return _RETAG_STATE
+
+
 def _issue_email_verification(user_id: int, email: str | None) -> str:
     """Generate + persist a verification token and try to email it. Same
     degrade as the password reset flow: without Resend (or without an email on
