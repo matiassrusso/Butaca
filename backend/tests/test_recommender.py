@@ -674,3 +674,25 @@ def test_recommend_cancels_a_tag_marked_both_ways() -> None:
 
     by_title = {item.title: item for item in response.recommendations}
     assert by_title["Dark Pick"].match_score == by_title["Light Pick"].match_score == 50
+
+
+def test_rejecting_animation_actually_penalizes_animated_titles() -> None:
+    """El género Animación de TMDb mapeaba SOLO a "stylized", que comparten
+    Drive, Blade Runner o cualquier Wes Anderson — así que "no me interesa"
+    sobre anime penalizaba la estética y no filtraba nada de lo animado
+    (reportado por Matías, 2026-08-07: "no para de recomendarlas")."""
+    catalog = [
+        {"title": "Anime Pick", "year": 2020, "kind": "movie", "tags": ["animation", "stylized"]},
+        {"title": "Live Action Stylized", "year": 2020, "kind": "movie", "tags": ["stylized"]},
+    ]
+
+    response = recommend(
+        ratings=[], mood="", catalog=catalog,
+        rejected_tags=Counter({"animation": 2}), min_score=0,
+    )
+
+    by_title = {item.title: item for item in response.recommendations}
+    # lo animado baja...
+    assert by_title["Anime Pick"].match_score < by_title["Live Action Stylized"].match_score
+    # ...y lo estilizado no animado queda intacto, que era el daño colateral
+    assert by_title["Live Action Stylized"].match_score == 50

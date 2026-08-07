@@ -29,7 +29,11 @@ CACHE_MAX_ENTRIES = 32
 GENRE_ID_TAG_MAP: dict[int, list[str]] = {
     28: ["action", "kinetic", "blockbuster"],  # Action
     12: ["kinetic", "blockbuster"],  # Adventure
-    16: ["stylized"],  # Animation
+    # "animation" es un tag propio, no solo "stylized": sin el, rechazar una
+    # peli animada penalizaba "stylized" -- que comparten Drive, Blade Runner
+    # o cualquier Wes Anderson -- y no filtraba NADA de lo animado. Por eso
+    # "no me interesa" sobre anime no paraba de traer anime (Matias, 2026-08-07).
+    16: ["animation", "stylized"],  # Animation
     35: ["funny", "light"],  # Comedy
     80: ["dark", "psychological"],  # Crime
     99: [],  # Documentary
@@ -63,7 +67,7 @@ MOOD_GENRE_ID_MAP: dict[str, int] = {
 # philosophy as GENRE_ID_TAG_MAP.
 TV_GENRE_ID_TAG_MAP: dict[int, list[str]] = {
     10759: ["action", "kinetic", "blockbuster"],  # Action & Adventure
-    16: ["stylized"],  # Animation
+    16: ["animation", "stylized"],  # Animation
     35: ["funny", "light"],  # Comedy
     80: ["dark", "psychological"],  # Crime
     99: [],  # Documentary

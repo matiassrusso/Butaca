@@ -104,9 +104,17 @@ def _build_taste_digest(ratings: list[RatedItem]) -> str:
     disliked = sorted((r for r in ratings if r.rating <= 2.5), key=lambda r: r.rating)
     average = sum(r.rating for r in ratings) / len(ratings)
 
+    # De la reseña Y de los tags del título. Antes salía SOLO de la reseña, así
+    # que una peli puntuada 5 sin reseña no aportaba nada al patrón de gusto y
+    # el agente terminaba apoyando todos los "why" en las pocas con texto
+    # (reportado por Matías, 2026-08-07). El scoring ya miraba las dos cosas
+    # (recommender._collect_preference_tags), así que el match_score y lo que
+    # el agente entendía de la persona venían de fuentes distintas.
+    known_tags = set(TAG_PHRASES)
     tag_counts: Counter[str] = Counter()
     for item in loved:
         tag_counts.update(positive_tags_from_text(item.review))
+        tag_counts.update(tag for tag in item.tags if tag in known_tags)
     top_tags = [tag for tag, _ in tag_counts.most_common(5)]
 
     lines = [f"{len(ratings)} títulos puntuados, promedio {average:.1f}/5."]
@@ -213,6 +221,12 @@ WRITING_RULES = (
     "que podrían aplicar a cualquier usuario.\n"
     # todos los why salían con "tono oscuro + misterio psicológico" porque son
     # los tags que dominan el perfil (reportado por Matías, 2026-08-07)
+    # el agente citaba la reseña en TODOS los why porque eran las únicas
+    # entradas del perfil con texto jugoso (reportado por Matías, 2026-08-07)
+    "- Las reseñas que escribió son UNA fuente, no LA fuente. La mayoría de lo que vio "
+    "lo puntuó sin escribir nada, y esos puntajes valen igual: un 5 sin reseña dice "
+    "tanto como uno con reseña. Apoyate en una reseña puntual solo cuando aporte algo "
+    "que el puntaje solo no dice; si la citás en todos los textos, sobra.\n"
     "- No apoyes todos los textos en los mismos dos o tres rasgos. Si ya usaste uno "
     "(por ejemplo el tono oscuro, o lo psicológico), el siguiente tiene que entrar por "
     "otro lado: el ritmo, la estructura, las actuaciones, el humor, la época, la "
@@ -275,6 +289,10 @@ WRITING_RULES_EN = (
     "The only things the user has seen are in the profile and the reviews.\n"
     "- Always cite something concrete from their profile or history — no generic praise "
     "that could apply to any user.\n"
+    "- The reviews they wrote are ONE source, not THE source. Most of what they watched "
+    "they rated without writing anything, and those ratings count just as much: a 5 with "
+    "no review says as much as one with a review. Lean on a specific review only when it "
+    "adds something the rating alone doesn't; quoting one in every text is too much.\n"
     "- Don't lean every text on the same two or three traits. If you already used one (say "
     "the dark tone, or the psychological angle), the next one has to come in from somewhere "
     "else: the pacing, the structure, the performances, the humor, the era, the directing, "

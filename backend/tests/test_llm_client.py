@@ -6,6 +6,7 @@ import pytest
 
 from backend.app import llm_client
 from backend.app.models import RatedItem, Recommendation, RecommendResponse
+from backend.app.recommender import TAG_PHRASES
 
 
 @pytest.fixture(autouse=True)
@@ -817,3 +818,20 @@ def test_kickoff_verdict_deduplicates_concurrent_calls(monkeypatch) -> None:
         time.sleep(0.02)
 
     assert len(calls) == 1
+
+
+def test_taste_digest_counts_ratings_without_a_review() -> None:
+    """El digest que lee el agente salía SOLO del texto de las reseñas, así que
+    una peli puntuada 5 sin reseña no aportaba nada al patrón y todos los "why"
+    terminaban apoyados en las pocas con texto (Matías, 2026-08-07). El scoring
+    ya miraba las dos fuentes; esto las empareja."""
+    sin_resena = [
+        RatedItem(title="Sin Reseña Uno", rating=5, review="", tags=["dark", "psychological"]),
+        RatedItem(title="Sin Reseña Dos", rating=5, review="", tags=["dark", "mysterious"]),
+    ]
+
+    digest = llm_client._build_taste_digest(sin_resena)
+
+    # sin el fix, no había línea de patrones en absoluto
+    assert "Patrones que se repiten" in digest
+    assert TAG_PHRASES["dark"] in digest

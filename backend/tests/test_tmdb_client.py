@@ -1595,3 +1595,16 @@ def test_personalized_pool_advances_pages_instead_of_always_page_one(monkeypatch
     # las angostas siguen en una sola página: pedirles la 6 devuelve vacío
     narrow = [url for url in movie_calls if "with_people" in url]
     assert all(url.endswith("page=1") for url in narrow)
+
+
+def test_animation_genre_carries_its_own_tag() -> None:
+    """El género 16 de TMDb mapeaba SOLO a "stylized", un tag que comparte con
+    Drive, Blade Runner o cualquier Wes Anderson. Sin un tag propio, marcar
+    "no me interesa" en una peli animada penalizaba la estética de medio
+    catálogo y no filtraba nada de lo animado (Matías, 2026-08-07)."""
+    for table in (tmdb_client.GENRE_ID_TAG_MAP, tmdb_client.TV_GENRE_ID_TAG_MAP):
+        assert "animation" in table[16]
+    # y el tag tiene frase en los dos idiomas, si no el "why" mostraría el slug
+    from backend.app.recommender import TAG_PHRASES, TAG_PHRASES_EN
+
+    assert "animation" in TAG_PHRASES and "animation" in TAG_PHRASES_EN
