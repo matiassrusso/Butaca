@@ -105,6 +105,29 @@ export default function Rate() {
     next();
   }
 
+  // "La quiero ver": no la vio todavía, pero la quiere ver. Va a la misma
+  // watchlist que importa el zip de Letterboxd, así que alimenta el modo
+  // "watchlist" del wizard. No puntúa nada a propósito: no haberla visto no
+  // dice nada del gusto, e inventarle un rating sería fabricar datos.
+  async function wantToSee() {
+    if (!current || !token) return;
+    setSaving(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/profile/watchlist`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ title: current.title, tmdb_id: current.tmdb_id }),
+      });
+      if (!response.ok) throw new Error();
+      toast.success(t("rate.wantToSeeSaved"));
+      next();
+    } catch {
+      toast.error(t("rate.wantToSeeError"));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function submitRating(rating: number) {
     if (!current || !token) return;
     setSaving(true);
@@ -288,6 +311,10 @@ export default function Rate() {
                     <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground text-center mb-2">
                       {t("rate.seenQuestion")}
                     </p>
+                    {/* 3 botones no entran en una fila a este ancho (max-w-xs)
+                        sin partir las palabras — "La quiero ver" va en su
+                        propia fila, que además le da el peso que merece
+                        estando en el medio del flujo. */}
                     <div className="flex gap-2">
                       <button
                         onClick={() => setStep("rating")}
@@ -302,6 +329,13 @@ export default function Rate() {
                         {t("rate.seenNo")}
                       </button>
                     </div>
+                    <button
+                      onClick={wantToSee}
+                      disabled={saving}
+                      className="w-full mt-2 py-3 font-mono text-[10px] uppercase tracking-widest border border-accent/40 text-accent hover:bg-accent hover:text-accent-foreground hover:border-accent transition-colors disabled:opacity-40"
+                    >
+                      {t("rate.wantToSee")}
+                    </button>
                     <p className="text-center font-mono text-[9px] text-muted-foreground/60 mt-3">
                       {t("rate.swipeHint")}
                     </p>

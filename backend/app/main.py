@@ -60,6 +60,7 @@ from .models import (
     TriviaQuestion,
     UserCredentials,
     WatchedHistoryResponse,
+    WatchlistAddRequest,
 )
 from .recommender import GENRE_OPTIONS, MIN_MATCH_SCORE, PICK_OPTIONS, recommend
 
@@ -1433,7 +1434,11 @@ def _unwatched_candidate_pool(user_id: int, count: int, extra_exclude: set[str] 
         return []
 
     watched_titles = {item["title"].strip().lower() for item in db.get_watched_items(user_id)}
-    seen_titles = watched_titles | extra_exclude
+    # la watchlist también se excluye: un título que el usuario ya marcó como
+    # "La quiero ver" no tiene que volver a aparecer preguntándole si lo vio
+    # (2026-08-07). No está en get_watched_items porque no lo vio ni lo puntuó.
+    watchlisted = {title.strip().lower() for title in db.get_watchlist_items(user_id)}
+    seen_titles = watched_titles | watchlisted | extra_exclude
 
     def _resolve_by_id(key: tuple[int, str]) -> dict | None:
         try:
@@ -1963,3 +1968,19 @@ def rate_title(
     )
     db.invalidate_taste_profile(user["id"])
     return {"status": "saved", "rating": payload.rating, "source": "star"}
+
+
+@app.post("/profile/watchlist", status_code=201)
+def add_to_watchlist(
+    payload: WatchlistAddRequest, user: sqlite3.Row = Depends(auth.get_current_user)
+) -> dict[str, str]:
+    """Botón "La quiero ver" de /rate (pedido de Matías, 2026-08-07): la vio
+    pasar, no la vio todavía, pero la quiere ver.
+
+    Va a la MISMA watchlist que importa el zip de Letterboxd, así que
+    alimenta el modo "watchlist" del wizard que ya existía. No puntúa nada: no
+    verla todavía no dice nada del gusto, e inventarle un rating sería el
+    mismo error que Matías marcó como "grave" en el juego de comparar
+    (2026-08-03) — fabricar datos del usuario."""
+    db.add_watchlist_item(user["id"], payload.title)
+    return {"status": "saved"}

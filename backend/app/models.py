@@ -247,6 +247,12 @@ class RateTitleRequest(BaseModel):
     tmdb_id: int | None = None
 
 
+class WatchlistAddRequest(BaseModel):
+    # "La quiero ver" en /rate: suma a la watchlist sin puntuar nada
+    title: str = Field(min_length=1, max_length=300)
+    tmdb_id: int | None = None
+
+
 class LetterboxdUsernameRequest(BaseModel):
     # "" desvincula la cuenta; el largo tope es el de Letterboxd
     letterboxd_username: str = Field(default="", max_length=100)

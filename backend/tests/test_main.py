@@ -2948,3 +2948,45 @@ def test_recommend_zip_error_detail_follows_accept_language() -> None:
         "/recommend/zip", headers={**headers, "Accept-Language": "en"}, files=files
     )
     assert en.json()["detail"] == "Upload the .zip that Letterboxd exports."
+
+
+def test_watchlist_add_does_not_wipe_the_imported_list() -> None:
+    """El botón "La quiero ver" de /rate (2026-08-07). save_watchlist_items es
+    replace-all porque un import de Letterboxd ES el estado completo — usarla
+    para sumar de a uno habría borrado la watchlist importada entera."""
+    headers = _auth_headers("watchlistadd")
+    user_id = db.get_user_by_username("watchlistadd")["id"]
+    db.save_watchlist_items(user_id, ["Imported One", "Imported Two"])
+
+    response = client.post(
+        "/profile/watchlist",
+        headers=headers,
+        json={"title": "Brand New Pick", "tmdb_id": 999},
+    )
+
+    assert response.status_code == 201
+    assert db.get_watchlist_items(user_id) == ["Imported One", "Imported Two", "Brand New Pick"]
+
+
+def test_watchlist_add_is_idempotent() -> None:
+    # la tabla no tiene UNIQUE, así que sin el chequeo se acumulaban duplicados
+    headers = _auth_headers("watchlistdupe")
+    user_id = db.get_user_by_username("watchlistdupe")["id"]
+
+    for _ in range(3):
+        client.post("/profile/watchlist", headers=headers, json={"title": "Same Movie"})
+    # y tampoco por diferencia de mayúsculas
+    client.post("/profile/watchlist", headers=headers, json={"title": "same movie"})
+
+    assert db.get_watchlist_items(user_id) == ["Same Movie"]
+
+
+def test_watchlist_add_does_not_invent_a_rating() -> None:
+    """No haberla visto no dice nada del gusto: inventarle un rating sería el
+    mismo error que Matías marcó como grave en el juego de comparar."""
+    headers = _auth_headers("watchlistnorating")
+    user_id = db.get_user_by_username("watchlistnorating")["id"]
+
+    client.post("/profile/watchlist", headers=headers, json={"title": "Unseen Movie"})
+
+    assert db.get_watched_items(user_id) == []

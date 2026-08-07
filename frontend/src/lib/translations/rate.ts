@@ -27,6 +27,12 @@ export const RATE: Record<string, Entry> = {
   "rate.seenQuestion": { es: "¿La viste?", en: "Did you see it?" },
   "rate.seenYes": { es: "Sí, la vi", en: "Yes, I saw it" },
   "rate.seenNo": { es: "No la vi", en: "Haven't seen it" },
+  "rate.wantToSee": { es: "La quiero ver", en: "I want to see it" },
+  "rate.wantToSeeSaved": { es: "Va a tu watchlist", en: "Added to your watchlist" },
+  "rate.wantToSeeError": {
+    es: "No se pudo guardar en tu watchlist.",
+    en: "Couldn't save it to your watchlist.",
+  },
   "rate.swipeHint": {
     es: "O deslizá: derecha si la viste, izquierda si no.",
     en: "Or swipe: right if you saw it, left if you didn't.",

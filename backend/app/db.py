@@ -1414,6 +1414,27 @@ def save_watchlist_items(user_id: int, titles: list[str]) -> None:
             )
 
 
+def add_watchlist_item(user_id: int, title: str) -> None:
+    """Suma UN título sin tocar el resto — al revés que save_watchlist_items,
+    que es replace-all porque un import de Letterboxd ES el estado completo.
+    Usarla desde el botón "La quiero ver" de /rate (pedido de Matías,
+    2026-08-07) hubiera borrado la watchlist importada entera.
+
+    Idempotente por título: la tabla no tiene UNIQUE (y agregarlo ahora sería
+    una migración sobre datos existentes que ya pueden tener duplicados del
+    import), así que se chequea antes de insertar."""
+    with get_connection() as conn:
+        existing = conn.execute(
+            "SELECT 1 FROM watchlist_items WHERE user_id = ? AND LOWER(title) = LOWER(?)",
+            (user_id, title),
+        ).fetchone()
+        if existing is None:
+            conn.execute(
+                "INSERT INTO watchlist_items (user_id, title) VALUES (?, ?)",
+                (user_id, title),
+            )
+
+
 def get_watchlist_items(user_id: int) -> list[str]:
     with get_connection() as conn:
         rows = conn.execute(
