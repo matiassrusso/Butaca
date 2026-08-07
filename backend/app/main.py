@@ -1260,6 +1260,9 @@ def _finish_recommend(
     # score. Es de acá que se repone lo que el filtro de abajo descarte —
     # la llamada al LLM pisa `response`, así que hay que guardarlo antes.
     pre_llm_picks = list(response.recommendations)
+    # el match_score que puntuó el MOTOR, por título. Es el que se muestra: ver
+    # la restauración más abajo.
+    engine_scores = {rec.title.casefold(): rec.match_score for rec in pre_llm_picks}
 
     refined = False
     if refine and not use_llm:
@@ -1285,6 +1288,27 @@ def _finish_recommend(
     # sin que nada lo frenara (reportado por Matías, 2026-08-05: picks
     # mezclados con 82%/78% junto a 35%/40%).
     strong = [rec for rec in response.recommendations if rec.match_score >= MIN_MATCH_SCORE]
+
+    # El VETO del LLM se aplica arriba (con SU score decide qué se cae); el
+    # NÚMERO que se muestra vuelve a ser el del motor.
+    #
+    # Por qué (Matías, 2026-08-07, comparando dos tandas seguidas): el LLM
+    # puntúa de nuevo en cada llamada, así que el mismo título podía dar 71%
+    # en una tanda y 78% en la siguiente sin que cambiara nada. Dos tandas son
+    # dos opiniones independientes: sus números no están en la misma escala y
+    # compararlos no significa nada. El del motor sí es estable y comparable.
+    #
+    # Acotado a /recommend a propósito. /weekly y el veredicto del buscador
+    # siguen mostrando el número del LLM: ahí el set es fijo y la respuesta se
+    # cachea, así que no hay dos llamadas que comparar, y encima el LLM aporta
+    # una estimación donde el motor no tiene evidencia (match_score=50, que el
+    # frontend muestra como "Match desconocido").
+    strong = [
+        rec.model_copy(update={"match_score": engine_scores[key]})
+        if (key := rec.title.casefold()) in engine_scores
+        else rec
+        for rec in strong
+    ]
 
     # ...y REPONER lo que se descartó. Filtrar sin reponer era la mitad del
     # trabajo: el LLM le pone su propio match_score a cada pick que elige, así

@@ -3029,3 +3029,33 @@ def test_retag_served_adds_new_tags_without_dropping_the_old_ones(monkeypatch) -
     assert "animation" in tags                      # el tag nuevo entra...
     assert {"revenge", "vibe-l2:7"} <= set(tags)     # ...y no se pierde nada
     assert tags.count("stylized") == 1               # sin duplicar lo que ya estaba
+
+
+def test_engine_owns_the_match_score_but_the_llm_keeps_its_veto(monkeypatch) -> None:
+    """Matías, 2026-08-07, comparando dos tandas seguidas: el LLM puntúa de
+    nuevo en cada llamada, así que el mismo título daba 71% en una tanda y 78%
+    en la otra sin que cambiara nada. El número pasa a ser el del motor (estable
+    y comparable entre tandas); el LLM conserva el veto."""
+    monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
+    headers = _auth_headers("enginescore")
+    seen_engine_scores: list[int] = []
+
+    def fake_refine(ratings, mood, heuristic, lang="es"):
+        seen_engine_scores.extend(r.match_score for r in heuristic.recommendations)
+        picks = []
+        for i, rec in enumerate(heuristic.recommendations[:6]):
+            # el primero lo veta (abajo del piso), al resto les inventa un 99
+            picks.append(rec.model_copy(update={"match_score": 20 if i == 0 else 99, "refined": True}))
+        return heuristic.model_copy(update={"recommendations": picks})
+
+    monkeypatch.setattr("backend.app.main.llm_client.refine_recommendations", fake_refine)
+    picks = _post_zip(headers).json()["recommendations"]
+
+    assert seen_engine_scores, "el motor tiene que haber puntuado antes del LLM"
+    # el 99 inventado por el LLM no se muestra en ningun pick
+    assert all(item["match_score"] != 99 for item in picks)
+    # y todo lo mostrado sale del set de scores que calculo el motor
+    assert all(item["match_score"] in seen_engine_scores for item in picks)
+    # el veto sigue vivo: el titulo que el LLM puntuo 20 no sobrevive con su
+    # score del motor, se cae igual
+    assert len(picks) == 6
