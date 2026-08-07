@@ -1608,3 +1608,31 @@ def test_animation_genre_carries_its_own_tag() -> None:
     from backend.app.recommender import TAG_PHRASES, TAG_PHRASES_EN
 
     assert "animation" in TAG_PHRASES and "animation" in TAG_PHRASES_EN
+
+
+def test_picker_keeps_the_low_vote_floor_so_niche_options_survive() -> None:
+    """El pool por defecto subió su piso de votos para matar el sesgo anime
+    (26% -> 10%, medido). El picker NO: ahí el usuario pidió algo angosto a
+    propósito, y con el piso alto "b movie" queda en 0 títulos y la vibra
+    Schlock se rompe entera (medido contra TMDb, 2026-08-07)."""
+    assert tmdb_client.MIN_VOTE_COUNT_PICKER < tmdb_client.MIN_VOTE_COUNT
+
+    calls: list[str] = []
+
+    def fake_get_json(url: str) -> dict:
+        calls.append(url)
+        return {"results": []}
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(tmdb_client, "_get_json", fake_get_json)
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    try:
+        tmdb_client.fetch_candidates_for_options(["horror"], "movie")
+        tmdb_client.fetch_candidates("", pages=1)
+    finally:
+        monkeypatch.undo()
+
+    picker = [u for u in calls if f"vote_count.gte={tmdb_client.MIN_VOTE_COUNT_PICKER}" in u]
+    default = [u for u in calls if f"vote_count.gte={tmdb_client.MIN_VOTE_COUNT}" in u]
+    assert picker, "el picker tiene que seguir usando el piso bajo"
+    assert default, "el pool por defecto tiene que usar el piso alto"

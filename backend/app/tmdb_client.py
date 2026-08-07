@@ -232,6 +232,29 @@ CREDITS_ENRICH_CAP = 30
 # medido contra TMDb, un perfil de género típico devuelve ~7.500 títulos en
 # ~376 páginas). Mismo bug que ya se había arreglado para el swipe de /rate el
 # 2026-08-03, que nunca se llevó acá.
+# Piso de votos del pool de recomendación. Estaba en 200 y ese era el motivo
+# real de "son pésimas recomendaciones" (Matías, 2026-08-07): con
+# sort_by=vote_average.desc, un piso bajo premia lo nicho-pero-adorado — una
+# peli con 200 votos y 8.5 le gana a un clásico con 20.000 y 8.4. Medido sobre
+# 60 títulos de un perfil drama/thriller/acción:
+#
+#   piso 200  -> 26% animadas, 48% no-inglesas (cabeza: Attack on Titan, Demon Slayer)
+#   piso 3000 -> 10% animadas, 25% no-inglesas (cabeza: The Dark Knight, Parasite)
+#
+# O sea que un cuarto del pool era anime sin importar el gusto del usuario, y
+# ninguna penalización por tags podía compensar semejante inundación. 3000 baja
+# el sesgo a la mitad sin volverlo puro Hollywood (Parasite sobrevive) y deja
+# 1.128 títulos / 57 páginas, de sobra para la ventana de PERSONALIZED_PAGE_WINDOW.
+MIN_VOTE_COUNT = 3000
+
+# El picker ("a tu elección") mantiene el piso viejo A PROPÓSITO: ahí el usuario
+# pidió algo angosto explícitamente, y filtrar por popularidad justo entonces
+# vacía las opciones. Medido con el piso alto: "b movie" (vibra Schlock) queda
+# en 0 títulos, "folk horror" en 5, "gothic horror" en 6. Cuando alguien pide
+# schlock, hay que darle schlock — el sesgo del pool por defecto es un problema
+# distinto, porque ahí no eligió nada.
+MIN_VOTE_COUNT_PICKER = 200
+
 PERSONALIZED_PAGES = 3  # páginas por consulta de discover: 20 títulos cada una
 # Las páginas arrancan en un offset que avanza a medida que el usuario consume
 # picks, y da la vuelta al llegar al tope. Acotado (y no "seguir avanzando para
@@ -377,7 +400,7 @@ def _fetch_from_discover(
             # vote_count.gte keeps this from surfacing obscure titles with a
             # handful of 10/10 votes.
             "sort_by": "vote_average.desc",
-            "vote_count.gte": 200,
+            "vote_count.gte": MIN_VOTE_COUNT,
             "include_adult": "false",
             "page": page,
         }
@@ -498,7 +521,7 @@ def _fetch_option_for_kind(option: dict, kind: str, pages: int, api_key: str) ->
             "api_key": api_key,
             "language": "en-US",
             "sort_by": "vote_average.desc",
-            "vote_count.gte": 200,
+            "vote_count.gte": MIN_VOTE_COUNT_PICKER,
             "include_adult": "false",
             "page": page,
         }
@@ -676,7 +699,7 @@ def fetch_top_rated_by_decade(kind: str, decade: int, pages: int = 1) -> list[di
             "api_key": api_key,
             "language": "en-US",
             "sort_by": "vote_average.desc",
-            "vote_count.gte": 200,
+            "vote_count.gte": MIN_VOTE_COUNT,
             "page": page,
             f"{date_field}.gte": f"{decade}-01-01",
             f"{date_field}.lte": f"{decade + 9}-12-31",
@@ -736,7 +759,7 @@ def fetch_weekly_trending() -> list[dict]:
 
 def fetch_catalog_stats() -> dict:
     """Real counts from the same TMDb pool recommendations are drawn from
-    (vote_count.gte 200, matching _fetch_from_discover), not the raw TMDb
+    (vote_count.gte MIN_VOTE_COUNT, matching _fetch_from_discover), not the raw TMDb
     total which is inflated by obscure/duplicate entries. Cached a day —
     this backs a footer decoration, not something that needs to be live."""
     global _catalog_stats_cache
@@ -750,7 +773,7 @@ def fetch_catalog_stats() -> dict:
         raise TmdbError("TMDB_API_KEY no configurada.")
 
     def _total_results(url: str) -> int:
-        params = {"api_key": api_key, "vote_count.gte": 200, "include_adult": "false"}
+        params = {"api_key": api_key, "vote_count.gte": MIN_VOTE_COUNT, "include_adult": "false"}
         data = _get_json(f"{url}?{urllib.parse.urlencode(params)}")
         return int(data.get("total_results", 0))
 
@@ -1403,7 +1426,7 @@ def _fetch_personalized_discover(
         "api_key": api_key,
         "language": "en-US",
         "sort_by": "vote_average.desc",
-        "vote_count.gte": 200,
+        "vote_count.gte": MIN_VOTE_COUNT,
         "include_adult": "false",
     }
     if genre_ids:
