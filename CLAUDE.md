@@ -45,25 +45,29 @@ Solo yo (Matías), con posible coordinación multi-agente (Claude, Codex) docume
 
 <!-- SESSION_STATE:START -->
 ## Estado actual
-_Última actualización: 2026-08-05_
+_Última actualización: 2026-08-07_
 
-**Qué se hizo (2026-08-05 — sesión corta, un bug reportado con capturas de `/recommend`, sin commitear todavía):**
+**Qué se hizo (sesión larga, 13 commits `5157503`..`5abb1f6`, 395 → 422 tests, todo pusheado y deployado):**
 
-- Matías mandó capturas de `/recommend` (modo "Perfil completo") con picks de 82%/78% mezclados con **35%/40%/55%** en la misma tanda, más una palabra inventada por el LLM ("Zodiacomodoro") en un "why". Primero pensé que las capturas eran de `/weekly` (que sí es floor-free a propósito) — Matías corrigió: eran de `/recommend`, donde el piso de 60 sí es un invariante.
-- **Causa real encontrada:** cuando "Nuevos picks" agota el pool nuevo y cae a `filled_with_old` (relleno con picks fuertes ya mostrados antes), el código llama a `llm_client.predict_fit` en vez de `refine_recommendations` — `predict_fit` es la misma función de `/weekly`, sin piso de score a propósito ahí. Además `refine_recommendations` (el camino normal) solo descartaba `match_score <= 50`, dejando pasar el hueco 51-59 (de ahí el 55%).
-- **Fix:** un filtro único después de la llamada al LLM en `_finish_recommend` ([main.py:1147](backend/app/main.py:1147)) que descarta cualquier pick devuelto con `match_score < MIN_MATCH_SCORE`, cubre los dos caminos. Puede devolver menos de 6 picks si el LLM le baja el puntaje a varios — preferible a mostrar un match flojo disfrazado de fuerte.
-- **"Zodiacomodoro"** no era un bug de renderizado (no hay highlighting en el frontend, era el find-in-page del navegador) — es una palabra inventada por el LLM (nemotron o el fallback llama). Se agregó una regla dura al `WRITING_RULES` compartido ([llm_client.py:198](backend/app/llm_client.py:198)) prohibiendo palabras pegadas/inventadas — mitiga, no elimina (comportamiento probabilístico, mismo patrón que el fix de "tenés chances de encantarte").
-- Test nuevo `test_recommend_zip_filled_with_old_still_respects_match_floor` en `test_main.py` — verificado a mano que falla sin el fix (reproduce el escenario real: agota el pool con dos llamadas seguidas, mockea el LLM devolviendo 35%). 395 tests en verde.
+- **Cerrado lo de la sesión anterior** (piso de match + palabras pegadas), verificado contra la API real de NVIDIA antes de commitear.
+- **Toda la página en ES/EN**, incluidos los "why" del agente: toggle en la navbar persistido en `localStorage`, variantes en inglés de `AGENT_VOICE`/`WRITING_RULES`/`SCORE_RULE`, el idioma dentro de las cache keys del `llm_client`, y el "why" heurístico traducido con su propio vocabulario de tags. Los errores del backend también siguen el idioma (`backend/app/errors.py`).
+- **Cuatro bugs de fondo del motor**, todos reportados por Matías usando la página y todos con causa raíz distinta a la que parecía: la tanda quedaba en 4 picks (el filtro de piso descartaba sin reponer); el pool era **siempre las mismas 20 películas** (`page: 1` hardcodeado, y todas las consultas llevaban `with_people`, que se agota en 2-3 páginas); rechazar anime no filtraba nada (el género 16 mapeaba solo a `"stylized"`); y el LLM devolvía **títulos del propio historial** como picks, perdiendo tandas enteras de "why".
+- **Feedback y datos:** "Me interesa" pasó a mover el motor (era un botón muerto), botón "La quiero ver" en `/rate` que va a la watchlist, y una **migración one-off ya corrida en producción** que rellenó el vocabulario de tags viejo (406 filas escaneadas, 85 actualizadas, idempotente).
 
-**Dónde retomar:** Nada a medio hacer en el fix. Falta: (1) commitear (`CLAUDE.md`, `backend/app/llm_client.py`, `backend/app/main.py`, `backend/tests/test_main.py` están modificados sin stagear), (2) verificar el prompt nuevo contra la API real de NVIDIA como se hace siempre con cambios de prompt (los tests no atrapan "sigue inventando palabras"), (3) deployar y confirmar en producción que "Nuevos picks" repetido varias veces ya no mezcla scores bajos.
+**Dónde retomar:** Nada a medio hacer, working tree limpio y todo deployado. Lo que sigue es **que Matías use la página con su cuenta real** y reporte — cambiaron el pool, el piso, el número, el prompt y los tags históricos, y varias de esas solo se juzgan con su historial. Dos cosas que él ya marcó como pendientes de decisión suya: (1) el **relleno heurístico** puede poner cards flojas al final de la tanda, "6 con relleno" vs "4 buenas" es llamada suya; (2) las **3 features "wow"** (`TASKS.md`, `wow-features-2026-08-03`) siguen esperando que defina qué sumarles.
 
-**Bloqueos / decisiones pendientes:** Ninguno técnico. Sigue pendiente lo de la sesión anterior: definir qué sumar a las 3 features "wow" (`TASKS.md`, `wow-features-2026-08-03`) antes de codearlas — Matías no lo tocó esta sesión.
+**Bloqueos / decisiones pendientes:** Ninguno técnico. Quedó sin hacer una **auditoría de frentes que no se revisaron** (deuda de código, ops, cobertura de tests): el workflow que la iba a correr murió por límite de sesión y después se priorizó lo que Matías iba reportando en vivo.
 
 **Contexto que no es obvio del código:**
-- **`predict_fit` y `refine_recommendations` tienen semánticas de piso distintas a propósito** (`llm_client.py`): `predict_fit` nunca pierde un título porque `/weekly` necesita el set fijo completo aunque el match sea malo; `refine_recommendations` elige y puede descartar. Mezclarlas (usar `predict_fit` dentro de `/recommend` vía `filled_with_old`) fue lo que rompió el invariante de piso — el fix vive en `main.py`, no en `llm_client.py`, justamente para no tocar el comportamiento de `/weekly`.
-- **`/recommend/sessions/{id}/refine`** (usado para el refine progresivo de una sesión ya mostrada, no activamente enganchado en el frontend hoy) también llama a `predict_fit` directo, sin el filtro nuevo — mismo hueco potencial, pero fuera de alcance porque no era lo reportado y ese endpoint depende a propósito de nunca perder un pick ya mostrado. Si en algún momento se vuelve a enganchar en el frontend, revisar si necesita el mismo piso.
-- **La captura que mandó Matías tenía dos causas superpuestas**: el 55% venía del hueco 51-59 de `refine_recommendations` (camino normal), el 35%/40% del `predict_fit` sin piso (camino `filled_with_old`) — ambas se acumulan porque "Nuevos picks" clickeado varias veces agota el pool nuevo rápido con el catálogo real de TMDb.
-- **Los tests de `test_main.py` corren desde la raíz del repo, no desde `backend/`** — `python -m pytest` (no `cd backend && pytest`), porque los imports son `from backend.app import ...`.
+- **El `match_score` que se MUESTRA en `/recommend` es el del motor, no el del LLM** (`_finish_recommend`, `engine_scores`). El LLM conserva el **veto** (con su score decide qué pick se cae) pero no el número: puntúa de nuevo en cada llamada, así que el mismo título daba 71% en una tanda y 78% en la siguiente. **`/weekly` y el veredicto del buscador siguen mostrando el número del LLM a propósito** — ahí el set es fijo y cacheado, no hay dos llamadas que comparar, y el LLM aporta una estimación donde el motor no tiene evidencia (50 = "Match desconocido").
+- **Matías propuso orden descendente global entre tandas y después lo descartó él mismo**, tras discutir que convertiría "Nuevos picks" en un botón de rendimientos decrecientes y enterraría la franja de exploración. **No re-proponerlo.** Tampoco quiso ordenar dentro de la tanda.
+- **El orden de los picks es una mezcla y nunca hubo un sort en la respuesta final** (verificado en el historial de git): primero los que eligió el LLM en SU orden, después el relleno en orden del motor. Una tanda se ve perfectamente ordenada solo cuando el LLM no aportó nada.
+- **La única fuente de idioma del backend es el header `Accept-Language`.** No hay query param ni campo de body: se unificó porque habían quedado dos mecanismos y el sitio respondía en idiomas distintos según el endpoint. El frontend lo manda envolviendo `fetch` una vez al arrancar (`frontend/src/lib/apiLang.ts`) en vez de tocar las ~40 llamadas sueltas.
+- **Los tags se guardan CONGELADOS en `recommendations_served` al servir cada pick**, y `get_feedback_signals` los lee de ahí. Por eso agregar un tag al vocabulario no cuenta retroactivamente, y por eso existe `POST /admin/retag-served` (aditivo: suma los que faltan y **nunca pisa** los keyword tags ni los `vibe-l2:N`, que TMDb no devuelve al re-resolver).
+- **`BUTACA_RECOMMEND_DAILY_LIMIT` se subió a 200 en Render** (default del código: 20). Matías se comió el límite probando. Ojo: el reintento nuevo del `llm_client` puede hacer **2 llamadas al LLM por recomendación**, así que la cuota de NVIDIA rinde la mitad en el peor caso.
+- **Para cambiar env vars de Render usar el endpoint de UNA key** (`PUT /v1/services/{id}/env-vars/{key}`); el plural reemplaza TODAS y borraría el resto.
+- **Los tests corren desde la raíz del repo**, `python -m pytest` (no `cd backend && pytest`). El typecheck real del frontend es `npm run build`.
+- **Un chequeo mecánico que vale la pena repetir** al tocar i18n: comparar las claves definidas en `lib/translations/` contra las usadas con `t()`. Encontró 10 claves huérfanas que en realidad eran texto todavía hardcodeado en `MovieModal.tsx`.
 <!-- SESSION_STATE:END -->
 
 <details>
@@ -377,6 +381,36 @@ _Última actualización: 2026-08-05_
 </details>
 
 ## Historial de sesiones
+
+### 2026-08-07 — la página bilingüe, y cuatro bugs de fondo del motor que aparecieron usándola
+Arrancó cerrando el fix del piso de match que había quedado sin commitear, y
+siguió con la feature grande del día: **toda la página en español o inglés**,
+incluidos los "why" que escribe el agente y los mensajes de error del backend.
+Cuatro agentes en paralelo murieron por límite de sesión a mitad de la
+migración de textos y hubo que completarla a mano; un chequeo mecánico
+(claves definidas contra claves usadas) destapó que `MovieModal.tsx` había
+quedado entero en español.
+
+De ahí en adelante la sesión la manejó el feedback de Matías usando la página,
+y cada reporte tuvo una causa distinta a la que parecía. La tanda de 4 picks
+era el filtro de piso descartando sin reponer. El "¿en serio hay solo 4
+películas en todo el mundo?" resultó ser que el pool pedía **siempre la misma
+página 1** de TMDb — y paginar solo no alcanzaba, porque todas las consultas
+llevaban `with_people` y esa query se agota en 2-3 páginas; faltaba una pasada
+solo-por-género (medido: 292 títulos distintos en 4 tandas contra 103). El
+"no para de recomendarme anime" era que el género Animación mapeaba solo a
+`"stylized"`, así que el rechazo castigaba la estética de medio catálogo y no
+filtraba nada. Y el "el why siempre se parece" eran dos cosas: el digest del
+agente salía **solo del texto de las reseñas**, ignorando los puntajes sin
+reseña, y el LLM devolvía títulos del propio historial como picks, perdiendo
+tandas enteras de "why" (una vino 6 de 6 así) — eso último terminó necesitando
+un reintento en código, porque la regla en el prompt ya existía y no alcanzaba.
+
+Cerró con una discusión de diseño que vale releer: Matías propuso que las
+tandas fueran estrictamente descendentes, y tras discutir los costos lo
+descartó él mismo. El fix real era otro: el número lo volvió a dueñar el motor
+y el descenso apareció solo. 13 commits, 422 tests, migración de tags corrida
+en producción.
 
 ### 2026-08-05 — piso de match roto en "Nuevos picks", y una palabra inventada por el LLM
 Matías mandó capturas de `/recommend` con 35%/40%/55% mezclados con 78%/82% y un
