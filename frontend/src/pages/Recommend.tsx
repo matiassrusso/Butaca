@@ -1065,7 +1065,7 @@ export default function Recommend() {
                   onClick={() => setStep((s) => (s - 1) as WizardStep)}
                   className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground hover:text-accent transition-colors"
                 >
-                  ← Volver
+                  {t("recommend.back")}
                 </button>
               ) : (
                 <span />

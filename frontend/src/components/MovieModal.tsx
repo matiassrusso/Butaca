@@ -500,7 +500,7 @@ export function MovieModal({
                 {details.cast.length > 0 && (
                   <>
                     <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-2">
-                      Cast
+                      {t("modal.cast")}
                     </div>
                     <div className="text-sm">
                       {details.cast.map((c) => c.name).join(" · ")}
@@ -513,7 +513,7 @@ export function MovieModal({
             {details?.providers && (
               <div className="border-t border-foreground/10 pt-4 mb-6">
                 <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-2">
-                  Dónde verla
+                  {t("modal.whereToWatch")}
                   {details.providers.link && (
                     <a
                       href={details.providers.link}
@@ -542,48 +542,48 @@ export function MovieModal({
                     )}
                     {[...new Set([...details.providers.rent, ...details.providers.buy].map((p) => p.name))].length > 0 && (
                       <div className="font-mono text-[10px] text-muted-foreground">
-                        Alquiler/compra:{" "}
+                        {t("modal.rentBuy")}{" "}
                         {[...new Set([...details.providers.rent, ...details.providers.buy].map((p) => p.name))].join(" · ")}
                       </div>
                     )}
                   </>
                 ) : (
                   <div className="font-mono text-[10px] text-muted-foreground">
-                    No está en streaming en Argentina ahora.
+                    {t("modal.notStreaming")}
                   </div>
                 )}
-                <div className="font-mono text-[9px] text-muted-foreground/50 mt-2">Datos de JustWatch</div>
+                <div className="font-mono text-[9px] text-muted-foreground/50 mt-2">{t("modal.justwatch")}</div>
               </div>
             )}
 
             {!readOnly && <div className="mt-auto pt-4 border-t border-foreground/10">
               <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-3">
-                ¿Qué te parece este pick?
+                {t("modal.whatAboutPick")}
               </p>
               <div className="flex gap-2">
                 <button
                   onClick={() => onFeedback("interested")}
                   className={`${btn} ${feedback === "interested" ? "bg-foreground text-background border-foreground" : "border-foreground/30 hover:border-foreground"}`}
                 >
-                  Me interesa
+                  {t("modal.interested")}
                 </button>
                 <button
                   onClick={() => setShowRateMenu((v) => !v)}
                   className={`${btn} ${feedback === "seen" ? "bg-secondary border-foreground" : "border-foreground/30 hover:border-foreground"}`}
                 >
-                  Ya la vi
+                  {t("modal.alreadySeen")}
                 </button>
                 <button
                   onClick={() => onFeedback("not_interested")}
                   className={`${btn} ${feedback === "not_interested" ? "bg-accent text-accent-foreground border-accent" : "border-foreground/30 hover:border-foreground"}`}
                 >
-                  No me interesa
+                  {t("modal.notInterested")}
                 </button>
               </div>
               {showRateMenu && (
                 <div className="mt-3 border-t border-foreground/10 pt-3">
                   <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-2">
-                    ¿Qué te pareció?
+                    {t("modal.whatDidYouThink")}
                   </p>
                   <StarRating
                     value={ratingDraft}
@@ -592,8 +592,7 @@ export function MovieModal({
                   />
                   {details?.rating_source === "import" && (
                     <p className="mt-2 border border-accent/40 bg-accent/10 p-2 font-mono text-[9px] uppercase leading-relaxed text-accent">
-                      Este rating viene de Letterboxd y tiene prioridad. Para cambiarlo,
-                      actualizalo ahí y volvé a importar.
+                      {t("modal.letterboxdPriority")}
                     </p>
                   )}
                 </div>
