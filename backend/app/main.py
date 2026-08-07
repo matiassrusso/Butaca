@@ -248,7 +248,9 @@ def _adjust_match_scores(heuristic: RecommendResponse) -> RecommendResponse:
 
 
 @app.get("/weekly", response_model=RecommendResponse)
-def weekly_picks(user: sqlite3.Row | None = Depends(auth.get_optional_user)) -> RecommendResponse:
+def weekly_picks(
+    lang: str = "es", user: sqlite3.Row | None = Depends(auth.get_optional_user)
+) -> RecommendResponse:
     """Pedido de Matías (2026-07-30): 5 recomendaciones semanales, iguales
     para todos — 3 de TMDb /trending/movie/week real + 2 de variedad de
     épocas (tmdb_client.WEEKLY_CLASSIC_SLOTS, pedido 2026-07-31: antes las
@@ -288,7 +290,7 @@ def weekly_picks(user: sqlite3.Row | None = Depends(auth.get_optional_user)) -> 
     # muestra igual, con su score bajo/S/D.
     heuristic = recommend(
         ratings, mood="", catalog=trending, also_seen=frozenset(), profile=profile,
-        exclude_seen=False, min_score=0,
+        exclude_seen=False, min_score=0, lang=lang,
     )
     heuristic = _adjust_match_scores(heuristic)
 
@@ -300,11 +302,11 @@ def weekly_picks(user: sqlite3.Row | None = Depends(auth.get_optional_user)) -> 
         # se dispara en background (kickoff_verdict, con dedup propio) y se
         # devuelve el heurístico al toque -- el frontend hace polling hasta
         # que `refined` da True.
-        cached = llm_client.peek_verdict(user["id"], ratings, heuristic)
+        cached = llm_client.peek_verdict(user["id"], ratings, heuristic, lang)
         if cached is not None:
             cached.refined = True
             return cached
-        llm_client.kickoff_verdict(user["id"], ratings, heuristic)
+        llm_client.kickoff_verdict(user["id"], ratings, heuristic, lang)
 
     return heuristic
 
@@ -329,7 +331,10 @@ def titles_search(
 
 @app.get("/titles/{tmdb_id}/verdict", response_model=Recommendation)
 def title_verdict(
-    tmdb_id: int, kind: str = "movie", user: sqlite3.Row = Depends(auth.get_current_user)
+    tmdb_id: int,
+    kind: str = "movie",
+    lang: str = "es",
+    user: sqlite3.Row = Depends(auth.get_current_user),
 ) -> Recommendation:
     """El veredicto de Butaca sobre UN título que el usuario buscó: cuánto le
     va a gustar (match_score) y qué opina el agente (why).
@@ -361,7 +366,7 @@ def title_verdict(
     # elige de un pool — el veredicto tiene que salir aunque sea un mal match.
     heuristic = recommend(
         ratings, mood="", catalog=[item], also_seen=frozenset(), profile=profile,
-        exclude_seen=False, min_score=0,
+        exclude_seen=False, min_score=0, lang=lang,
     )
     if not heuristic.recommendations:
         raise HTTPException(status_code=502, detail="No pude analizar ese título.")
@@ -369,7 +374,7 @@ def title_verdict(
 
     if ratings and llm_client.is_configured():
         try:
-            heuristic = llm_client.predict_fit(user["id"], ratings, heuristic)
+            heuristic = llm_client.predict_fit(user["id"], ratings, heuristic, lang)
         except llm_client.LlmError as exc:
             logger.warning("Title verdict LLM failed, falling back to heuristic: %s", exc)
 
@@ -871,6 +876,7 @@ def _finish_recommend(
     refine: bool = True,
     persist: bool = True,
     ephemeral: bool = False,
+    lang: str = "es",
 ) -> RecommendResponse:
     """Shared tail of both /recommend/zip and /recommend/letterboxd: once a
     source has produced (ratings, extra_seen), the rest of the flow —
@@ -1060,6 +1066,7 @@ def _finish_recommend(
             limit=limit,
             extra_phrases=vibe_labels,
             pairwise_win_counts=pairwise_win_counts,
+            lang=lang,
         )
 
     use_llm = refine and llm_client.is_configured()
@@ -1136,9 +1143,9 @@ def _finish_recommend(
             # allowed to drop candidates, so after a fallback fill it could
             # discard every genuinely new title in favor of old high scorers.
             response = (
-                llm_client.predict_fit(user["id"], ratings, response)
+                llm_client.predict_fit(user["id"], ratings, response, lang)
                 if filled_with_old
-                else llm_client.refine_recommendations(ratings, mood, response)
+                else llm_client.refine_recommendations(ratings, mood, response, lang)
             )
             refined = True
         except llm_client.LlmError as exc:
@@ -1195,6 +1202,7 @@ async def recommend_titles_from_zip(
     kind_filter: str = Form("both"),
     genres: str = Form(""),
     refine: str = Form("1"),
+    lang: str = Form("es"),
     file: UploadFile = File(...),
     user: sqlite3.Row = Depends(auth.get_current_user),
 ) -> RecommendResponse:
@@ -1221,7 +1229,7 @@ async def recommend_titles_from_zip(
 
     return _finish_recommend(
         ratings, extra_seen, mood, mode, kind_filter, genres, user, discarded_rows,
-        refine=_refine_enabled(refine),
+        refine=_refine_enabled(refine), lang=lang,
     )
 
 
@@ -1233,6 +1241,7 @@ def recommend_titles_from_letterboxd(
     kind_filter: str = Form("both"),
     genres: str = Form(""),
     refine: str = Form("1"),
+    lang: str = Form("es"),
     user: sqlite3.Row = Depends(auth.get_current_user),
 ) -> RecommendResponse:
     _validate_recommend_params(mode, kind_filter)
@@ -1258,6 +1267,7 @@ def recommend_titles_from_letterboxd(
         refine=_refine_enabled(refine) if is_own_account else True,
         persist=is_own_account,
         ephemeral=not is_own_account,
+        lang=lang,
     )
 
 
@@ -1700,6 +1710,7 @@ def recommend_titles_manual(
         payload.genres,
         user,
         refine=payload.refine,
+        lang=payload.lang,
     )
 
 
@@ -1722,13 +1733,13 @@ def recommend_titles_from_profile(
 
     return _finish_recommend(
         ratings, set(), payload.mood, payload.mode, payload.kind_filter, payload.genres,
-        user, refine=payload.refine, persist=False,
+        user, refine=payload.refine, persist=False, lang=payload.lang,
     )
 
 
 @app.post("/recommend/sessions/{session_id}/refine", response_model=RecommendResponse)
 def refine_session(
-    session_id: int, user: sqlite3.Row = Depends(auth.get_current_user)
+    session_id: int, lang: str = "es", user: sqlite3.Row = Depends(auth.get_current_user)
 ) -> RecommendResponse:
     """Second half of progressive rendering: re-run the LLM over a session's
     already-served heuristic picks and persist the rewritten reasons. Returns
@@ -1762,7 +1773,7 @@ def refine_session(
 
     try:
         refined = llm_client.predict_fit(
-            user["id"], _rebuild_ratings(user["id"]), heuristic
+            user["id"], _rebuild_ratings(user["id"]), heuristic, lang
         )
     except llm_client.LlmError as exc:
         logger.warning("Session refine failed, returning heuristic: %s", exc)

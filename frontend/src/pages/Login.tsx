@@ -4,6 +4,7 @@ import { useLocation } from "wouter";
 import { GoogleSignInButton } from "@/components/GoogleSignInButton";
 import { PageTransition } from "@/components/PageTransition";
 import { API_BASE_URL, useAuth } from "@/hooks/useAuth";
+import { useLang } from "@/lib/i18n";
 import { PRIMARY_QUOTE } from "@/lib/quotes";
 
 // El backend corre en el free tier de Render, que se duerme tras inactividad:
@@ -13,6 +14,7 @@ const COLD_START_HINT_MS = 4000;
 
 export default function Login() {
   const { login, register, guestLogin, claimAccount, googleLogin, user } = useAuth();
+  const { t } = useLang();
   const [, navigate] = useLocation();
   // ?register=1 (CTA "Empezar gratis" del home) abre directo en modo registro.
   // ?claim=1 (banner de invitado) usa el mismo form, pero conservando la
@@ -37,10 +39,10 @@ export default function Login() {
 
   function validate(): boolean {
     const errs: typeof fieldErrors = {};
-    if (username.trim().length < 3) errs.username = "Mínimo 3 caracteres.";
+    if (username.trim().length < 3) errs.username = t("auth.errUsernameMin");
     if (needsEmail && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email))
-      errs.email = "Ingresá un email válido.";
-    if (mode !== "forgot" && password.length < 8) errs.password = "Mínimo 8 caracteres.";
+      errs.email = t("auth.errEmailInvalid");
+    if (mode !== "forgot" && password.length < 8) errs.password = t("auth.errPasswordMin");
     setFieldErrors(errs);
     return Object.keys(errs).length === 0;
   }
@@ -52,7 +54,7 @@ export default function Login() {
       await googleLogin(idToken);
       navigate("/recommend");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "No pude entrar con Google.");
+      setError(err instanceof Error ? err.message : t("auth.errGoogle"));
     } finally {
       setLoading(false);
     }
@@ -68,7 +70,7 @@ export default function Login() {
       await guestLogin();
       navigate("/recommend");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "No pude crear una sesión de invitado.");
+      setError(err instanceof Error ? err.message : t("auth.errGuest"));
     } finally {
       if (slowTimer.current) clearTimeout(slowTimer.current);
       setLoading(false);
@@ -103,7 +105,7 @@ export default function Login() {
       }
       navigate("/recommend");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Falló la autenticación.");
+      setError(err instanceof Error ? err.message : t("auth.errAuth"));
     } finally {
       if (slowTimer.current) clearTimeout(slowTimer.current);
       setLoading(false);
@@ -120,8 +122,11 @@ export default function Login() {
           </div>
           <div>
             <h1 className="text-6xl md:text-7xl xl:text-8xl font-black uppercase tracking-tighter leading-[0.85] mb-8">
-              Volvé a la{" "}
-              <span className="text-accent italic font-serif normal-case tracking-normal">función</span>.
+              {t("auth.heroTitleLead")}{" "}
+              <span className="text-accent italic font-serif normal-case tracking-normal">
+                {t("auth.heroTitleAccent")}
+              </span>
+              .
             </h1>
             <p className="font-serif italic text-2xl leading-snug opacity-80 max-w-md">
               "{PRIMARY_QUOTE.text}"
@@ -137,13 +142,12 @@ export default function Login() {
             <div className="w-full max-w-sm space-y-8">
               <div>
                 <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-2">
-                  [Recuperación]
+                  {t("auth.tagRecovery")}
                 </div>
-                <h2 className="text-3xl font-black uppercase tracking-tighter">Listo</h2>
-                <p className="text-sm text-muted-foreground mt-2">
-                  Si ese usuario existe, le llegó un mail con instrucciones para elegir una
-                  nueva contraseña.
-                </p>
+                <h2 className="text-3xl font-black uppercase tracking-tighter">
+                  {t("auth.forgotSentTitle")}
+                </h2>
+                <p className="text-sm text-muted-foreground mt-2">{t("auth.forgotSentBody")}</p>
               </div>
               <button
                 type="button"
@@ -153,7 +157,7 @@ export default function Login() {
                 }}
                 className="w-full font-mono text-[10px] uppercase tracking-widest text-muted-foreground hover:text-accent transition-colors"
               >
-                ← Volver a entrar
+                {t("auth.backToLogin")}
               </button>
             </div>
           ) : (
@@ -161,35 +165,35 @@ export default function Login() {
               <div>
                 <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-2">
                   {isClaiming
-                    ? "[Guardá tu cuenta]"
+                    ? t("auth.tagClaim")
                     : needsEmail
-                      ? "[Registro nuevo]"
+                      ? t("auth.tagRegister")
                       : mode === "forgot"
-                        ? "[Recuperación]"
-                        : "[Volvés]"}
+                        ? t("auth.tagRecovery")
+                        : t("auth.tagLogin")}
                 </div>
                 <h2 className="text-3xl font-black uppercase tracking-tighter">
                   {isClaiming
-                    ? "Quedátela"
+                    ? t("auth.claimTitle")
                     : needsEmail
-                      ? "Creá tu cuenta"
+                      ? t("auth.registerTitle")
                       : mode === "forgot"
-                        ? "Recuperá tu clave"
-                        : "Entrá"}
+                        ? t("auth.forgotTitle")
+                        : t("auth.loginTitle")}
                 </h2>
                 <p className="text-sm text-muted-foreground mt-2">
                   {isClaiming
-                    ? "Elegí usuario y contraseña. Todo lo que puntuaste como invitado queda igual — es la misma cuenta, ahora con forma de volver a entrar."
+                    ? t("auth.claimSubtitle")
                     : mode === "forgot"
-                      ? "Ingresá tu usuario y te mandamos un link para elegir una nueva contraseña."
-                      : "Necesitamos un usuario para guardar tu historial y tus recomendaciones."}
+                      ? t("auth.forgotSubtitle")
+                      : t("auth.loginSubtitle")}
                 </p>
               </div>
 
               <div className="space-y-6">
                 <label className="block">
                   <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                    Usuario
+                    {t("auth.usernameLabel")}
                   </span>
                   <input
                     value={username}
@@ -212,7 +216,7 @@ export default function Login() {
                 {needsEmail && (
                   <label className="block">
                     <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                      Email
+                      {t("auth.emailLabel")}
                     </span>
                     <input
                       type="email"
@@ -237,7 +241,7 @@ export default function Login() {
                 {mode !== "forgot" && (
                   <label className="block">
                     <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                      Password
+                      {t("auth.passwordLabel")}
                     </span>
                     <input
                       type="password"
@@ -268,18 +272,17 @@ export default function Login() {
                 {loading
                   ? "..."
                   : isClaiming
-                    ? "Guardar mi cuenta →"
+                    ? t("auth.submitClaim")
                     : needsEmail
-                      ? "Crear cuenta →"
+                      ? t("auth.submitRegister")
                       : mode === "forgot"
-                        ? "Mandar mail →"
-                        : "Entrar →"}
+                        ? t("auth.submitForgot")
+                        : t("auth.submitLogin")}
               </button>
 
               {slowHint && (
                 <p className="font-mono text-[10px] uppercase leading-relaxed tracking-widest text-muted-foreground">
-                  Despertando el servidor... la primera vez puede tardar hasta un minuto.
-                  Esperá sin recargar.
+                  {t("auth.slowHint")}
                 </p>
               )}
 
@@ -292,7 +295,7 @@ export default function Login() {
                   }}
                   className="w-full font-mono text-[10px] uppercase tracking-widest text-muted-foreground hover:text-accent transition-colors"
                 >
-                  ¿Olvidaste tu contraseña?
+                  {t("auth.forgotLink")}
                 </button>
               )}
 
@@ -306,10 +309,10 @@ export default function Login() {
                   className="w-full font-mono text-[10px] uppercase tracking-widest text-muted-foreground hover:text-accent transition-colors"
                 >
                   {mode === "register"
-                    ? "¿Ya tenés cuenta? Entrá"
+                    ? t("auth.toLogin")
                     : mode === "forgot"
-                      ? "← Volver a entrar"
-                      : "¿Primera vez? Registrate"}
+                      ? t("auth.backToLogin")
+                      : t("auth.toRegister")}
                 </button>
               )}
 
@@ -317,7 +320,7 @@ export default function Login() {
                 <div className="space-y-3">
                   <div className="flex items-center gap-3 font-mono text-[10px] uppercase tracking-widest text-muted-foreground/60">
                     <span className="h-px flex-1 bg-foreground/10" />
-                    o
+                    {t("auth.or")}
                     <span className="h-px flex-1 bg-foreground/10" />
                   </div>
 
@@ -325,7 +328,7 @@ export default function Login() {
 
                   {isClaiming ? (
                     <p className="font-mono text-[10px] uppercase leading-relaxed tracking-widest text-muted-foreground/60">
-                      Con Google también conservás lo que puntuaste.
+                      {t("auth.googleKeepsRatings")}
                     </p>
                   ) : (
                     <>
@@ -335,11 +338,10 @@ export default function Login() {
                         disabled={loading}
                         className="w-full py-4 border-2 border-foreground/30 font-mono text-xs uppercase tracking-widest hover:border-accent hover:text-accent transition-colors disabled:opacity-60"
                       >
-                        Entrar como invitado →
+                        {t("auth.guestButton")}
                       </button>
                       <p className="font-mono text-[10px] uppercase leading-relaxed tracking-widest text-muted-foreground/60">
-                        Sin usuario ni mail. Vale para probar, pero si borrás los datos del
-                        navegador perdés el acceso.
+                        {t("auth.guestDisclaimer")}
                       </p>
                     </>
                   )}

@@ -3,8 +3,10 @@ import { useLocation } from "wouter";
 
 import { PageTransition } from "@/components/PageTransition";
 import { API_BASE_URL } from "@/hooks/useAuth";
+import { useLang } from "@/lib/i18n";
 
 export default function ResetPassword() {
+  const { t } = useLang();
   const [, navigate] = useLocation();
   const token = new URLSearchParams(window.location.search).get("token") ?? "";
   const [password, setPassword] = useState("");
@@ -26,12 +28,12 @@ export default function ResetPassword() {
 
       if (!response.ok) {
         const body = await response.json().catch(() => null);
-        throw new Error(body?.detail ?? "No pude cambiar tu contraseña.");
+        throw new Error(body?.detail ?? t("auth.errResetFailed"));
       }
 
       setDone(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Falló el cambio de contraseña.");
+      setError(err instanceof Error ? err.message : t("auth.errResetFailed"));
     } finally {
       setLoading(false);
     }
@@ -43,16 +45,16 @@ export default function ResetPassword() {
         <div className="w-full max-w-sm space-y-8">
           <div>
             <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-2">
-              [Recuperación]
+              {t("auth.tagRecovery")}
             </div>
             <h2 className="text-3xl font-black uppercase tracking-tighter">
-              {done ? "Contraseña actualizada" : "Elegí una nueva contraseña"}
+              {done ? t("auth.resetDoneTitle") : t("auth.resetTitle")}
             </h2>
           </div>
 
           {!token && !done && (
             <div className="p-4 border-2 border-destructive/50 font-mono text-xs text-destructive">
-              Este link no tiene un token válido. Pedí uno nuevo desde el login.
+              {t("auth.resetNoToken")}
             </div>
           )}
 
@@ -62,13 +64,13 @@ export default function ResetPassword() {
               onClick={() => navigate("/login")}
               className="w-full py-4 bg-foreground text-background font-mono text-xs uppercase tracking-widest hover:bg-accent transition-colors"
             >
-              Ir a entrar →
+              {t("auth.resetGoToLogin")}
             </button>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-8">
               <label className="block">
                 <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                  Nueva password
+                  {t("auth.resetNewPassword")}
                 </span>
                 <input
                   type="password"
@@ -85,7 +87,7 @@ export default function ResetPassword() {
                 disabled={loading || !token}
                 className="w-full py-4 bg-foreground text-background font-mono text-xs uppercase tracking-widest hover:bg-accent transition-colors disabled:opacity-60"
               >
-                {loading ? "..." : "Cambiar contraseña →"}
+                {loading ? "..." : t("auth.resetSubmit")}
               </button>
 
               {error ? (

@@ -7,6 +7,8 @@ import {
   useState,
 } from "react";
 
+import { useLang } from "../lib/i18n";
+
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8001";
 const TOKEN_KEY = "butaca_token";
 
@@ -41,6 +43,10 @@ type AuthState = {
 const AuthContext = createContext<AuthState | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  // AuthProvider va SIEMPRE adentro de LanguageProvider (ver App.tsx): los
+  // Error que lanza acá son los que la UI muestra literal (err.message), así
+  // que sin esto la pantalla en inglés seguía mostrando el error en español.
+  const { t } = useLang();
   const [token, setToken] = useState<string | null>(() => localStorage.getItem(TOKEN_KEY));
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -66,7 +72,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     fetch(`${API_BASE_URL}/auth/me`, { headers: { Authorization: `Bearer ${token}` } })
       .then((response) => {
-        if (!response.ok) throw new Error("Sesión inválida.");
+        // control de flujo, no texto de UI: el .catch de abajo lo descarta y
+        // solo limpia la sesión — por eso no se traduce (meter `t` en las
+        // deps del efecto dispararía un /auth/me nuevo en cada toggle).
+        if (!response.ok) throw new Error("invalid session");
         return response.json();
       })
       .then((data) => {
@@ -120,7 +129,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const body = await response.json().catch(() => null);
       if (!response.ok) {
-        const message = body?.detail ?? "No pude autenticarte.";
+        const message = body?.detail ?? t("auth.errLogin");
         const err = new Error(message);
         setError(err);
         throw err;
@@ -128,7 +137,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       applySession(body);
     },
-    [applySession],
+    [applySession, t],
   );
 
   const login = useCallback(
@@ -147,13 +156,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const response = await fetch(`${API_BASE_URL}/auth/guest`, { method: "POST" });
     const body = await response.json().catch(() => null);
     if (!response.ok) {
-      const message = body?.detail ?? "No pude crear una sesión de invitado.";
+      const message = body?.detail ?? t("auth.errGuest");
       const err = new Error(message);
       setError(err);
       throw err;
     }
     applySession(body);
-  }, [applySession]);
+  }, [applySession, t]);
 
   const googleLogin = useCallback(
     async (idToken: string) => {
@@ -170,13 +179,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
       const body = await response.json().catch(() => null);
       if (!response.ok) {
-        const err = new Error(body?.detail ?? "No pude entrar con Google.");
+        const err = new Error(body?.detail ?? t("auth.errGoogle"));
         setError(err);
         throw err;
       }
       applySession(body);
     },
-    [token, applySession],
+    [token, applySession, t],
   );
 
   const claimAccount = useCallback(
@@ -189,14 +198,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
       const body = await response.json().catch(() => null);
       if (!response.ok) {
-        const err = new Error(body?.detail ?? "No pude registrar la cuenta.");
+        const err = new Error(body?.detail ?? t("auth.errClaim"));
         setError(err);
         throw err;
       }
       // el backend rota el token al ponerle contraseña a la cuenta
       applySession(body);
     },
-    [token, applySession],
+    [token, applySession, t],
   );
 
   const logout = useCallback(async () => {
@@ -221,14 +230,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
       if (!response.ok) {
         const body = await response.json().catch(() => null);
-        throw new Error(body?.detail ?? "No pude borrar la cuenta.");
+        throw new Error(body?.detail ?? t("auth.errDelete"));
       }
       // account (and its session) are gone server-side; clear locally too
       localStorage.removeItem(TOKEN_KEY);
       setToken(null);
       setUser(null);
     },
-    [token],
+    [token, t],
   );
 
   const saveLetterboxdUsername = useCallback(
@@ -239,13 +248,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ letterboxd_username: letterboxdUsername }),
       });
-      if (!response.ok) throw new Error("No pude guardar tu usuario de Letterboxd.");
+      if (!response.ok) throw new Error(t("auth.errLetterboxd"));
       const body = await response.json();
       setUser((prev) =>
         prev ? { ...prev, letterboxdUsername: body.letterboxd_username ?? null } : prev,
       );
     },
-    [token],
+    [token, t],
   );
 
   return (

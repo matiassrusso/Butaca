@@ -8,6 +8,7 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import { Footer } from "./components/Footer";
 import { Navbar } from "./components/Navbar";
 import { AuthProvider } from "./hooks/useAuth";
+import { LanguageProvider } from "./lib/i18n";
 import Games from "./pages/Games";
 import History from "./pages/History";
 import Home from "./pages/Home";
@@ -43,6 +44,7 @@ function Router() {
 export default function App() {
   return (
     <ErrorBoundary>
+      <LanguageProvider>
       <AuthProvider>
         <Toaster
           toastOptions={{
@@ -63,6 +65,7 @@ export default function App() {
         <Analytics />
         <SpeedInsights />
       </AuthProvider>
+      </LanguageProvider>
     </ErrorBoundary>
   );
 }

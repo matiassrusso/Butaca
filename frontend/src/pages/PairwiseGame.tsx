@@ -5,6 +5,7 @@ import { useLocation } from "wouter";
 
 import { PageTransition } from "@/components/PageTransition";
 import { API_BASE_URL, useAuth } from "@/hooks/useAuth";
+import { useLang } from "@/lib/i18n";
 import type { OnboardingTitle } from "@/pages/Recommend";
 
 // Juego "¿cuál te gustó más?" (idea de Matías, 2026-08-02, rediseñado
@@ -46,6 +47,7 @@ function Poster({ item, onPick, disabled }: { item: OnboardingTitle; onPick: () 
 export default function PairwiseGame() {
   const { isAuthenticated, loading: authLoading, token } = useAuth();
   const [, navigate] = useLocation();
+  const { t } = useLang();
 
   const [pair, setPair] = useState<Pair>({ left: null, right: null });
   const [rounds, setRounds] = useState(0);
@@ -60,7 +62,8 @@ export default function PairwiseGame() {
     fetch(`${API_BASE_URL}/games/pairwise`, { headers: { Authorization: `Bearer ${token}` } })
       .then((response) => (response.ok ? response.json() : Promise.reject()))
       .then((body: Pair) => setPair(body))
-      .catch(() => setError("No pude armar un par para jugar."))
+      // se guarda la CLAVE, no el texto: el cartel sigue el toggle de idioma
+      .catch(() => setError("games.pairwise.error"))
       .finally(() => setLoading(false));
   }, [token]);
 
@@ -85,7 +88,7 @@ export default function PairwiseGame() {
       setRounds((n) => n + 1);
       loadPair();
     } catch {
-      toast.error("No se pudo guardar tu elección.");
+      toast.error(t("games.pairwise.saveError"));
     } finally {
       setChoosing(false);
     }
@@ -104,40 +107,41 @@ export default function PairwiseGame() {
       <main className="max-w-3xl mx-auto px-6 pt-16 pb-24">
         <header className="pb-8 border-b-2 border-foreground mb-8">
           <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-4">
-            [Juego]
+            {t("games.tagSingle")}
           </div>
           <h1 className="text-6xl md:text-7xl font-black uppercase tracking-tighter leading-[0.9]">
-            ¿Cuál te <span className="text-accent italic font-serif normal-case tracking-normal">gustó</span> más?
+            {t("games.pairwise.titlePrefix")}
+            <span className="text-accent italic font-serif normal-case tracking-normal">
+              {t("games.pairwise.titleAccent")}
+            </span>
+            {t("games.pairwise.titleSuffix")}
           </h1>
-          <p className="font-mono text-xs text-muted-foreground mt-4">
-            Dos pelis que ya viste y puntuaste igual. Elegí la que más te gustó -- nos ayuda a
-            desempatar entre tus favoritas, no te cambia el puntaje.
-          </p>
+          <p className="font-mono text-xs text-muted-foreground mt-4">{t("games.pairwise.intro")}</p>
         </header>
 
         {loading && (
           <div className="py-20 text-center">
             <Loader2 className="w-7 h-7 text-accent animate-spin mx-auto mb-4" />
-            <p className="font-mono text-xs uppercase text-muted-foreground">Buscando un par...</p>
+            <p className="font-mono text-xs uppercase text-muted-foreground">{t("games.pairwise.loading")}</p>
           </div>
         )}
 
         {!loading && error && (
-          <div className="p-4 border-2 border-destructive/50 font-mono text-xs text-destructive">{error}</div>
+          <div className="p-4 border-2 border-destructive/50 font-mono text-xs text-destructive">{t(error)}</div>
         )}
 
         {!loading && !error && (!pair.left || !pair.right) && (
           <div className="p-10 border-2 border-dashed border-foreground/20 text-center">
             <h2 className="text-2xl font-black uppercase tracking-tighter mb-2">
               {rounds > 0
-                ? `Jugaste ${rounds} ronda${rounds === 1 ? "" : "s"}.`
-                : "Necesitás al menos dos pelis vistas con el mismo puntaje para jugar -- puntuá más en \"Puntuar más\"."}
+                ? t(rounds === 1 ? "games.pairwise.playedOne" : "games.pairwise.playedMany", { n: rounds })
+                : t("games.pairwise.needMore")}
             </h2>
             <button
               onClick={loadPair}
               className="mt-4 px-5 py-3 font-mono text-[10px] uppercase tracking-widest bg-accent text-accent-foreground hover:bg-foreground hover:text-background transition-colors"
             >
-              Reintentar
+              {t("common.retry")}
             </button>
           </div>
         )}
@@ -145,7 +149,7 @@ export default function PairwiseGame() {
         {!loading && !error && pair.left && pair.right && (
           <div>
             <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground text-center mb-6">
-              {rounds} ronda{rounds === 1 ? "" : "s"} jugada{rounds === 1 ? "" : "s"}
+              {t(rounds === 1 ? "games.pairwise.roundsOne" : "games.pairwise.roundsMany", { n: rounds })}
             </div>
             <div className="grid grid-cols-2 gap-6 md:gap-10 items-start">
               <Poster item={pair.left} onPick={() => choose(pair.left!, pair.right!)} disabled={choosing} />

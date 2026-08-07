@@ -47,12 +47,12 @@ _REFINE_CACHE: OrderedDict[tuple, tuple[float, dict]] = OrderedDict()
 # personalizados) pero rompería acá — las 5 películas semanales son
 # LITERALMENTE las mismas para todos, así que sin el user_id en la clave el
 # segundo usuario que pidiera /weekly recibiría la predicción del primero.
-_VERDICT_CACHE: OrderedDict[tuple[int, tuple, str], tuple[float, dict]] = OrderedDict()
+_VERDICT_CACHE: OrderedDict[tuple[int, tuple, str, str], tuple[float, dict]] = OrderedDict()
 
 # kickoff_verdict evita disparar dos veces el mismo predict_fit en background
 # -- sin esto, varios polls de /weekly llegando antes de que el primero
 # termine dispararían una llamada nueva a NVIDIA cada uno.
-_INFLIGHT_VERDICTS: set[tuple[int, tuple, str]] = set()
+_INFLIGHT_VERDICTS: set[tuple[int, tuple, str, str]] = set()
 _INFLIGHT_LOCK = threading.Lock()
 
 
@@ -115,15 +115,16 @@ def _build_taste_digest(ratings: list[RatedItem]) -> str:
     return " ".join(lines)
 
 
-def _rating_label(rating: float) -> str:
+def _rating_label(rating: float, lang: str = "es") -> str:
     # segunda persona — el LLM cita esta frase literal en el "why" (reportado
     # por Matías, 2026-07-31: decía "que ya puntuaste como 'le encantó'",
     # mezclando el "puntuaste" en segunda persona con la frase en tercera)
+    labels = _RATING_LABELS_BY_LANG[normalize_lang(lang)]
     if rating >= 4:
-        return "te encantó"
+        return labels["loved"]
     if rating <= 2:
-        return "no te gustó"
-    return "te gustó"
+        return labels["disliked"]
+    return labels["liked"]
 
 
 def _ratings_lines(ratings: list[RatedItem]) -> str:
@@ -213,6 +214,73 @@ MATCH_SCORE_RULE = (
     "veredicto escrito nunca pueden contradecirse."
 )
 
+# ─── English variants ───────────────────────────────────────────────────────
+# Pedido de Matías (2026-08-06): toggle ES/EN en toda la página, con los "why"
+# del LLM también en inglés. Solo se traducen las reglas que controlan el
+# OUTPUT (voz, escritura, score) — el contexto que arma _profile_block (tags,
+# reseñas del usuario) sigue en español siempre: es información que el modelo
+# lee, no algo que le mostremos al usuario, y un LLM sigue una instrucción de
+# "respondé en inglés" sin problema aunque el contexto esté en otro idioma.
+AGENT_VOICE_EN = (
+    "You're Butaca's film critic: you know this person's taste inside and out and talk "
+    "to them straight, in natural, casual English, like a friend who knows movies and "
+    "won't lie to you just to look good."
+)
+
+WRITING_RULES_EN = (
+    "HOW TO WRITE (hard rules, apply to everything you return):\n"
+    "- ALWAYS talk to them in second person (\"you\"). Never third person: no \"they'll "
+    "love it\" or \"their profile\".\n"
+    "- Open each text DIFFERENTLY. Don't let several start with the same formula.\n"
+    "- Forbidden to open with \"You're going to love this because\" in more than one.\n"
+    "- Vary your verbs: hook, land, click, cost you, bore, surprise, hit, clash. Don't use "
+    "\"love\" more than once in the whole response.\n"
+    "- If something's lukewarm or a bad fit, say so plainly, no sugarcoating: an honest "
+    "\"I don't think this'll click for you\" beats an inflated compliment.\n"
+    "- Natural English, like you'd tell a friend. No stiff or awkward constructions.\n"
+    "- Don't repeat the same comparison structure (\"just like X or Y\") in every one: "
+    "sometimes cite one title, sometimes none and just describe the pattern.\n"
+    "- Each text needs a different SKELETON, not just different words. If one opens naming "
+    "what the user liked, another has to open with the movie itself, another with a "
+    "warning, another with how it'll make them feel. Two texts that boil down to the same "
+    "template (\"you liked X like A and B, and this has the same...\") are WRONG, even "
+    "with different words.\n"
+    "- Only cite titles that literally appear in the profile above. It's FORBIDDEN to name "
+    "a movie the user didn't rate, even if you assume they saw it or would like it. If "
+    "there's no title that fits, describe the pattern without naming one. Never clarify in "
+    "parentheses that you're guessing.\n"
+    "- Always cite something concrete from their profile or history — no generic praise "
+    "that could apply to any user.\n"
+    "- Write ONLY real English words, separated by spaces. Never glue two words or titles "
+    "together into one (e.g. \"Zodiacobsession\") — if you're unsure about a title, don't "
+    "name it."
+)
+
+SCORE_RULE_EN = (
+    "If you cite a title's score from 'Full reviews', use EXACTLY the one that appears "
+    "there (don't make up a number if the title says 'no numeric score')."
+)
+
+MATCH_SCORE_RULE_EN = (
+    "For each title also return match_score: an integer from 1 to 99 estimating how much "
+    "this person will like it. 50 means there's no evidence; the number and the written "
+    "verdict can never contradict each other."
+)
+
+_AGENT_VOICE_BY_LANG = {"es": AGENT_VOICE, "en": AGENT_VOICE_EN}
+_WRITING_RULES_BY_LANG = {"es": WRITING_RULES, "en": WRITING_RULES_EN}
+_SCORE_RULE_BY_LANG = {"es": SCORE_RULE, "en": SCORE_RULE_EN}
+_MATCH_SCORE_RULE_BY_LANG = {"es": MATCH_SCORE_RULE, "en": MATCH_SCORE_RULE_EN}
+_RATING_LABELS_BY_LANG = {
+    "es": {"loved": "te encantó", "liked": "te gustó", "disliked": "no te gustó"},
+    "en": {"loved": "you loved it", "liked": "you liked it", "disliked": "you didn't like it"},
+}
+_ALREADY_SEEN_PREFIX_BY_LANG = {"es": "Ya la viste", "en": "You already watched this"}
+
+
+def normalize_lang(lang: str) -> str:
+    return "en" if lang == "en" else "es"
+
 
 def _profile_block(ratings: list[RatedItem]) -> str:
     return (
@@ -221,12 +289,19 @@ def _profile_block(ratings: list[RatedItem]) -> str:
     )
 
 
-def _build_prompt(ratings: list[RatedItem], mood: str, heuristic: RecommendResponse) -> str:
+def _build_prompt(
+    ratings: list[RatedItem], mood: str, heuristic: RecommendResponse, lang: str = "es"
+) -> str:
     """Tarea: elegir y ordenar picks de un pool de candidatos (/recommend).
     La voz y las reglas de escritura son las mismas que en _build_verdict_prompt
     — ver AGENT_VOICE arriba."""
+    lang = normalize_lang(lang)
+    language_line = (
+        "" if lang == "es" else "Write your ENTIRE response (taste_summary and every why) in English.\n\n"
+    )
     return (
-        f"{AGENT_VOICE}\n\n"
+        f"{_AGENT_VOICE_BY_LANG[lang]}\n\n"
+        f"{language_line}"
         f"{_profile_block(ratings)}\n\n"
         f"Mood de hoy: {mood or 'sin preferencia'}\n\n"
         "Candidatos ya filtrados por un motor heurístico. Elegí y ordená exactamente 6 "
@@ -237,9 +312,9 @@ def _build_prompt(ratings: list[RatedItem], mood: str, heuristic: RecommendRespo
         f"{_candidate_lines(heuristic)}\n\n"
         "Devolvé un resumen breve del gusto del usuario que use el perfil de arriba, no una "
         "frase genérica, y para cada pick elegido una razón de 1-2 frases.\n\n"
-        f"{WRITING_RULES}\n\n"
-        f"{SCORE_RULE}\n\n"
-        f"{MATCH_SCORE_RULE}\n\n"
+        f"{_WRITING_RULES_BY_LANG[lang]}\n\n"
+        f"{_SCORE_RULE_BY_LANG[lang]}\n\n"
+        f"{_MATCH_SCORE_RULE_BY_LANG[lang]}\n\n"
         # reforzado cerca del final a propósito (2026-08-03, TASKS.md): un
         # candidato inventado ("Zodiac", "Obsession" — ninguno estaba en la
         # lista) tira ese pick al heurístico sin que se note en pantalla. La
@@ -329,13 +404,13 @@ def _now_monotonic() -> float:
 
 
 def _refine_cache_key(
-    ratings: list[RatedItem], mood: str, heuristic: RecommendResponse
-) -> tuple[str, str, tuple]:
+    ratings: list[RatedItem], mood: str, heuristic: RecommendResponse, lang: str = "es"
+) -> tuple[str, str, tuple, str]:
     candidates = tuple(
         rec.tmdb_id if rec.tmdb_id is not None else rec.title.strip().lower()
         for rec in heuristic.recommendations
     )
-    return (_profile_block(ratings), mood.strip().lower(), candidates)
+    return (_profile_block(ratings), mood.strip().lower(), candidates, normalize_lang(lang))
 
 
 def _get_cached_refine(cache_key: tuple[str, tuple]) -> dict | None:
@@ -385,7 +460,7 @@ def _pick_match_score(pick: dict, fallback: int) -> int:
 
 
 def refine_recommendations(
-    ratings: list[RatedItem], mood: str, heuristic: RecommendResponse
+    ratings: list[RatedItem], mood: str, heuristic: RecommendResponse, lang: str = "es"
 ) -> RecommendResponse:
     api_key = os.environ.get("NVIDIA_API_KEY")
     if not api_key:
@@ -393,11 +468,11 @@ def refine_recommendations(
     if not heuristic.recommendations:
         raise LlmError("No hay candidatos para refinar.")
 
-    cache_key = _refine_cache_key(ratings, mood, heuristic)
+    cache_key = _refine_cache_key(ratings, mood, heuristic, lang)
     result = _get_cached_refine(cache_key)
     cache_hit = result is not None
     if result is None:
-        result = _call_nvidia_with_fallback(_build_prompt(ratings, mood, heuristic), api_key)
+        result = _call_nvidia_with_fallback(_build_prompt(ratings, mood, heuristic, lang), api_key)
 
     by_title = {_title_key(rec.title): rec for rec in heuristic.recommendations}
     reordered = []
@@ -455,7 +530,9 @@ def refine_recommendations(
     return RecommendResponse(taste_summary=taste_summary, recommendations=reordered[:6])
 
 
-def _build_verdict_prompt(ratings: list[RatedItem], heuristic: RecommendResponse) -> str:
+def _build_verdict_prompt(
+    ratings: list[RatedItem], heuristic: RecommendResponse, lang: str = "es"
+) -> str:
     """Tarea: opinar sobre títulos YA elegidos (no elegirlos). La usan las
     semanales de la home y el buscador — en los dos casos el set viene dado y
     lo único que falta es el veredicto para esta persona.
@@ -463,10 +540,15 @@ def _build_verdict_prompt(ratings: list[RatedItem], heuristic: RecommendResponse
     `heuristic` acá ya viene filtrado de títulos que el usuario puntuó antes
     (predict_fit los saca del pool), así que el count es dinámico en vez de
     hardcodeado — antes decía "las 5" aunque quedaran 4 o 3."""
+    lang = normalize_lang(lang)
     count = len(heuristic.recommendations)
     plural = count > 1
+    language_line = (
+        "" if lang == "es" else "Write your ENTIRE response (every why) in English.\n\n"
+    )
     return (
-        f"{AGENT_VOICE}\n\n"
+        f"{_AGENT_VOICE_BY_LANG[lang]}\n\n"
+        f"{language_line}"
         f"{_profile_block(ratings)}\n\n"
         f"{'Estos son' if plural else 'Este es'} {count} "
         f"{'títulos que ya están elegidos' if plural else 'título que ya está elegido'} — no "
@@ -475,9 +557,9 @@ def _build_verdict_prompt(ratings: list[RatedItem], heuristic: RecommendResponse
         f"particular{f'. Escribí sobre {count}, ninguno de menos' if plural else ''}:\n"
         f"{_candidate_lines(heuristic)}\n\n"
         f"Para cada uno, 1-2 frases con tu veredicto.\n\n"
-        f"{WRITING_RULES}\n\n"
-        f"{SCORE_RULE}\n\n"
-        f"{MATCH_SCORE_RULE}\n\n"
+        f"{_WRITING_RULES_BY_LANG[lang]}\n\n"
+        f"{_SCORE_RULE_BY_LANG[lang]}\n\n"
+        f"{_MATCH_SCORE_RULE_BY_LANG[lang]}\n\n"
         "Respondé ÚNICAMENTE con un JSON válido, sin texto ni markdown alrededor, con esta forma "
         'exacta: {"picks": [{"title": "...", "why": "...", "match_score": 85}, ...]}'
         + (f" — un elemento por cada uno de los {count}, nunca menos." if plural else ".")
@@ -485,13 +567,13 @@ def _build_verdict_prompt(ratings: list[RatedItem], heuristic: RecommendResponse
 
 
 def _verdict_cache_key(
-    user_id: int, ratings: list[RatedItem], heuristic: RecommendResponse
-) -> tuple[int, tuple, str]:
+    user_id: int, ratings: list[RatedItem], heuristic: RecommendResponse, lang: str = "es"
+) -> tuple[int, tuple, str, str]:
     candidates = tuple(
         rec.tmdb_id if rec.tmdb_id is not None else rec.title.strip().lower()
         for rec in heuristic.recommendations
     )
-    return (user_id, candidates, _profile_block(ratings))
+    return (user_id, candidates, _profile_block(ratings), normalize_lang(lang))
 
 
 def _predictable_recs(
@@ -513,8 +595,12 @@ def _predictable_recs(
 
 
 def _apply_verdict_result(
-    ratings: list[RatedItem], heuristic: RecommendResponse, result: dict | None
+    ratings: list[RatedItem],
+    heuristic: RecommendResponse,
+    result: dict | None,
+    lang: str = "es",
 ) -> RecommendResponse:
+    lang = normalize_lang(lang)
     seen_by_key, _ = _predictable_recs(ratings, heuristic)
     by_title = {_title_key(rec.title): rec for rec in heuristic.recommendations}
     updates_by_key: dict[str, dict] = {}
@@ -535,7 +621,8 @@ def _apply_verdict_result(
         key = _title_key(rec.title)
         seen_item = seen_by_key.get(key)
         if seen_item:
-            updates = {"why": f"Ya la viste — {_rating_label(seen_item.rating)}."}
+            prefix = _ALREADY_SEEN_PREFIX_BY_LANG[lang]
+            updates = {"why": f"{prefix} — {_rating_label(seen_item.rating, lang)}."}
         else:
             updates = updates_by_key.get(key)
             updates = {**updates, "refined": True} if updates else {}
@@ -544,7 +631,7 @@ def _apply_verdict_result(
 
 
 def predict_fit(
-    user_id: int, ratings: list[RatedItem], heuristic: RecommendResponse
+    user_id: int, ratings: list[RatedItem], heuristic: RecommendResponse, lang: str = "es"
 ) -> RecommendResponse:
     """Veredicto del agente sobre títulos YA elegidos: '¿le va a gustar o no a
     esta persona?'. La contracara de refine_recommendations, que además ELIGE
@@ -562,7 +649,7 @@ def predict_fit(
     if not heuristic.recommendations:
         raise LlmError("No hay candidatos para opinar.")
 
-    cache_key = _verdict_cache_key(user_id, ratings, heuristic)
+    cache_key = _verdict_cache_key(user_id, ratings, heuristic, lang)
     _, predictable = _predictable_recs(ratings, heuristic)
 
     result: dict | None = None
@@ -582,7 +669,7 @@ def predict_fit(
                 del _VERDICT_CACHE[cache_key]
         if result is None:
             result = _call_nvidia_with_fallback(
-                _build_verdict_prompt(ratings, predictable_heuristic), api_key
+                _build_verdict_prompt(ratings, predictable_heuristic, lang), api_key
             )
         if not cache_hit:
             _VERDICT_CACHE[cache_key] = (_now_monotonic() + REFINE_CACHE_TTL_SECONDS, result)
@@ -590,11 +677,11 @@ def predict_fit(
             while len(_VERDICT_CACHE) > REFINE_CACHE_MAX_ENTRIES:
                 _VERDICT_CACHE.popitem(last=False)
 
-    return _apply_verdict_result(ratings, heuristic, result)
+    return _apply_verdict_result(ratings, heuristic, result, lang)
 
 
 def peek_verdict(
-    user_id: int, ratings: list[RatedItem], heuristic: RecommendResponse
+    user_id: int, ratings: list[RatedItem], heuristic: RecommendResponse, lang: str = "es"
 ) -> RecommendResponse | None:
     """Devuelve el veredicto YA cacheado sin llamar al LLM ni disparar nada
     -- para el fix async de /weekly (2026-08-03): la primera visita del día
@@ -607,23 +694,25 @@ def peek_verdict(
     if not predictable:
         # nada que predecir -- todos los picks ya los vio, el resultado
         # "ya la viste" es el final, no hay nada async pendiente
-        return _apply_verdict_result(ratings, heuristic, None)
-    cache_key = _verdict_cache_key(user_id, ratings, heuristic)
+        return _apply_verdict_result(ratings, heuristic, None, lang)
+    cache_key = _verdict_cache_key(user_id, ratings, heuristic, lang)
     cached = _VERDICT_CACHE.get(cache_key)
     if cached is None:
         return None
     expires_at, cached_result = cached
     if expires_at <= _now_monotonic():
         return None
-    return _apply_verdict_result(ratings, heuristic, cached_result)
+    return _apply_verdict_result(ratings, heuristic, cached_result, lang)
 
 
-def kickoff_verdict(user_id: int, ratings: list[RatedItem], heuristic: RecommendResponse) -> None:
+def kickoff_verdict(
+    user_id: int, ratings: list[RatedItem], heuristic: RecommendResponse, lang: str = "es"
+) -> None:
     """Dispara predict_fit en un thread de background si no hay uno ya
     corriendo para la misma clave (dedup vía _INFLIGHT_VERDICTS) -- así
     varios polls seguidos de /weekly antes de que el primero termine no
     disparan una llamada nueva a NVIDIA cada uno."""
-    cache_key = _verdict_cache_key(user_id, ratings, heuristic)
+    cache_key = _verdict_cache_key(user_id, ratings, heuristic, lang)
     with _INFLIGHT_LOCK:
         if cache_key in _INFLIGHT_VERDICTS:
             return
@@ -631,7 +720,7 @@ def kickoff_verdict(user_id: int, ratings: list[RatedItem], heuristic: Recommend
 
     def _run() -> None:
         try:
-            predict_fit(user_id, ratings, heuristic)
+            predict_fit(user_id, ratings, heuristic, lang)
         except LlmError as exc:
             logger.warning("Background weekly verdict failed: %s", exc)
         finally:

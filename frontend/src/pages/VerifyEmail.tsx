@@ -3,14 +3,18 @@ import { useLocation } from "wouter";
 
 import { PageTransition } from "@/components/PageTransition";
 import { API_BASE_URL } from "@/hooks/useAuth";
+import { useLang } from "@/lib/i18n";
 
 type Status = "verifying" | "done" | "error";
 
 export default function VerifyEmail() {
+  const { t } = useLang();
   const [, navigate] = useLocation();
   const token = new URLSearchParams(window.location.search).get("token") ?? "";
   const [status, setStatus] = useState<Status>(token ? "verifying" : "error");
-  const [error, setError] = useState(token ? "" : "Este link no tiene un token válido.");
+  // vacío = "falta el token"; se traduce al renderizar y no al montar, así el
+  // texto sigue el cambio de idioma
+  const [error, setError] = useState("");
   // StrictMode double-invokes effects in dev; the token is single-use, so the
   // second call would 400 and flip a real success to error
   const ran = useRef(false);
@@ -27,12 +31,12 @@ export default function VerifyEmail() {
       .then(async (response) => {
         if (!response.ok) {
           const body = await response.json().catch(() => null);
-          throw new Error(body?.detail ?? "No pude verificar tu email.");
+          throw new Error(body?.detail ?? t("auth.errVerifyFailed"));
         }
         setStatus("done");
       })
       .catch((err) => {
-        setError(err instanceof Error ? err.message : "Falló la verificación.");
+        setError(err instanceof Error ? err.message : t("auth.errVerifyFailed"));
         setStatus("error");
       });
   }, [token]);
@@ -43,22 +47,26 @@ export default function VerifyEmail() {
         <div className="w-full max-w-sm space-y-8">
           <div>
             <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-2">
-              [Verificación de email]
+              {t("auth.verifyTag")}
             </div>
             <h2 className="text-3xl font-black uppercase tracking-tighter">
-              {status === "done" ? "Email confirmado" : status === "error" ? "No se pudo verificar" : "Verificando…"}
+              {status === "done"
+                ? t("auth.verifyDoneTitle")
+                : status === "error"
+                  ? t("auth.verifyErrorTitle")
+                  : t("auth.verifyingTitle")}
             </h2>
           </div>
 
           {status === "verifying" && (
             <p className="font-mono text-xs uppercase tracking-widest text-muted-foreground">
-              Un segundo…
+              {t("auth.verifyingBody")}
             </p>
           )}
 
           {status === "error" && (
             <div className="p-4 border-2 border-destructive/50 font-mono text-xs text-destructive">
-              {error} Pedí uno nuevo desde el banner en la app.
+              {error || t("auth.verifyNoToken")} {t("auth.verifyErrorHint")}
             </div>
           )}
 
@@ -68,7 +76,7 @@ export default function VerifyEmail() {
               onClick={() => navigate("/")}
               className="w-full py-4 bg-foreground text-background font-mono text-xs uppercase tracking-widest hover:bg-accent transition-colors"
             >
-              Ir al inicio →
+              {t("auth.verifyGoHome")}
             </button>
           )}
         </div>

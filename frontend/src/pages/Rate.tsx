@@ -8,6 +8,7 @@ import { PageTransition } from "@/components/PageTransition";
 import { StarRating } from "@/components/StarRating";
 import { API_BASE_URL, useAuth } from "@/hooks/useAuth";
 import { useSwipeCard } from "@/hooks/useSwipeCard";
+import { useLang } from "@/lib/i18n";
 import type { OnboardingTitle } from "@/pages/Recommend";
 
 // Sección para volver cuando quieras y sumar de a poco al perfil, sin
@@ -27,15 +28,16 @@ const PREFETCH_THRESHOLD = 5;
 type Step = "seen" | "rating";
 type Kind = "movie" | "series" | "both";
 
-const KIND_OPTIONS: { value: Kind; label: string }[] = [
-  { value: "movie", label: "Películas" },
-  { value: "series", label: "Series" },
-  { value: "both", label: "Ambas" },
+const KIND_OPTIONS: { value: Kind; labelKey: string }[] = [
+  { value: "movie", labelKey: "common.movies" },
+  { value: "series", labelKey: "common.series" },
+  { value: "both", labelKey: "common.both" },
 ];
 
 export default function Rate() {
   const { isAuthenticated, loading: authLoading, token } = useAuth();
   const [, navigate] = useLocation();
+  const { t } = useLang();
 
   const [kind, setKind] = useState<Kind>("movie");
   const [titles, setTitles] = useState<OnboardingTitle[]>([]);
@@ -65,7 +67,9 @@ export default function Rate() {
           }
           setExhausted(fresh.length === 0);
         })
-        .catch(() => setError("No pude traer pelis para puntuar."))
+        // se guarda la CLAVE, no el texto: así el cartel de error también
+        // cambia de idioma si tocás el toggle con el error en pantalla
+        .catch(() => setError("rate.error"))
         .finally(() => {
           setLoading(false);
           fetchingRef.current = false;
@@ -114,7 +118,7 @@ export default function Rate() {
       setRated((n) => n + 1);
       next();
     } catch {
-      toast.error("No se pudo guardar el puntaje.");
+      toast.error(t("rate.saveError"));
     } finally {
       setSaving(false);
     }
@@ -156,15 +160,16 @@ export default function Rate() {
       <main className="max-w-2xl mx-auto px-6 pt-16 pb-24">
         <header className="pb-8 border-b-2 border-foreground mb-8">
           <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-4">
-            [Puntuar]
+            {t("rate.tag")}
           </div>
           <h1 className="text-6xl md:text-7xl font-black uppercase tracking-tighter leading-[0.9]">
-            ¿Qué más <span className="text-accent italic font-serif normal-case tracking-normal">viste</span>?
+            {t("rate.titlePrefix")}
+            <span className="text-accent italic font-serif normal-case tracking-normal">
+              {t("rate.titleAccent")}
+            </span>
+            {t("rate.titleSuffix")}
           </h1>
-          <p className="font-mono text-xs text-muted-foreground mt-4">
-            Cuanto más puntúes, mejores matches. Te mostramos lo más popular real de TMDb que todavía
-            no tenés en tu perfil -- pensado para lo que quizás viste y te olvidaste de anotar.
-          </p>
+          <p className="font-mono text-xs text-muted-foreground mt-4">{t("rate.intro")}</p>
           <div className="flex gap-2 mt-5">
             {KIND_OPTIONS.map((option) => (
               <button
@@ -177,7 +182,7 @@ export default function Rate() {
                     : "border-foreground/30 hover:border-foreground"
                 }`}
               >
-                {option.label}
+                {t(option.labelKey)}
               </button>
             ))}
           </div>
@@ -186,18 +191,18 @@ export default function Rate() {
         {loading && (
           <div className="py-20 text-center">
             <Loader2 className="w-7 h-7 text-accent animate-spin mx-auto mb-4" />
-            <p className="font-mono text-xs uppercase text-muted-foreground">Buscando pelis...</p>
+            <p className="font-mono text-xs uppercase text-muted-foreground">{t("rate.loading")}</p>
           </div>
         )}
 
         {!loading && error && (
-          <div className="p-4 border-2 border-destructive/50 font-mono text-xs text-destructive">{error}</div>
+          <div className="p-4 border-2 border-destructive/50 font-mono text-xs text-destructive">{t(error)}</div>
         )}
 
         {!loading && !error && !current && exhausted && (
           <div className="p-10 border-2 border-dashed border-foreground/20 text-center">
             <h2 className="text-2xl font-black uppercase tracking-tighter mb-2">
-              Por ahora no encontramos más pelis populares que no tengas en tu perfil.
+              {t("rate.exhausted")}
             </h2>
             <button
               onClick={() => {
@@ -206,7 +211,7 @@ export default function Rate() {
               }}
               className="mt-4 px-5 py-3 font-mono text-[10px] uppercase tracking-widest bg-accent text-accent-foreground hover:bg-foreground hover:text-background transition-colors"
             >
-              Reintentar
+              {t("common.retry")}
             </button>
           </div>
         )}
@@ -214,7 +219,7 @@ export default function Rate() {
         {!loading && !error && current && (
           <div>
             <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground text-center mb-4">
-              {rated} puntuadas
+              {t("rate.ratedCount", { n: rated })}
             </div>
 
             <AnimatePresence mode="wait" initial={false}>
@@ -244,7 +249,7 @@ export default function Rate() {
                   {hint && (
                     <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-background/70">
                       <span className="font-mono text-xs uppercase tracking-widest px-3 py-2 border-2 border-foreground bg-background">
-                        {hint === "right" ? "La vi" : "No la vi"}
+                        {hint === "right" ? t("rate.hintSeen") : t("rate.hintNotSeen")}
                       </span>
                     </div>
                   )}
@@ -281,24 +286,24 @@ export default function Rate() {
                     transition={{ duration: 0.2, ease: "easeOut" }}
                   >
                     <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground text-center mb-2">
-                      ¿La viste?
+                      {t("rate.seenQuestion")}
                     </p>
                     <div className="flex gap-2">
                       <button
                         onClick={() => setStep("rating")}
                         className="flex-1 py-3 font-mono text-[10px] uppercase tracking-widest border border-foreground/30 hover:border-accent hover:text-accent transition-colors"
                       >
-                        Sí, la vi
+                        {t("rate.seenYes")}
                       </button>
                       <button
                         onClick={skip}
                         className="flex-1 py-3 font-mono text-[10px] uppercase tracking-widest border border-foreground/30 hover:border-foreground transition-colors"
                       >
-                        No la vi
+                        {t("rate.seenNo")}
                       </button>
                     </div>
                     <p className="text-center font-mono text-[9px] text-muted-foreground/60 mt-3">
-                      O deslizá: derecha si la viste, izquierda si no.
+                      {t("rate.swipeHint")}
                     </p>
                   </motion.div>
                 ) : (
@@ -310,7 +315,7 @@ export default function Rate() {
                     transition={{ duration: 0.2, ease: "easeOut" }}
                   >
                     <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground text-center mb-2">
-                      ¿Qué te pareció?
+                      {t("rate.ratingQuestion")}
                     </p>
                     <StarRating onChange={submitRating} disabled={saving} size="lg" />
                   </motion.div>

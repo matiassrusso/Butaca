@@ -15,6 +15,7 @@ import { StarRating } from "@/components/StarRating";
 import { API_BASE_URL, useAuth } from "@/hooks/useAuth";
 import { useSwipeCard } from "@/hooks/useSwipeCard";
 import { useTiltCard } from "@/hooks/useTiltCard";
+import { useLang } from "@/lib/i18n";
 
 type RecommendResponse = {
   taste_summary: string;
@@ -29,49 +30,34 @@ type RecommendMode = "profile" | "recent" | "genres" | "watchlist";
 type KindFilter = "movie" | "series" | "both";
 
 // desc: qué hace cada modo, visible en el paso 2 del wizard (feedback: "no
-// entiendo qué significa cada opción")
-const modeOptions: { mode: RecommendMode; label: string; desc: string }[] = [
-  {
-    mode: "profile",
-    label: "Perfil completo",
-    desc: "Cruzamos todo tu historial: géneros, directores, décadas y tags.",
-  },
-  {
-    mode: "recent",
-    label: "Últimas vistas",
-    desc: "Le damos más peso a lo último que viste — para seguir la racha.",
-  },
-  {
-    mode: "genres",
-    label: "A tu elección",
-    desc: "Elegís vos: géneros clásicos o vibras más específicas, y buscamos ahí adentro.",
-  },
-  {
-    mode: "watchlist",
-    label: "De mi watchlist",
-    desc: "Ordenamos tu propia watchlist según tu perfil: cuál va primero.",
-  },
+// entiendo qué significa cada opción"). Guardamos claves, no texto: una
+// constante de módulo no puede llamar a t().
+const modeOptions: { mode: RecommendMode; labelKey: string; descKey: string }[] = [
+  { mode: "profile", labelKey: "recommend.modeProfile", descKey: "recommend.modeProfileDesc" },
+  { mode: "recent", labelKey: "recommend.modeRecent", descKey: "recommend.modeRecentDesc" },
+  { mode: "genres", labelKey: "recommend.modeGenres", descKey: "recommend.modeGenresDesc" },
+  { mode: "watchlist", labelKey: "recommend.modeWatchlist", descKey: "recommend.modeWatchlistDesc" },
 ];
 
 // wizard de 3 pasos (feedback: la página anterior tiraba todo junto y los
 // usuarios nuevos no sabían por dónde empezar)
 type WizardStep = 1 | 2 | 3;
-const STEP_LABELS = ["Tu historial", "Qué ver", "Formato"];
+const STEP_LABEL_KEYS = ["recommend.step1Label", "recommend.step2Label", "recommend.step3Label"];
 
-const kindFilterOptions: { value: KindFilter; label: string }[] = [
-  { value: "movie", label: "Películas" },
-  { value: "series", label: "Series" },
-  { value: "both", label: "Ambas" },
+const kindFilterOptions: { value: KindFilter; labelKey: string }[] = [
+  { value: "movie", labelKey: "common.movies" },
+  { value: "series", labelKey: "common.series" },
+  { value: "both", labelKey: "common.both" },
 ];
 
 // cargadas desde GET /recommend/options (backend/app/recommender.py::PICK_OPTIONS)
 // -- ya no hardcodeadas acá, con 7 opciones duplicarlas a mano era tolerable,
 // con 25+ garantiza que se desincronicen.
 type PickOption = { key: string; label: string; group: string };
-const PICK_GROUP_LABELS: Record<string, string> = {
-  generos: "Géneros",
-  vibras: "Vibras",
-  movimientos: "Movimientos",
+const PICK_GROUP_LABEL_KEYS: Record<string, string> = {
+  generos: "recommend.groupGeneros",
+  vibras: "recommend.groupVibras",
+  movimientos: "recommend.groupMovimientos",
 };
 const MAX_SELECTED_OPTIONS = 5; // mismo tope que backend/app/main.py::MAX_SELECTED_OPTIONS
 
@@ -139,6 +125,7 @@ function ManualRatingCard({
   onRate: (title: string, rating: number | null) => void;
 }) {
   const { wrapRef, onMouseMove, onMouseLeave } = useTiltCard();
+  const { t } = useLang();
   const letterboxdRating = item.rating_source === "import";
 
   return (
@@ -183,14 +170,14 @@ function ManualRatingCard({
         />
         {letterboxdRating ? (
           <p className="mt-1 text-center font-mono text-[8px] uppercase tracking-wider text-accent">
-            Rating de Letterboxd
+            {t("recommend.letterboxdRating")}
           </p>
         ) : (
           <button
             onClick={() => onRate(item.title, null)}
             className="mt-1 w-full py-1 font-mono text-[9px] uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
           >
-            No la vi
+            {t("recommend.notSeen")}
           </button>
         )}
       </div>
@@ -243,6 +230,7 @@ function SwipeRating({
   ratings: Record<string, number>;
   onRate: (title: string, rating: number | null) => void;
 }) {
+  const { t } = useLang();
   const [skipped, setSkipped] = useState<Set<string>>(new Set());
   const remaining = titles.filter((t) => ratings[t.title] === undefined && !skipped.has(t.title));
   const current = remaining[0] as OnboardingTitle | undefined;
@@ -264,7 +252,7 @@ function SwipeRating({
   if (!current) {
     return (
       <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground text-center py-16">
-        {doneCount > 0 ? "Puntuaste todas las de la lista." : "No hay pelis para puntuar."}
+        {doneCount > 0 ? t("recommend.swipeAllRated") : t("recommend.swipeEmpty")}
       </p>
     );
   }
@@ -289,7 +277,7 @@ function SwipeRating({
           {hint && (
             <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-background/70">
               <span className="font-mono text-xs uppercase tracking-widest px-3 py-2 border-2 border-foreground bg-background">
-                No la vi
+                {t("recommend.notSeen")}
               </span>
             </div>
           )}
@@ -315,11 +303,11 @@ function SwipeRating({
       <div className="max-w-xs mx-auto mt-6">
         <StarRating onChange={rate} size="lg" />
         <button onClick={() => rate(null)} className={`${swipeActionBtn} w-full mt-2`}>
-          No la vi
+          {t("recommend.notSeen")}
         </button>
       </div>
       <p className="text-center font-mono text-[9px] text-muted-foreground/60 mt-3">
-        Elegí las estrellas o deslizá hacia abajo si no la viste.
+        {t("recommend.swipeHint")}
       </p>
     </div>
   );
@@ -329,6 +317,7 @@ function SwipeRating({
 
 export default function Recommend() {
   const { isAuthenticated, loading: authLoading, token, user } = useAuth();
+  const { t, lang } = useLang();
   const [, navigate] = useLocation();
 
   const [step, setStep] = useState<WizardStep>(1);
@@ -520,11 +509,11 @@ export default function Recommend() {
 
   const processFile = useCallback((file: File) => {
     if (!file.name.toLowerCase().endsWith(".zip")) {
-      toast.error("Eso no es un .zip — exportá tu data desde Letterboxd y subí ese archivo.");
+      toast.error(t("recommend.notAZip"));
       return;
     }
     setZipFile(file);
-  }, []);
+  }, [t]);
 
   function handleDrop(event: React.DragEvent<HTMLDivElement>) {
     event.preventDefault();
@@ -558,10 +547,10 @@ export default function Recommend() {
   // hint junto al botón deshabilitado: qué falta para poder continuar
   const step1Hint =
     importMethod === "zip"
-      ? "Subí tu .zip para continuar."
+      ? t("recommend.hintZip")
       : importMethod === "username"
-        ? "Escribí tu usuario de Letterboxd para continuar."
-        : `Puntuá al menos ${MIN_MANUAL_RATINGS} pelis para continuar.`;
+        ? t("recommend.hintUsername")
+        : t("recommend.hintManual", { n: MIN_MANUAL_RATINGS });
 
   async function handleGenerate() {
     if (!token || !canGenerate) return;
@@ -581,6 +570,8 @@ export default function Recommend() {
             kind_filter: kindFilter,
             genres: mode === "genres" ? selectedGenres.join(",") : "",
             refine: true,
+            // el LLM del backend escribe los "why" en este idioma
+            lang,
           }),
         });
       } else {
@@ -589,6 +580,7 @@ export default function Recommend() {
         formData.append("kind_filter", kindFilter);
         formData.append("genres", mode === "genres" ? selectedGenres.join(",") : "");
         formData.append("refine", "1");
+        formData.append("lang", lang);
 
         let endpoint = `${API_BASE_URL}/recommend/zip`;
         if (importMethod === "zip") {
@@ -609,23 +601,19 @@ export default function Recommend() {
 
       if (!response.ok) {
         const body = await response.json().catch(() => null);
-        throw new Error(body?.detail ?? "No pude hablar con el backend.");
+        throw new Error(body?.detail ?? t("recommend.backendError"));
       }
 
       const data = (await response.json()) as RecommendResponse;
       if (!data.recommendations.length) {
-        throw new Error(
-          result
-            ? "No encontré picks nuevos para esta búsqueda — ya te mostré todo lo que tenemos. Probá cambiar el modo, el género o el formato."
-            : "No pude leer ratings válidos de esa fuente."
-        );
+        throw new Error(result ? t("recommend.noNewPicks") : t("recommend.noValidRatings"));
       }
 
       setResult(data);
       setFeedbackState({});
-      toast.success("Tus picks están listos.");
+      toast.success(t("recommend.picksReady"));
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Falló la recomendación.";
+      const message = err instanceof Error ? err.message : t("recommend.generateFailed");
       setError(message);
       toast.error(message);
     } finally {
@@ -645,7 +633,7 @@ export default function Recommend() {
       if (!response.ok) throw new Error();
       setFeedbackState((prev) => ({ ...prev, [recommendationId]: status }));
     } catch {
-      toast.error("No se pudo guardar el feedback.");
+      toast.error(t("recommend.feedbackFailed"));
     }
   }
 
@@ -669,13 +657,13 @@ export default function Recommend() {
       if (!response.ok) throw new Error();
       const body = await response.json();
       if (body.status === "preserved") {
-        toast.info(`Tu ${body.rating}/5 de Letterboxd tiene prioridad. Cambialo ahí y volvé a importar.`);
+        toast.info(t("recommend.ratePreserved", { rating: body.rating }));
         return true;
       }
-      toast.success(`Guardado en tu perfil: ${finalTitle}`);
+      toast.success(t("recommend.rateSaved", { title: finalTitle }));
       return true;
     } catch {
-      toast.error("No se pudo guardar el puntaje.");
+      toast.error(t("recommend.rateFailed"));
       return false;
     }
   }
@@ -693,10 +681,14 @@ export default function Recommend() {
       <main className="max-w-7xl mx-auto px-6 pt-16 pb-24">
         <header className="pb-10 border-b-2 border-foreground mb-12">
           <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-4">
-            [Personalizado para vos]
+            {t("recommend.eyebrow")}
           </div>
           <h1 className="text-6xl md:text-7xl font-black uppercase tracking-tighter leading-[0.9]">
-            Tus <span className="text-accent italic font-serif normal-case tracking-normal">picks</span> de peli
+            {t("recommend.titlePre")}{" "}
+            <span className="text-accent italic font-serif normal-case tracking-normal">
+              {t("recommend.titleAccent")}
+            </span>{" "}
+            {t("recommend.titlePost")}
           </h1>
         </header>
 
@@ -704,7 +696,8 @@ export default function Recommend() {
           <div className="max-w-4xl">
             {/* Stepper: pasos completados clickeables para volver */}
             <div className="flex items-center gap-3 mb-12 font-mono text-[10px] uppercase tracking-widest">
-              {STEP_LABELS.map((label, i) => {
+              {STEP_LABEL_KEYS.map((labelKey, i) => {
+                const label = t(labelKey);
                 const n = (i + 1) as WizardStep;
                 const done = step > n;
                 const current = step === n;
@@ -744,31 +737,28 @@ export default function Recommend() {
             {step === 1 && (
               <section>
                 <h2 className="text-3xl font-black uppercase tracking-tighter mb-3">
-                  ¿De dónde sacamos tu gusto?
+                  {t("recommend.step1Title")}
                 </h2>
                 <p className="font-serif italic text-lg text-muted-foreground mb-8 max-w-2xl">
-                  Para recomendarte en serio primero tenemos que conocerte. Elegí cómo nos
-                  contás qué viste y qué te gustó.
+                  {t("recommend.step1Intro")}
                 </p>
 
                 <div className="flex gap-0 mb-6 max-w-xl">
                   <button onClick={() => setImportMethod("zip")} className={tabCls(importMethod === "zip")}>
-                    Subir .zip
+                    {t("recommend.tabZip")}
                   </button>
                   <button onClick={() => setImportMethod("username")} className={tabCls(importMethod === "username")}>
-                    Username
+                    {t("recommend.tabUsername")}
                   </button>
                   <button onClick={() => setImportMethod("manual")} className={tabCls(importMethod === "manual")}>
-                    Sin cuenta
+                    {t("recommend.tabManual")}
                   </button>
                 </div>
 
                 {importMethod === "zip" ? (
                   <div className="max-w-xl">
                     <p className="font-mono text-[10px] uppercase leading-relaxed text-muted-foreground mb-3">
-                      La mejor opción: trae tu historial completo (ratings, reviews, likes,
-                      watchlist). Descargalo desde Letterboxd: Settings → Data → Export your
-                      data.
+                      {t("recommend.zipHint")}
                     </p>
                     <div
                       onDrop={handleDrop}
@@ -784,33 +774,35 @@ export default function Recommend() {
                     >
                       <input ref={fileInputRef} type="file" accept=".zip,application/zip" onChange={handleFileInput} className="hidden" />
                       <div className="font-mono text-xs uppercase tracking-widest mb-2">
-                        {isDragging ? "Soltalo acá" : "Arrastrá tu .zip acá"}
+                        {isDragging ? t("recommend.dropActive") : t("recommend.dropIdle")}
                       </div>
-                      <div className="font-mono text-[10px] text-muted-foreground mb-3">o click para elegir</div>
+                      <div className="font-mono text-[10px] text-muted-foreground mb-3">
+                        {t("recommend.dropClick")}
+                      </div>
                       {zipFile ? (
                         <div className="inline-flex items-center gap-2 font-mono text-[10px] text-accent">
                           <CheckCircle className="w-3 h-3" />
                           {zipFile.name} · {formatFileSize(zipFile.size)}
                         </div>
                       ) : (
-                        <div className="font-mono text-[10px] text-muted-foreground/60">Solo .zip</div>
+                        <div className="font-mono text-[10px] text-muted-foreground/60">
+                          {t("recommend.dropOnlyZip")}
+                        </div>
                       )}
                     </div>
                   </div>
                 ) : importMethod === "username" ? (
                   <div className="max-w-xl">
                     <p className="font-mono text-[10px] uppercase leading-relaxed text-muted-foreground mb-2">
-                      Leemos tu diario público de Letterboxd (ratings, fechas, rewatches). Tu
-                      perfil tiene que ser público.
+                      {t("recommend.usernameHint")}
                     </p>
                     <p className="font-mono text-[10px] uppercase leading-relaxed text-muted-foreground/60 mb-3">
-                      Ojo: esto solo trae tu actividad reciente (~50 entradas) — para tu
-                      historial completo, usá el .zip.
+                      {t("recommend.usernameWarning")}
                     </p>
                     <input
                       value={letterboxdUsername}
                       onChange={(e) => setLetterboxdUsername(e.target.value)}
-                      placeholder="ej: scorsese"
+                      placeholder={t("recommend.usernamePlaceholder")}
                       list="letterboxd-usernames"
                       className="w-full bg-transparent border-b-2 border-foreground py-3 font-mono text-sm placeholder:text-muted-foreground focus:outline-none focus:border-accent"
                     />
@@ -824,8 +816,10 @@ export default function Recommend() {
                     </datalist>
                     {isForeignAccount && (
                       <p className="font-mono text-[10px] uppercase leading-relaxed text-accent mt-3">
-                        Ojo: «{letterboxdUsername.trim()}» no es tu cuenta ({user?.letterboxdUsername}).
-                        Te muestro los picks igual, pero no lo guardo en tu perfil.
+                        {t("recommend.foreignAccount", {
+                          name: letterboxdUsername.trim(),
+                          own: user?.letterboxdUsername ?? "",
+                        })}
                       </p>
                     )}
                   </div>
@@ -835,13 +829,10 @@ export default function Recommend() {
                         conocerte, no el resultado; feedback Simón: ser honestos
                         con el límite del modo manual */}
                     <p className="font-mono text-[10px] uppercase leading-relaxed text-muted-foreground mb-2 max-w-2xl">
-                      Estas pelis no son recomendaciones — son para conocerte. Puntuá las que
-                      hayas visto y con eso armamos tu perfil. Tus picks aparecen al final.
+                      {t("recommend.manualHint")}
                     </p>
                     <p className="font-mono text-[10px] uppercase leading-relaxed text-muted-foreground/60 mb-6 max-w-2xl">
-                      Ojo: acá solo sabemos de las pelis que puntúes en esta lista, así que
-                      algún pick puede ser una que ya viste. Si tenés Letterboxd, el .zip
-                      evita eso.
+                      {t("recommend.manualWarning")}
                     </p>
 
                     <div className="flex items-baseline justify-between gap-4 mb-4 flex-wrap">
@@ -849,7 +840,7 @@ export default function Recommend() {
                         <span className={manualCount >= MIN_MANUAL_RATINGS ? "text-accent" : ""}>
                           {manualCount}
                         </span>{" "}
-                        / {MIN_MANUAL_RATINGS} puntuadas
+                        / {MIN_MANUAL_RATINGS} {t("recommend.ratedSuffix")}
                       </div>
                       <div className="flex gap-0">
                         <button
@@ -860,7 +851,7 @@ export default function Recommend() {
                               : "border-foreground/20 hover:border-foreground"
                           }`}
                         >
-                          Grilla
+                          {t("recommend.viewGrid")}
                         </button>
                         <button
                           onClick={() => setRatingView("swipe")}
@@ -870,7 +861,7 @@ export default function Recommend() {
                               : "border-foreground/20 hover:border-foreground"
                           }`}
                         >
-                          Una por una
+                          {t("recommend.viewSwipe")}
                         </button>
                       </div>
                     </div>
@@ -880,7 +871,7 @@ export default function Recommend() {
                       <input
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
-                        placeholder="¿Viste otra? Buscala por nombre…"
+                        placeholder={t("recommend.searchPlaceholder")}
                         className="w-full bg-transparent border-b-2 border-foreground py-3 font-mono text-sm placeholder:text-muted-foreground focus:outline-none focus:border-accent"
                       />
                     </div>
@@ -902,7 +893,7 @@ export default function Recommend() {
                         />
                       ) : (
                         <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground py-6">
-                          Sin resultados para "{searchQuery.trim()}".
+                          {t("recommend.searchEmpty", { query: searchQuery.trim() })}
                         </p>
                       )
                     ) : loadingTitles ? (
@@ -927,11 +918,10 @@ export default function Recommend() {
             {step === 2 && (
               <section>
                 <h2 className="text-3xl font-black uppercase tracking-tighter mb-3">
-                  ¿Qué querés ver hoy?
+                  {t("recommend.step2Title")}
                 </h2>
                 <p className="font-serif italic text-lg text-muted-foreground mb-8 max-w-2xl">
-                  Todos los modos usan tu perfil — lo que cambia es desde dónde arranca la
-                  búsqueda.
+                  {t("recommend.step2Intro")}
                 </p>
 
                 <div className="space-y-3 max-w-2xl">
@@ -941,8 +931,8 @@ export default function Recommend() {
                       (option.mode === "recent" && importMethod === "manual");
                     const disabledReason =
                       option.mode === "watchlist"
-                        ? "Solo con .zip: la watchlist no viene por las otras vías."
-                        : "Necesita fechas de visto, que el modo sin cuenta no tiene.";
+                        ? t("recommend.modeWatchlistDisabled")
+                        : t("recommend.modeRecentDisabled");
                     return (
                       <button
                         key={option.mode}
@@ -956,14 +946,14 @@ export default function Recommend() {
                       >
                         <div className="font-mono text-xs uppercase tracking-widest mb-1">
                           <span className="text-accent mr-2">{mode === option.mode ? "●" : "○"}</span>
-                          {option.label}
+                          {t(option.labelKey)}
                         </div>
                         <div
                           className={`font-serif italic text-sm ${
                             mode === option.mode ? "text-background/70" : "text-muted-foreground"
                           }`}
                         >
-                          {disabled ? disabledReason : option.desc}
+                          {disabled ? disabledReason : t(option.descKey)}
                         </div>
                       </button>
                     );
@@ -973,7 +963,10 @@ export default function Recommend() {
                 {mode === "genres" && (
                   <div className="mt-6 max-w-2xl">
                     <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-3">
-                      {selectedGenres.length}/{MAX_SELECTED_OPTIONS} elegidas
+                      {t("recommend.picksSelected", {
+                        n: selectedGenres.length,
+                        max: MAX_SELECTED_OPTIONS,
+                      })}
                     </p>
                     {Object.entries(
                       // agrupar preservando el orden en que llegan del backend,
@@ -985,7 +978,7 @@ export default function Recommend() {
                     ).map(([group, options]) => (
                       <div key={group} className="mb-5">
                         <h3 className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-2">
-                          {PICK_GROUP_LABELS[group] ?? group}
+                          {PICK_GROUP_LABEL_KEYS[group] ? t(PICK_GROUP_LABEL_KEYS[group]) : group}
                         </h3>
                         <div className="flex flex-wrap gap-2">
                           {options.map((option) => {
@@ -1012,7 +1005,9 @@ export default function Recommend() {
                   </div>
                 )}
                 {mode === "genres" && selectedGenres.length === 0 && (
-                  <p className="font-mono text-[10px] text-destructive mt-3">Elegí al menos una opción.</p>
+                  <p className="font-mono text-[10px] text-destructive mt-3">
+                    {t("recommend.pickAtLeastOne")}
+                  </p>
                 )}
               </section>
             )}
@@ -1020,28 +1015,29 @@ export default function Recommend() {
             {step === 3 && (
               <section>
                 <h2 className="text-3xl font-black uppercase tracking-tighter mb-3">
-                  ¿Películas, series o ambas?
+                  {t("recommend.step3Title")}
                 </h2>
                 <p className="font-serif italic text-lg text-muted-foreground mb-8 max-w-2xl">
-                  Último paso. Elegí el formato y pedí tus picks.
+                  {t("recommend.step3Intro")}
                 </p>
 
                 <div className="flex gap-0 max-w-xl mb-8">
                   {kindFilterOptions.map((option) => (
                     <button key={option.value} onClick={() => setKindFilter(option.value)} className={tabCls(kindFilter === option.value)}>
-                      {option.label}
+                      {t(option.labelKey)}
                     </button>
                   ))}
                 </div>
 
                 <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-8">
-                  Fuente:{" "}
+                  {t("recommend.recapSource")}{" "}
                   {importMethod === "zip"
                     ? `.zip (${zipFile?.name ?? ""})`
                     : importMethod === "username"
                       ? `@${letterboxdUsername.trim()}`
-                      : `${manualCount} pelis puntuadas`}{" "}
-                  · Modo: {modeOptions.find((o) => o.mode === mode)?.label}
+                      : t("recommend.recapManualCount", { n: manualCount })}{" "}
+                  · {t("recommend.recapMode")}{" "}
+                  {t(modeOptions.find((o) => o.mode === mode)?.labelKey ?? "")}
                   {mode === "genres" &&
                     ` (${selectedGenres
                       .map((k) => pickOptions.find((g) => g.key === k)?.label)
@@ -1053,20 +1049,11 @@ export default function Recommend() {
                     lugar donde el usuario está por pedirlos */}
                 <details className="max-w-2xl mb-4 border border-foreground/20">
                   <summary className="cursor-pointer px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-muted-foreground hover:text-accent transition-colors">
-                    ¿Cómo se calculan tus picks?
+                    {t("recommend.howSummary")}
                   </summary>
                   <div className="px-4 pb-4 font-serif text-sm leading-relaxed space-y-2">
-                    <p>
-                      Armamos tu perfil con lo que puntuaste: géneros, directores, décadas y
-                      tags de lo que amaste y lo que odiaste. Con eso buscamos candidatos en
-                      TMDb y los puntuamos contra tu perfil — cada pick trae la razón
-                      concreta del match, no un promedio global.
-                    </p>
-                    <p>
-                      Arriba de eso, un agente de IA revisa los candidatos y reescribe las
-                      razones citando películas reales de tu historial. Tu feedback (ya la
-                      vi / no me interesa) entra al cálculo de la próxima tanda.
-                    </p>
+                    <p>{t("recommend.howP1")}</p>
+                    <p>{t("recommend.howP2")}</p>
                   </div>
                 </details>
               </section>
@@ -1097,7 +1084,7 @@ export default function Recommend() {
                     disabled={step === 1 ? !hasSource : !step2Valid}
                     className="px-8 py-4 bg-foreground text-background font-mono text-xs uppercase tracking-widest hover:bg-accent hover:text-accent-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                   >
-                    Continuar →
+                    {t("recommend.continue")}
                   </button>
                 ) : (
                   <button
@@ -1105,7 +1092,7 @@ export default function Recommend() {
                     disabled={loading || !canGenerate}
                     className="px-8 py-4 bg-accent text-accent-foreground font-mono text-xs uppercase tracking-widest hover:bg-foreground hover:text-background transition-colors disabled:opacity-60"
                   >
-                    Dame mis recomendaciones
+                    {t("recommend.generate")}
                   </button>
                 )}
               </div>
@@ -1116,9 +1103,11 @@ export default function Recommend() {
         {loading && (
           <div className="py-20 text-center">
             <Loader2 className="w-7 h-7 text-accent animate-spin mx-auto mb-6" />
-            <h3 className="text-2xl font-black uppercase tracking-tighter mb-3">Buscando tus pelis...</h3>
+            <h3 className="text-2xl font-black uppercase tracking-tighter mb-3">
+              {t("recommend.loadingTitle")}
+            </h3>
             <p className="font-mono text-xs uppercase text-muted-foreground max-w-sm mx-auto">
-              Leyendo tu historial y buscando candidatos que encajen con tu gusto.
+              {t("recommend.loadingBody")}
             </p>
           </div>
         )}
@@ -1135,7 +1124,7 @@ export default function Recommend() {
             <div className="mb-12">
               <div className="flex items-center gap-4 flex-wrap">
                 <span className="font-mono text-xs px-2 py-1 border border-foreground/20 shrink-0">
-                  [Resultados · {result.recommendations.length}]
+                  {t("recommend.resultsBadge", { n: result.recommendations.length })}
                 </span>
                 <div className="h-px flex-grow bg-foreground/10 min-w-8" />
                 <div className="flex gap-4 shrink-0">
@@ -1143,7 +1132,7 @@ export default function Recommend() {
                     onClick={handleGenerate}
                     className="font-mono text-[10px] uppercase tracking-widest hover:text-accent transition-colors"
                   >
-                    ↻ Nuevos picks
+                    {t("recommend.newPicks")}
                   </button>
                   <button
                     onClick={() => {
@@ -1152,7 +1141,7 @@ export default function Recommend() {
                     }}
                     className="font-mono text-[10px] uppercase tracking-widest hover:text-accent transition-colors"
                   >
-                    Cambiar búsqueda
+                    {t("recommend.changeSearch")}
                   </button>
                 </div>
               </div>

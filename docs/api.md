@@ -174,8 +174,29 @@ mood: psychological           (opcional, legacy — sesga qué página de TMDb s
 mode: profile | recent | genres   (default: profile)
 kind_filter: movie | series | both   (default: both)
 genres: "action,romance"      (obligatorio si mode=genres, claves separadas por coma)
+lang: es | en                 (default: es — idioma de los "why" y el taste_summary)
 file: <el .zip como binario>
 ```
+
+### `lang` (agregado 2026-08-06)
+
+Define el idioma de los textos generados: el `why` de cada pick y el
+`taste_summary`. Lo aceptan todos los endpoints que devuelven esos campos —
+`/recommend/zip`, `/recommend/letterboxd` (form field), `/recommend/manual`,
+`/recommend/profile` (campo del JSON), y `/weekly`, `/titles/{id}/verdict`,
+`/recommend/sessions/{id}/refine` (query param). Cualquier valor que no sea
+`en` cae a `es`.
+
+Cubre los dos caminos, no solo el del LLM: `llm_client` arma sus prompts con
+la voz y las reglas de escritura en el idioma pedido, y `recommender` tiene
+su propio vocabulario de frases y plantillas por idioma para el `why`
+heurístico (el que se muestra sin sesión, cuando el LLM falla, y en los picks
+que el LLM no llega a cubrir).
+
+El idioma **es parte de la clave de caché** de los dos caches del
+`llm_client` (`_REFINE_CACHE` y `_VERDICT_CACHE`). Sin eso, el primer usuario
+que pide `/weekly` en español dejaría cacheado ese resultado y el siguiente
+que lo pide en inglés recibiría los `why` en español.
 
 `mode` controla de dónde sale la señal de gusto para puntuar candidatos:
 

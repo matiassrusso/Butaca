@@ -584,3 +584,41 @@ def test_series_still_lose_the_tiebreak_against_movies_in_a_mixed_pool() -> None
 
     by_title = {item.title: item.match_score for item in response.recommendations}
     assert by_title["Peli"] > by_title["Serie"]
+
+
+def test_heuristic_why_and_summary_are_written_in_english_when_asked() -> None:
+    # el why heurístico se muestra sin sesión, cuando el LLM falla, y en los
+    # picks que el LLM no cubre — sin traducirlo, la página en inglés mostraba
+    # texto en español en todos esos casos (pedido de Matías, 2026-08-06).
+    catalog = [{"title": "Dark One", "year": 2020, "kind": "movie", "tags": ["dark", "slow"]}]
+    ratings = [RatedItem(title="Vieja", rating=5, review="dark and slow")]
+
+    response = recommend(ratings=ratings, mood="", catalog=catalog, min_score=0, lang="en")
+
+    why = response.recommendations[0].why.lower()
+    assert "leans into" in why
+    assert "tira para" not in why
+    assert "Your history" in response.taste_summary
+
+
+def test_heuristic_why_stays_in_spanish_by_default() -> None:
+    # el default no puede moverse: todo el sitio sigue siendo español salvo
+    # que el frontend pida lo contrario explícitamente
+    catalog = [{"title": "Dark One", "year": 2020, "kind": "movie", "tags": ["dark", "slow"]}]
+    ratings = [RatedItem(title="Vieja", rating=5, review="dark and slow")]
+
+    response = recommend(ratings=ratings, mood="", catalog=catalog, min_score=0)
+
+    assert "tira para" in response.recommendations[0].why.lower()
+    assert "Tu historial" in response.taste_summary
+
+
+def test_unknown_lang_falls_back_to_spanish() -> None:
+    # el lang viaja desde el frontend (query param / form field), así que un
+    # valor basura no puede tirar un KeyError en el motor de scoring
+    catalog = [{"title": "Dark One", "year": 2020, "kind": "movie", "tags": ["dark"]}]
+
+    response = recommend(ratings=[], mood="", catalog=catalog, min_score=0, lang="pt-BR")
+
+    assert response.recommendations
+    assert "Todavía no tengo historial" in response.taste_summary

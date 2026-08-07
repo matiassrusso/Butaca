@@ -4,6 +4,7 @@ import { toast } from "sonner";
 
 import { MovieModal, type Recommendation } from "@/components/MovieModal";
 import { API_BASE_URL, useAuth } from "@/hooks/useAuth";
+import { useLang } from "@/lib/i18n";
 
 // Pedido de Matías (2026-07-31): "un buscador arriba a la derecha, para que el
 // usuario pueda buscar CUALQUIER película o serie, y que Butaca le calcule la
@@ -26,6 +27,7 @@ const DEBOUNCE_MS = 300;
 
 export function SearchBox() {
   const { token } = useAuth();
+  const { t, lang } = useLang();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [open, setOpen] = useState(false);
@@ -96,7 +98,7 @@ export function SearchBox() {
     setVerdictFor(item.tmdb_id);
     try {
       const response = await fetch(
-        `${API_BASE_URL}/titles/${item.tmdb_id}/verdict?kind=${encodeURIComponent(item.kind)}`,
+        `${API_BASE_URL}/titles/${item.tmdb_id}/verdict?kind=${encodeURIComponent(item.kind)}&lang=${lang}`,
         { headers: { Authorization: `Bearer ${token}` } },
       );
       if (!response.ok) throw new Error();
@@ -108,7 +110,7 @@ export function SearchBox() {
       // cinco de Spider-Man obligaba a re-escribir "spiderman" cinco veces.
       // Se limpia con la X o vaciando el input, no sola.
     } catch {
-      toast.error("No pude analizar ese título.");
+      toast.error(t("modal.verdictError"));
     } finally {
       setVerdictFor(null);
     }
@@ -123,8 +125,8 @@ export function SearchBox() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onFocus={() => results.length > 0 && setOpen(true)}
-            placeholder="Buscar peli o serie…"
-            aria-label="Buscar cualquier película o serie"
+            placeholder={t("search.placeholder")}
+            aria-label={t("search.aria")}
             className="w-40 lg:w-56 bg-transparent font-mono text-[10px] uppercase tracking-widest placeholder:text-muted-foreground focus:outline-none"
           />
           {searching && <Loader2 className="w-3.5 h-3.5 animate-spin text-accent shrink-0" />}
@@ -136,7 +138,7 @@ export function SearchBox() {
                 setResults([]);
                 setOpen(false);
               }}
-              aria-label="Limpiar búsqueda"
+              aria-label={t("modal.clearSearch")}
               className="shrink-0 text-muted-foreground hover:text-accent transition-colors"
             >
               <X className="w-3.5 h-3.5" />
@@ -148,7 +150,7 @@ export function SearchBox() {
           <div className="absolute right-0 mt-2 w-80 max-h-96 overflow-y-auto border-2 border-foreground bg-background shadow-xl">
             {results.length === 0 ? (
               <p className="px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                Sin resultados
+                {t("search.noResults")}
               </p>
             ) : (
               results.map((item) => (
@@ -169,7 +171,7 @@ export function SearchBox() {
                     <span className="block text-sm truncate">{item.title}</span>
                     <span className="block font-mono text-[9px] uppercase text-muted-foreground">
                       {item.year}
-                      {item.kind === "series" ? " · Serie" : ""}
+                      {item.kind === "series" ? ` · ${t("common.show")}` : ""}
                     </span>
                   </span>
                   {verdictFor === item.tmdb_id && (
@@ -180,7 +182,7 @@ export function SearchBox() {
             )}
             {verdictFor != null && (
               <p className="px-4 py-2 border-t border-foreground/10 font-mono text-[9px] uppercase tracking-widest text-muted-foreground">
-                Calculando qué tanto va con vos…
+                {t("search.verdictLoading")}
               </p>
             )}
           </div>
@@ -212,13 +214,13 @@ export function SearchBox() {
               if (!response.ok) throw new Error();
               const body = await response.json();
               if (body.status === "preserved") {
-                toast.info(`Tu ${body.rating}/5 de Letterboxd tiene prioridad. Cambialo ahí y volvé a importar.`);
+                toast.info(t("modal.ratePreserved", { n: body.rating }));
                 return true;
               }
-              toast.success(`Guardado en tu perfil: ${finalTitle}`);
+              toast.success(t("modal.rateSaved", { title: finalTitle }));
               return true;
             } catch {
-              toast.error("No se pudo guardar el puntaje.");
+              toast.error(t("modal.rateError"));
               return false;
             }
           }}

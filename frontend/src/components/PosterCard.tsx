@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 
 import type { FeedbackStatus, Recommendation } from "@/components/MovieModal";
 import { useTiltCard } from "@/hooks/useTiltCard";
+import { useLang } from "@/lib/i18n";
 import { isUnknownMatch } from "@/lib/match";
 
 // Pedido de Matías (2026-07-31): "la idea es que siempre sea lo mismo no
@@ -37,6 +38,7 @@ export function PosterCard({
   // esquina (home, archivo)
   featured?: boolean;
 }) {
+  const { t } = useLang();
   const { wrapRef, onMouseMove, onMouseLeave } = useTiltCard();
   const poster = rec.poster_path ?? rec.backdrop_path;
   const unknown = isUnknownMatch(rec.match_score);
@@ -45,7 +47,7 @@ export function PosterCard({
     <button
       type="button"
       onClick={onSelect}
-      aria-label={`Ver detalle de ${rec.title}`}
+      aria-label={t("modal.viewDetail", { title: rec.title })}
       className="animate-reveal text-left group block w-full focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
       style={{ animationDelay: `${index * 100}ms`, perspective: "1000px" }}
     >
@@ -83,10 +85,10 @@ export function PosterCard({
             <div
               className="absolute -top-3 -right-3 size-16 bg-accent flex items-center justify-center text-accent-foreground font-mono font-bold shadow-2xl shadow-accent/30 ring-1 ring-background/40"
               style={{ transform: "translateZ(40px)" }}
-              title={unknown ? "Match desconocido: todavía no hay evidencia real en tu perfil" : undefined}
+              title={unknown ? t("modal.unknownMatchHint") : undefined}
             >
               {unknown ? (
-                <span className="text-xs leading-tight text-center">S/D</span>
+                <span className="text-xs leading-tight text-center">{t("match.unknownShort")}</span>
               ) : (
                 <span className="text-lg">{rec.match_score}%</span>
               )}
@@ -95,15 +97,15 @@ export function PosterCard({
             <div
               className="absolute top-2 right-2 px-2 py-1 bg-accent text-accent-foreground font-mono text-xs font-bold"
               style={{ transform: "translateZ(40px)" }}
-              title={unknown ? "Match desconocido: todavía no hay evidencia real en tu perfil" : undefined}
+              title={unknown ? t("modal.unknownMatchHint") : undefined}
             >
-              {unknown ? "Match desconocido" : `${rec.match_score}% match`}
+              {unknown ? t("match.unknown") : `${rec.match_score}% match`}
             </div>
           ))}
 
         {rec.kind === "series" && (
           <span className="absolute top-3 left-3 font-mono text-[10px] uppercase px-2 py-1 bg-background border border-foreground/20">
-            Serie
+            {t("common.show")}
           </span>
         )}
 
@@ -118,9 +120,9 @@ export function PosterCard({
         {!rec.refined && (
           <span
             className="absolute bottom-3 right-3 font-mono text-[9px] uppercase px-1.5 py-1 bg-background border border-foreground/20 text-muted-foreground"
-            title="Elegido por el motor de recomendación, sin pasar por la IA"
+            title={t("modal.heuristicHint")}
           >
-            heurístico
+            {t("modal.heuristic")}
           </span>
         )}
       </div>

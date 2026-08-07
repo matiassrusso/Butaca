@@ -580,7 +580,7 @@ def test_recommend_zip_carries_poster_and_overview_fields(monkeypatch) -> None:
 def test_recommend_zip_uses_llm_refinement_when_configured(monkeypatch) -> None:
     monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
 
-    def fake_refine(ratings, mood, heuristic):
+    def fake_refine(ratings, mood, heuristic, lang="es"):
         picked = heuristic.recommendations[0].model_copy(update={"why": "elegido por el agente"})
         return heuristic.model_copy(
             update={"taste_summary": "resumen del agente", "recommendations": [picked]}
@@ -602,7 +602,7 @@ def test_recommend_zip_uses_llm_refinement_when_configured(monkeypatch) -> None:
 def test_recommend_zip_falls_back_to_heuristic_when_llm_fails(monkeypatch) -> None:
     monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
 
-    def raise_llm_error(ratings, mood, heuristic):
+    def raise_llm_error(ratings, mood, heuristic, lang="es"):
         raise LlmError("boom")
 
     monkeypatch.setattr("backend.app.main.llm_client.refine_recommendations", raise_llm_error)
@@ -657,7 +657,7 @@ def test_recommend_zip_filled_with_old_still_respects_match_floor(monkeypatch) -
     )
     headers = _auth_headers("floorfilledold")
 
-    def fake_predict(user_id, ratings, heuristic):
+    def fake_predict(user_id, ratings, heuristic, lang="es"):
         picks = [
             rec.model_copy(update={"match_score": 35 if i == 0 else rec.match_score})
             for i, rec in enumerate(heuristic.recommendations)
@@ -1366,7 +1366,7 @@ def test_recommend_fills_partial_pool_after_recent_exclusions(monkeypatch) -> No
 def test_recommend_zip_refine_false_skips_llm(monkeypatch) -> None:
     monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
 
-    def boom(ratings, mood, heuristic):
+    def boom(ratings, mood, heuristic, lang="es"):
         raise AssertionError("LLM must not run when refine=0")
 
     monkeypatch.setattr("backend.app.main.llm_client.refine_recommendations", boom)
@@ -1393,7 +1393,7 @@ def test_refine_session_applies_llm_and_persists(monkeypatch) -> None:
     # devuelve solo los que el LLM eligió — los demás se quedaban con el why
     # heurístico persistido para siempre (bug reportado por Matías en
     # "Current picks" de la home, 2026-07-31).
-    def fake_predict(user_id, ratings, heuristic):
+    def fake_predict(user_id, ratings, heuristic, lang="es"):
         picks = [
             rec.model_copy(update={"why": f"razón del agente {i}"})
             for i, rec in enumerate(heuristic.recommendations)
@@ -2218,7 +2218,7 @@ def test_new_picks_keeps_available_unseen_titles_with_llm_enabled(monkeypatch) -
     )
     monkeypatch.setattr("backend.app.main.tmdb_client.fetch_candidates", lambda mood, pages=2: [])
 
-    def rank_by_match(ratings, mood, response):
+    def rank_by_match(ratings, mood, response, lang="es"):
         return response.model_copy(
             update={
                 "recommendations": sorted(
@@ -2232,7 +2232,7 @@ def test_new_picks_keeps_available_unseen_titles_with_llm_enabled(monkeypatch) -
     monkeypatch.setattr("backend.app.main.llm_client.refine_recommendations", rank_by_match)
     monkeypatch.setattr(
         "backend.app.main.llm_client.predict_fit",
-        lambda user_id, ratings, response: response,
+        lambda user_id, ratings, response, lang="es": response,
     )
     headers = _auth_headers("newpickschanges")
 
@@ -2523,7 +2523,7 @@ def test_weekly_uses_llm_prediction_when_configured(monkeypatch) -> None:
     # para otra cosa -- enriquecer tags -- que un patch global rompería)
     monkeypatch.setattr(
         "backend.app.main.llm_client.kickoff_verdict",
-        lambda user_id, ratings, heuristic: llm_client.predict_fit(user_id, ratings, heuristic),
+        lambda user_id, ratings, heuristic, lang="es": llm_client.predict_fit(user_id, ratings, heuristic, lang),
     )
 
     first = client.get("/weekly", headers=headers)
@@ -2543,7 +2543,7 @@ def test_weekly_falls_back_to_heuristic_when_llm_fails(monkeypatch) -> None:
         "backend.app.main.tmdb_client.fetch_weekly_trending", lambda: _WEEKLY_TRENDING
     )
 
-    def boom(user_id, ratings, heuristic):
+    def boom(user_id, ratings, heuristic, lang="es"):
         raise LlmError("boom")
 
     monkeypatch.setattr("backend.app.main.llm_client.predict_fit", boom)
@@ -2553,7 +2553,7 @@ def test_weekly_falls_back_to_heuristic_when_llm_fails(monkeypatch) -> None:
     # ver comentario en test_weekly_uses_llm_prediction_when_configured -- acá
     # además hay que replicar el try/except que kickoff_verdict hace en su
     # thread real, si no el LlmError se escapa sin capturar
-    def sync_kickoff(user_id, ratings, heuristic):
+    def sync_kickoff(user_id, ratings, heuristic, lang="es"):
         try:
             llm_client.predict_fit(user_id, ratings, heuristic)
         except LlmError:
@@ -2782,3 +2782,55 @@ def test_recommend_genres_mode_fetches_and_deduplicates_a_selected_movement(monk
     assert response.status_code == 200
     assert [item["title"] for item in response.json()["recommendations"]] == ["Pick"]
     assert "Crimen nocturno" in response.json()["recommendations"][0]["why"]
+
+
+def test_weekly_lang_en_returns_english_heuristic_text(monkeypatch) -> None:
+    # end-to-end por HTTP: el query param lang tiene que llegar hasta el motor
+    # heurístico, no solo hasta el prompt del LLM. Sin NVIDIA configurada este
+    # es EXACTAMENTE el camino que ve un visitante sin sesión.
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.fetch_weekly_trending", lambda: _WEEKLY_TRENDING
+    )
+
+    response = client.get("/weekly?lang=en")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "history" in body["taste_summary"].lower()
+    assert "historial" not in body["taste_summary"].lower()
+
+
+def test_weekly_defaults_to_spanish(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.fetch_weekly_trending", lambda: _WEEKLY_TRENDING
+    )
+
+    body = client.get("/weekly").json()
+
+    assert "historial" in body["taste_summary"].lower()
+
+
+def test_recommend_manual_passes_lang_through_to_the_llm(monkeypatch) -> None:
+    # el lang del body JSON tiene que llegar a refine_recommendations: si se
+    # pierde en el camino, la página en inglés muestra why en español.
+    monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
+    seen_langs = []
+
+    def spy_refine(ratings, mood, heuristic, lang="es"):
+        seen_langs.append(lang)
+        return heuristic
+
+    monkeypatch.setattr("backend.app.main.llm_client.refine_recommendations", spy_refine)
+    headers = _auth_headers("langpassthrough")
+
+    client.post(
+        "/recommend/manual",
+        headers=headers,
+        json={"ratings": _MANUAL_RATINGS, "lang": "en"},
+    )
+
+    assert seen_langs == ["en"]

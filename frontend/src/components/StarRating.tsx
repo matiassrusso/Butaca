@@ -1,16 +1,19 @@
 import { useState } from "react";
 
-const LABELS: Record<number, string> = {
-  0.5: "No te gustó nada",
-  1: "Muy mala",
-  1.5: "Mala",
-  2: "Floja",
-  2.5: "Regular",
-  3: "Te gustó",
-  3.5: "Te gustó bastante",
-  4: "Te gustó mucho",
-  4.5: "Te encantó",
-  5: "Una favorita",
+import { useLang } from "@/lib/i18n";
+
+// clave del diccionario por rating; el texto lo resuelve t() en el componente
+const LABEL_KEYS: Record<number, string> = {
+  0.5: "modal.star0_5",
+  1: "modal.star1",
+  1.5: "modal.star1_5",
+  2: "modal.star2",
+  2.5: "modal.star2_5",
+  3: "modal.star3",
+  3.5: "modal.star3_5",
+  4: "modal.star4",
+  4.5: "modal.star4_5",
+  5: "modal.star5",
 };
 
 const SIZES = {
@@ -31,7 +34,7 @@ export function StarRating({
   disabled = false,
   size = "md",
   showLabel = true,
-  label = "Tu rating",
+  label,
 }: {
   value?: number | null;
   onChange: (rating: number) => void;
@@ -40,6 +43,7 @@ export function StarRating({
   showLabel?: boolean;
   label?: string;
 }) {
+  const { t } = useLang();
   const [preview, setPreview] = useState<number | null>(null);
   const shown = preview ?? value ?? 0;
 
@@ -47,7 +51,7 @@ export function StarRating({
     <div className="text-center" onMouseLeave={() => setPreview(null)}>
       <div
         role="radiogroup"
-        aria-label={label}
+        aria-label={label ?? t("modal.yourRating")}
         className={`inline-flex items-center justify-center ${disabled ? "opacity-50" : ""}`}
       >
         {[0, 1, 2, 3, 4].map((index) => {
@@ -73,8 +77,14 @@ export function StarRating({
                     type="button"
                     role="radio"
                     aria-checked={value === rating}
-                    aria-label={`${formatRating(rating)} estrellas: ${LABELS[rating]}`}
-                    title={`${formatRating(rating)} estrellas · ${LABELS[rating]}`}
+                    aria-label={t("modal.starsAria", {
+                      n: formatRating(rating),
+                      label: t(LABEL_KEYS[rating]),
+                    })}
+                    title={t("modal.starsTitle", {
+                      n: formatRating(rating),
+                      label: t(LABEL_KEYS[rating]),
+                    })}
                     disabled={disabled}
                     onMouseEnter={() => setPreview(rating)}
                     onFocus={() => setPreview(rating)}
@@ -92,7 +102,9 @@ export function StarRating({
       </div>
       {showLabel && (
         <div className="mt-1 min-h-4 font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
-          {shown ? `${formatRating(shown)} estrellas · ${LABELS[shown]}` : "Elegí tu rating"}
+          {shown
+            ? t("modal.starsTitle", { n: formatRating(shown), label: t(LABEL_KEYS[shown]) })
+            : t("modal.pickRating")}
         </div>
       )}
     </div>

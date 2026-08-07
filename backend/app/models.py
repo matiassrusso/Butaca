@@ -42,6 +42,7 @@ class ManualRecommendRequest(BaseModel):
     kind_filter: str = "both"
     genres: str = ""
     refine: bool = True
+    lang: str = "es"
 
 
 class ProfileRecommendRequest(BaseModel):
@@ -52,6 +53,7 @@ class ProfileRecommendRequest(BaseModel):
     kind_filter: str = "both"
     genres: str = ""
     refine: bool = True
+    lang: str = "es"
 
 
 class OnboardingTitle(BaseModel):

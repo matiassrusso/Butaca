@@ -193,11 +193,122 @@ TAG_PHRASES: dict[str, str] = {
 }
 
 
-def _tag_phrases(tags: set[str], extra_phrases: dict[str, str] | None = None) -> str:
-    phrases = [(extra_phrases or {}).get(tag, TAG_PHRASES.get(tag, tag)) for tag in sorted(tags)]
+# Variante en inglés del vocabulario de arriba (pedido de Matías, 2026-08-06:
+# toggle ES/EN en toda la página). Solo cubre la SALIDA visible; los tags en sí
+# siguen siendo las mismas claves internas en los dos idiomas, así que el
+# scoring, POSITIVE_HINTS y todo lo que matchea no se toca.
+TAG_PHRASES_EN: dict[str, str] = {
+    "slow": "the unhurried pace",
+    "quiet": "how quiet it is",
+    "melancholic": "the melancholy",
+    "intimate": "how intimate it is",
+    "psychological": "the psychological side",
+    "mysterious": "the mystery",
+    "dark": "the dark tone",
+    "action": "the action",
+    "kinetic": "the breakneck pace",
+    "blockbuster": "the blockbuster scale",
+    "romantic": "the romantic streak",
+    "funny": "the humor",
+    "light": "the light tone",
+    "sharp": "how sharp it is",
+    "loud": "the intensity",
+    "character": "the focus on characters",
+    "stylized": "how visually stylized it is",
+    "dialogue-heavy": "the long stretches of dialogue",
+    "walking": "the long walks",
+    "thriller": "the thriller side",
+    "architectural": "the architecture",
+    "drama": "the drama",
+    "indie": "the indie spirit",
+    "restless": "the restlessness",
+    "existential": "the existential streak",
+    "sad": "the sadness",
+    "prestige": "the prestige craft",
+    "mystery": "the mystery",
+    "messy": "the emotional mess",
+    "heist": "the planned heist",
+    "true-story": "the true story behind it",
+    "time-travel": "the time travel",
+    "coming-of-age": "the coming of age",
+    "revenge": "the revenge",
+    "single-location": "everything happening in one place",
+    "road-trip": "the road trip",
+    "hitman": "the hitman angle",
+    "dystopian": "the dystopian future",
+    "found-footage": "the found footage",
+    "dark-comedy": "the dark comedy",
+    "neo-noir": "the neo-noir",
+    "folk-horror": "the folk horror roots",
+    "survival": "the survival stakes",
+    "on-the-run": "the constant running",
+    "revisionist-western": "the revisionist western",
+    "documentary": "the documentary side",
+    "mind-bending": "how much it bends your head",
+    "heartwarming": "how endearing it is",
+    "gothic": "the gothic tone",
+    "lowbrow": "the crude humor",
+    "harrowing": "the sustained dread",
+    "schlock": "the B-movie abandon",
+    "urban": "the urban pulse",
+    "tween": "the teenage lens",
+}
+
+_TAG_PHRASES_BY_LANG = {"es": TAG_PHRASES, "en": TAG_PHRASES_EN}
+# plantillas del "why" heurístico — el que se muestra sin sesión, cuando el LLM
+# falla, y en los picks que el LLM no cubre. {} se rellenan en el mismo orden
+# que en la construcción de `reasons` más abajo.
+_WHY_TEMPLATES = {
+    "es": {
+        "join": " y ",
+        "and": ", y ",
+        "positive_ref": "tira para {phrase}, como lo que valoraste en «{reference}»",
+        "positive": "tira para {phrase}, que es lo que venís premiando",
+        "mood": "tiene {phrase}, la vibra '{mood}' que pediste hoy",
+        "genre": "cae dentro de {phrase}, el género que elegiste",
+        "director": "la dirige {director}, uno de tus directores más repetidos",
+        "actors": "tiene a {actors}, que ya te viene gustando",
+        "decade": "es de los {decade}s, la década que más consumís",
+        "fallback_tags": "es una apuesta distinta, con aire a {phrase}, para ampliar tu mapa",
+        "fallback": "es una apuesta distinta para ampliar tu mapa",
+        "summary_empty": "Todavía no tengo historial suficiente, así que arranco con picks bastante amplios.",
+        "summary_loved": "Tu historial tira más a cine de autor, personajes marcados y algo de riesgo controlado.",
+        "summary_disliked": "Tu historial parece castigar lo pretencioso y premiar cosas más directas o efectivas.",
+        "summary_mood": "{base} Hoy además buscás algo con vibra '{mood}'.",
+    },
+    "en": {
+        "join": " and ",
+        "and": ", and ",
+        # comillas rectas, no «»: las angulares son tipografía española
+        "positive_ref": "leans into {phrase}, the same thing you valued in \"{reference}\"",
+        "positive": "leans into {phrase}, which is what you keep rewarding",
+        "mood": "has {phrase}, the '{mood}' vibe you asked for today",
+        "genre": "falls under {phrase}, the genre you picked",
+        "director": "is directed by {director}, one of your most repeated directors",
+        "actors": "has {actors}, who you've been liking lately",
+        "decade": "is from the {decade}s, the decade you watch most",
+        "fallback_tags": "is a different bet, with a hint of {phrase}, to widen your map",
+        "fallback": "is a different bet, to widen your map",
+        "summary_empty": "I don't have enough history yet, so I'm starting with fairly broad picks.",
+        "summary_loved": "Your history leans toward auteur cinema, strong characters and some controlled risk.",
+        "summary_disliked": "Your history seems to punish the pretentious and reward things that are more direct or effective.",
+        "summary_mood": "{base} Today you're also after something with a '{mood}' vibe.",
+    },
+}
+
+
+def normalize_lang(lang: str) -> str:
+    return "en" if lang == "en" else "es"
+
+
+def _tag_phrases(
+    tags: set[str], extra_phrases: dict[str, str] | None = None, lang: str = "es"
+) -> str:
+    table = _TAG_PHRASES_BY_LANG[normalize_lang(lang)]
+    phrases = [(extra_phrases or {}).get(tag, table.get(tag, tag)) for tag in sorted(tags)]
     if len(phrases) == 1:
         return phrases[0]
-    return ", ".join(phrases[:-1]) + " y " + phrases[-1]
+    return ", ".join(phrases[:-1]) + _WHY_TEMPLATES[normalize_lang(lang)]["join"] + phrases[-1]
 
 
 def _profile_signals(profile: dict | None) -> tuple[set[str], set[str], int | None]:
@@ -253,20 +364,21 @@ def positive_tags_from_text(text: str) -> set[str]:
     return tags
 
 
-def summarize_taste(ratings: list[RatedItem], mood: str) -> str:
+def summarize_taste(ratings: list[RatedItem], mood: str, lang: str = "es") -> str:
+    templates = _WHY_TEMPLATES[normalize_lang(lang)]
     loved = [item for item in ratings if item.rating >= 4]
     disliked = [item for item in ratings if item.rating <= 2.5]
 
     if not ratings:
-        base = "Todavía no tengo historial suficiente, así que arranco con picks bastante amplios."
+        base = templates["summary_empty"]
     elif len(loved) >= len(disliked):
-        base = "Tu historial tira más a cine de autor, personajes marcados y algo de riesgo controlado."
+        base = templates["summary_loved"]
     else:
-        base = "Tu historial parece castigar lo pretencioso y premiar cosas más directas o efectivas."
+        base = templates["summary_disliked"]
 
     mood_text = _normalize(mood)
     if mood_text:
-        return capitalize_sentence(f"{base} Hoy además buscás algo con vibra '{mood_text}'.")
+        return capitalize_sentence(templates["summary_mood"].format(base=base, mood=mood_text))
     return capitalize_sentence(base)
 
 
@@ -375,7 +487,10 @@ def recommend(
     min_score: int = MIN_MATCH_SCORE,
     extra_phrases: dict[str, str] | None = None,
     pairwise_win_counts: dict[str, int] | None = None,
+    lang: str = "es",
 ) -> RecommendResponse:
+    lang = normalize_lang(lang)
+    templates = _WHY_TEMPLATES[lang]
     taste_ratings = ratings if preference_ratings is None else preference_ratings
     positive_tags, negative_tags = _collect_preference_tags(taste_ratings)
     # aplanado solo para el filtro duro y el "why" — el conteo de evidencia y
@@ -491,21 +606,29 @@ def recommend(
             # cap how many tags get named: a broad taste profile can match
             # most of a movie's tags at once, and citing all of them reads as
             # a generic tag dump instead of a specific reason
-            phrase = _tag_phrases(set(sorted(matched_positive)[:3]), extra_phrases)
+            phrase = _tag_phrases(set(sorted(matched_positive)[:3]), extra_phrases, lang)
             if reference:
-                reasons.append(f"tira para {phrase}, como lo que valoraste en «{reference}»")
+                reasons.append(templates["positive_ref"].format(phrase=phrase, reference=reference))
             else:
-                reasons.append(f"tira para {phrase}, que es lo que venís premiando")
+                reasons.append(templates["positive"].format(phrase=phrase))
         if matched_mood:
-            reasons.append(f"tiene {_tag_phrases(matched_mood, extra_phrases)}, la vibra '{mood_text}' que pediste hoy")
+            reasons.append(
+                templates["mood"].format(
+                    phrase=_tag_phrases(matched_mood, extra_phrases, lang), mood=mood_text
+                )
+            )
         if matched_genre:
-            reasons.append(f"cae dentro de {_tag_phrases(matched_genre, extra_phrases)}, el género que elegiste")
+            reasons.append(
+                templates["genre"].format(
+                    phrase=_tag_phrases(matched_genre, extra_phrases, lang)
+                )
+            )
         if matched_director:
-            reasons.append(f"la dirige {matched_director}, uno de tus directores más repetidos")
+            reasons.append(templates["director"].format(director=matched_director))
         if matched_actors:
-            reasons.append(f"tiene a {', '.join(sorted(matched_actors))}, que ya te viene gustando")
+            reasons.append(templates["actors"].format(actors=", ".join(sorted(matched_actors))))
         if matched_decade:
-            reasons.append(f"es de los {top_decade}s, la década que más consumís")
+            reasons.append(templates["decade"].format(decade=top_decade))
         if not reasons:
             # bug found while adding director/actor scoring: a candidate with
             # genuinely no tags at all (possible for a hand-authored catalog
@@ -514,10 +637,10 @@ def recommend(
             # empty set — falls back to a tag-free sentence instead of crashing.
             candidate_tags = set(item["tags"][:3]) or tags
             if candidate_tags:
-                own_phrase = _tag_phrases(candidate_tags, extra_phrases)
-                reasons.append(f"es una apuesta distinta, con aire a {own_phrase}, para ampliar tu mapa")
+                own_phrase = _tag_phrases(candidate_tags, extra_phrases, lang)
+                reasons.append(templates["fallback_tags"].format(phrase=own_phrase))
             else:
-                reasons.append("es una apuesta distinta para ampliar tu mapa")
+                reasons.append(templates["fallback"])
 
         scored.append(
             (
@@ -527,7 +650,7 @@ def recommend(
                     title=item["title"],
                     year=item["year"],
                     kind=item["kind"],
-                    why=capitalize_sentence(", y ".join(reasons) + "."),
+                    why=capitalize_sentence(templates["and"].join(reasons) + "."),
                     match_score=match_score,
                     tags=item["tags"],
                     director=item.get("director"),
@@ -553,6 +676,6 @@ def recommend(
         picks = _pick_with_exploration(scored, limit=limit)
 
     return RecommendResponse(
-        taste_summary=summarize_taste(taste_ratings, mood),
+        taste_summary=summarize_taste(taste_ratings, mood, lang),
         recommendations=picks,
     )

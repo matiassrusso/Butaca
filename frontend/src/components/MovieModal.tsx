@@ -3,6 +3,7 @@ import { useEffect, useState, type MutableRefObject } from "react";
 import { createPortal } from "react-dom";
 
 import { API_BASE_URL } from "@/hooks/useAuth";
+import { useLang } from "@/lib/i18n";
 import { isUnknownMatch } from "@/lib/match";
 import { StarRating } from "@/components/StarRating";
 
@@ -110,6 +111,7 @@ function DisagreePanel({
   onRate: (rating: number, title: string, tmdbId: number | null) => Promise<boolean>;
   onEnoughVotes: () => void;
 }) {
+  const { t } = useLang();
   const [pool, setPool] = useState<SimilarTitle[] | null>(null);
   const [index, setIndex] = useState(0);
   const [votes, setVotes] = useState(0);
@@ -169,7 +171,7 @@ function DisagreePanel({
     return (
       <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
         <Loader2 className="w-3.5 h-3.5 animate-spin" />
-        Buscando parecidas...
+        {t("modal.similarLoading")}
       </div>
     );
   }
@@ -183,16 +185,18 @@ function DisagreePanel({
     return (
       <div className="space-y-3">
         <p className="text-sm text-muted-foreground">
-          {votes > 0
-            ? `Me quedé sin títulos parecidos. Con ${votes} voto${votes === 1 ? "" : "s"} ya afiné algo tu perfil.`
-            : "No encontré títulos parecidos para votar."}
+          {votes === 0
+            ? t("modal.noSimilar")
+            : votes === 1
+              ? t("modal.outOfSimilarOne")
+              : t("modal.outOfSimilarMany", { n: votes })}
         </p>
         {votes > 0 && (
           <button
             onClick={onEnoughVotes}
             className="w-full py-2 font-mono text-[10px] uppercase tracking-widest border border-foreground/30 hover:border-accent hover:text-accent transition-colors"
           >
-            Recalcular igual
+            {t("modal.recalcAnyway")}
           </button>
         )}
       </div>
@@ -202,7 +206,7 @@ function DisagreePanel({
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between font-mono text-[9px] uppercase tracking-widest text-muted-foreground">
-        <span>Ajustá el match</span>
+        <span>{t("modal.adjustMatch")}</span>
         <span className="text-accent">
           {votes}/{VOTES_NEEDED}
         </span>
@@ -224,7 +228,7 @@ function DisagreePanel({
           <p className="font-medium leading-tight">{current.title}</p>
           <p className="font-mono text-[10px] text-muted-foreground">
             {current.year}
-            {current.kind === "series" ? " · Serie" : ""}
+            {current.kind === "series" ? ` · ${t("common.show")}` : ""}
           </p>
         </div>
       </div>
@@ -232,27 +236,27 @@ function DisagreePanel({
       {step === "seen" ? (
         <>
           <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-            ¿La viste?
+            {t("modal.seenIt")}
           </p>
           <div className="flex gap-2">
             <button
               onClick={() => setStep("rating")}
               className="flex-1 py-2 font-mono text-[10px] uppercase tracking-widest border border-foreground/30 hover:border-accent hover:text-accent transition-colors"
             >
-              Sí, la vi
+              {t("modal.yesSaw")}
             </button>
             <button
               onClick={next}
               className="flex-1 py-2 font-mono text-[10px] uppercase tracking-widest border border-foreground/30 hover:border-foreground transition-colors"
             >
-              No la vi
+              {t("modal.notSeen")}
             </button>
           </div>
         </>
       ) : (
         <>
           <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-            ¿Qué te pareció?
+            {t("modal.whatDidYouThink")}
           </p>
           <StarRating value={ratingDraft} onChange={vote} disabled={saving} size="sm" />
         </>
@@ -287,6 +291,7 @@ export function MovieModal({
   onRate: (rating: number, title?: string, tmdbId?: number | null) => Promise<boolean>;
   readOnly?: boolean;
 }) {
+  const { t, lang } = useLang();
   const [details, setDetails] = useState<MovieDetails | null>(null);
   const [showRateMenu, setShowRateMenu] = useState(false);
   const [ratingDraft, setRatingDraft] = useState<number | null>(null);
@@ -307,7 +312,7 @@ export function MovieModal({
   function recalculate() {
     if (rec.tmdb_id == null || !token) return;
     setRecalculating(true);
-    fetch(`${API_BASE_URL}/titles/${rec.tmdb_id}/verdict?kind=${encodeURIComponent(rec.kind)}`, {
+    fetch(`${API_BASE_URL}/titles/${rec.tmdb_id}/verdict?kind=${encodeURIComponent(rec.kind)}&lang=${lang}`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((response) => (response.ok ? response.json() : null))
@@ -417,13 +422,13 @@ export function MovieModal({
             </h2>
             <div className="font-mono text-xs text-muted-foreground uppercase tracking-widest mb-6">
               {shown.year}
-              {shown.kind === "series" ? " · Serie" : ""}
+              {shown.kind === "series" ? ` · ${t("common.show")}` : ""}
               {shown.vote_average != null ? ` · ★ ${shown.vote_average.toFixed(1)}` : ""}
               {" · "}
               {recalculating ? (
-                <span className="text-accent">Recalculando…</span>
+                <span className="text-accent">{t("modal.recalculating")}</span>
               ) : isUnknownMatch(shown.match_score) ? (
-                "Match desconocido"
+                t("match.unknown")
               ) : (
                 `${shown.match_score}% match`
               )}
@@ -434,7 +439,7 @@ export function MovieModal({
                     aria-expanded={showDisagree}
                     className="ml-2 normal-case tracking-normal underline decoration-dotted hover:text-accent"
                   >
-                    ¿No estás de acuerdo?
+                    {t("modal.disagree")}
                   </button>
                   {showDisagree && (
                     <div className="absolute left-0 top-full mt-2 z-10 w-72 p-4 border-2 border-foreground bg-background shadow-2xl normal-case tracking-normal text-foreground">
@@ -474,7 +479,7 @@ export function MovieModal({
             {loadingDetails && (
               <div className="border-t border-foreground/10 pt-4 mb-6 flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                Cargando reparto y tráiler...
+                {t("modal.loadingDetails")}
               </div>
             )}
 
@@ -488,7 +493,7 @@ export function MovieModal({
                     className="mb-4 inline-flex items-center gap-2 px-4 py-2 border border-foreground/30 font-mono text-[10px] uppercase tracking-widest hover:border-accent hover:text-accent transition-colors"
                   >
                     <Film className="w-3.5 h-3.5" />
-                    Ver tráiler
+                    {t("modal.watchTrailer")}
                     <ExternalLink className="w-3 h-3" />
                   </a>
                 )}

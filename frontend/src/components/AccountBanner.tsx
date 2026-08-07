@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import { toast } from "sonner";
 
 import { API_BASE_URL, useAuth } from "@/hooks/useAuth";
+import { useLang } from "@/lib/i18n";
 
 // Un solo banner para los dos avisos de cuenta, porque son excluyentes: un
 // invitado no tiene mail que verificar, y quien tiene mail no es invitado.
@@ -15,20 +16,19 @@ export function AccountBanner() {
   const { user, token, loading } = useAuth();
   const [dismissed, setDismissed] = useState(false);
   const [sending, setSending] = useState(false);
+  const { t } = useLang();
 
   if (loading || !user) return null;
 
   if (user.isGuest) {
     return (
       <Banner>
-        <span>
-          Estás como invitado. Poné usuario y contraseña para no perder tus puntuaciones.
-        </span>
+        <span>{t("home.banner.guest")}</span>
         <Link
           href="/login?claim=1"
           className="shrink-0 underline underline-offset-2 hover:opacity-70"
         >
-          Crear mi cuenta
+          {t("home.banner.guestCta")}
         </Link>
       </Banner>
     );
@@ -46,9 +46,9 @@ export function AccountBanner() {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!response.ok) throw new Error();
-      toast.success("Te reenviamos el mail de verificación.");
+      toast.success(t("home.banner.resendOk"));
     } catch {
-      toast.error("No pude reenviar el mail. Probá más tarde.");
+      toast.error(t("home.banner.resendError"));
     } finally {
       setSending(false);
     }
@@ -56,12 +56,16 @@ export function AccountBanner() {
 
   return (
     <Banner>
-      <span>Confirmá tu email para asegurar tu cuenta. Te mandamos un link al registrarte.</span>
+      <span>{t("home.banner.verify")}</span>
       <div className="flex items-center gap-4 shrink-0">
         <button onClick={resend} disabled={sending} className="underline hover:opacity-70 disabled:opacity-50">
-          {sending ? "Enviando…" : "Reenviar"}
+          {sending ? t("home.banner.sending") : t("home.banner.resend")}
         </button>
-        <button onClick={() => setDismissed(true)} aria-label="Cerrar aviso" className="hover:opacity-70">
+        <button
+          onClick={() => setDismissed(true)}
+          aria-label={t("home.banner.dismissAria")}
+          className="hover:opacity-70"
+        >
           ✕
         </button>
       </div>

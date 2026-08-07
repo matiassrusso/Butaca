@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 
+import { useLang } from "../lib/i18n";
+
 const STORAGE_KEY = "butaca-theme";
 
 function getInitial(): "light" | "dark" {
@@ -34,12 +36,14 @@ export function useTheme() {
 
 export function ThemeToggle() {
   const { theme, toggle, mounted } = useTheme();
+  const { t } = useLang();
+  const label = theme === "dark" ? t("theme.toLight") : t("theme.toDark");
 
   return (
     <button
       onClick={toggle}
-      aria-label={theme === "dark" ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
-      title={theme === "dark" ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
+      aria-label={label}
+      title={label}
       className="group relative size-8 grid place-items-center border border-foreground/20 hover:border-accent hover:text-accent transition-colors overflow-hidden"
     >
       <span className="font-mono text-[10px] tracking-widest">

@@ -5,6 +5,7 @@ import { useLocation } from "wouter";
 
 import { PageTransition } from "@/components/PageTransition";
 import { API_BASE_URL, useAuth } from "@/hooks/useAuth";
+import { useLang, type Lang } from "@/lib/i18n";
 
 type GenreWeight = { genre: string; weight: number };
 type DecadeCount = { decade: number; count: number };
@@ -33,10 +34,13 @@ type ProfileSummary = {
 };
 
 // created_at viene como "YYYY-MM-DD HH:MM:SS" UTC de ambos backends
-function formatMemberSince(value: string): string {
+function formatMemberSince(value: string, lang: Lang): string {
   const date = new Date(value.replace(" ", "T") + "Z");
   if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleDateString("es-AR", { month: "long", year: "numeric" });
+  return date.toLocaleDateString(lang === "en" ? "en-US" : "es-AR", {
+    month: "long",
+    year: "numeric",
+  });
 }
 
 const RADAR_SIZE = 360;
@@ -117,6 +121,7 @@ function DecadeHeatmap({ decades }: { decades: DecadeCount[] }) {
 }
 
 function PeopleList({ people }: { people: PersonCount[] }) {
+  const { t } = useLang();
   return (
     <ol className="space-y-3">
       {people.map((p, i) => (
@@ -125,7 +130,9 @@ function PeopleList({ people }: { people: PersonCount[] }) {
             <span className="font-mono text-xs text-muted-foreground w-6">{String(i + 1).padStart(2, "0")}</span>
             <span className="font-medium">{p.name}</span>
           </span>
-          <span className="font-mono text-xs text-accent">{p.count} vistas</span>
+          <span className="font-mono text-xs text-accent">
+            {t("profile.watchedCount", { n: p.count })}
+          </span>
         </li>
       ))}
     </ol>
@@ -138,6 +145,7 @@ function PeopleList({ people }: { people: PersonCount[] }) {
 // primer import; esto existe para corregirla o desvincularla.
 function LetterboxdAccount() {
   const { user, saveLetterboxdUsername } = useAuth();
+  const { t } = useLang();
   const [value, setValue] = useState(user?.letterboxdUsername ?? "");
   const [saving, setSaving] = useState(false);
 
@@ -151,9 +159,9 @@ function LetterboxdAccount() {
     setSaving(true);
     try {
       await saveLetterboxdUsername(value.trim());
-      toast.success(value.trim() ? "Guardado." : "Cuenta de Letterboxd desvinculada.");
+      toast.success(t(value.trim() ? "profile.letterboxdSaved" : "profile.letterboxdUnlinked"));
     } catch {
-      toast.error("No pude guardar tu usuario de Letterboxd.");
+      toast.error(t("profile.letterboxdError"));
     } finally {
       setSaving(false);
     }
@@ -165,14 +173,14 @@ function LetterboxdAccount() {
         htmlFor="letterboxd-account"
         className="block font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-2"
       >
-        Tu cuenta de Letterboxd
+        {t("profile.letterboxdLabel")}
       </label>
       <div className="flex flex-wrap items-center gap-3">
         <input
           id="letterboxd-account"
           value={value}
           onChange={(e) => setValue(e.target.value)}
-          placeholder="sin vincular"
+          placeholder={t("profile.letterboxdPlaceholder")}
           className="flex-1 min-w-40 bg-transparent border-b-2 border-foreground/30 py-2 font-mono text-sm placeholder:text-muted-foreground focus:outline-none focus:border-accent"
         />
         <button
@@ -180,12 +188,11 @@ function LetterboxdAccount() {
           disabled={!dirty || saving}
           className="px-4 py-2 font-mono text-[10px] uppercase tracking-widest border border-foreground/30 hover:border-accent hover:text-accent disabled:opacity-40 disabled:hover:border-foreground/30 disabled:hover:text-foreground transition-colors"
         >
-          {saving ? "Guardando…" : "Guardar"}
+          {saving ? t("profile.letterboxdSaving") : t("common.save")}
         </button>
       </div>
       <p className="font-mono text-[10px] uppercase leading-relaxed text-muted-foreground/60 mt-3">
-        Solo los imports de esta cuenta se guardan en tu perfil. Si alguien más prueba Butaca
-        con su usuario desde tu sesión, ve sus picks pero no toca tus datos.
+        {t("profile.letterboxdNote")}
       </p>
     </div>
   );
@@ -193,6 +200,7 @@ function LetterboxdAccount() {
 
 export default function Profile() {
   const { isAuthenticated, loading: authLoading, token, user, deleteAccount } = useAuth();
+  const { t, lang } = useLang();
   const [, navigate] = useLocation();
   const [profile, setProfile] = useState<TasteProfile | null>(null);
   const [summary, setSummary] = useState<ProfileSummary | null>(null);
@@ -210,10 +218,10 @@ export default function Profile() {
     setDeleteError("");
     try {
       await deleteAccount(deletePassword);
-      toast.success("Tu cuenta y tus datos fueron borrados.");
+      toast.success(t("profile.deleteSuccess"));
       navigate("/");
     } catch (err) {
-      setDeleteError(err instanceof Error ? err.message : "No pude borrar la cuenta.");
+      setDeleteError(err instanceof Error ? err.message : t("profile.deleteError"));
     } finally {
       setDeleting(false);
     }
@@ -252,7 +260,7 @@ export default function Profile() {
       .then(async (response) => {
         if (!response.ok) {
           const body = await response.json().catch(() => null);
-          throw new Error(body?.detail ?? "No pude armar tu perfil de gusto.");
+          throw new Error(body?.detail ?? t("profile.tasteError"));
         }
         return response.json();
       })
@@ -260,7 +268,7 @@ export default function Profile() {
         if (!cancelled) setProfile(body);
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "No pude armar tu perfil de gusto.");
+        if (!cancelled) setError(err instanceof Error ? err.message : t("profile.tasteError"));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -292,7 +300,11 @@ export default function Profile() {
               {summary?.avatar_url ? (
                 <img
                   src={summary.avatar_url}
-                  alt={summary.top_title ? `Still de ${summary.top_title}` : "Avatar"}
+                  alt={
+                    summary.top_title
+                      ? t("profile.avatarAlt", { title: summary.top_title })
+                      : t("profile.avatarFallbackAlt")
+                  }
                   className="size-28 md:size-32 object-cover border-2 border-foreground"
                 />
               ) : (
@@ -304,28 +316,31 @@ export default function Profile() {
 
             <div className="min-w-0">
               <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-3">
-                [Perfil]
+                {t("profile.kicker")}
               </div>
               <h1 className="text-5xl md:text-6xl font-black uppercase tracking-tighter leading-[0.9] break-words">
                 {user?.username}
               </h1>
               <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mt-4">
-                {summary?.member_since && <>Miembro desde {formatMemberSince(summary.member_since)}</>}
+                {summary?.member_since &&
+                  t("profile.memberSince", {
+                    date: formatMemberSince(summary.member_since, lang),
+                  })}
                 {summary?.email && (
                   <>
                     {" · "}
                     <span className="normal-case tracking-normal">{summary.email}</span>
                     {summary.email_verified ? (
-                      <span className="text-accent"> ✓ verificado</span>
+                      <span className="text-accent"> {t("profile.emailVerified")}</span>
                     ) : (
-                      <span> · sin verificar</span>
+                      <span> · {t("profile.emailUnverified")}</span>
                     )}
                   </>
                 )}
               </p>
               {summary?.avatar_url && summary.top_title && (
                 <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground/60 mt-1">
-                  Tu avatar sale de tu mejor puntuada: {summary.top_title}
+                  {t("profile.avatarFrom", { title: summary.top_title })}
                 </p>
               )}
             </div>
@@ -336,10 +351,10 @@ export default function Profile() {
           {summary && (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-0 mt-10 border-2 border-foreground">
               {[
-                { label: "Vistas", value: summary.rated_count },
-                { label: "Sesiones de picks", value: summary.session_count },
-                { label: "En watchlist", value: summary.watchlist_count },
-                { label: "Feedback dado", value: summary.feedback_count },
+                { label: t("profile.statWatched"), value: summary.rated_count },
+                { label: t("profile.statSessions"), value: summary.session_count },
+                { label: t("profile.statWatchlist"), value: summary.watchlist_count },
+                { label: t("profile.statFeedback"), value: summary.feedback_count },
               ].map((stat, i) => (
                 <div
                   key={stat.label}
@@ -358,11 +373,16 @@ export default function Profile() {
         </header>
 
         <div className="flex items-baseline gap-4 mb-10">
-          <span className="font-mono text-xs px-2 py-1 border border-foreground/20">[Mapa de afinidad]</span>
+          <span className="font-mono text-xs px-2 py-1 border border-foreground/20">
+            {t("profile.affinityMap")}
+          </span>
           <div className="h-px flex-grow bg-foreground/10" />
           {profile && profile.matched_count < profile.total_count && (
             <span className="font-mono text-xs text-muted-foreground shrink-0">
-              {profile.matched_count} de {profile.total_count} títulos matcheados
+              {t("profile.matchedCount", {
+                matched: profile.matched_count,
+                total: profile.total_count,
+              })}
             </span>
           )}
         </div>
@@ -370,7 +390,7 @@ export default function Profile() {
         {loading && (
           <div className="py-20 text-center">
             <Loader2 className="w-7 h-7 text-accent animate-spin mx-auto mb-4" />
-            <p className="font-mono text-xs uppercase text-muted-foreground">Cruzando tu historial con TMDb...</p>
+            <p className="font-mono text-xs uppercase text-muted-foreground">{t("profile.loading")}</p>
           </div>
         )}
 
@@ -381,16 +401,16 @@ export default function Profile() {
         {!loading && !error && !hasProfile && (
           <div className="p-10 border-2 border-dashed border-foreground/20 text-center">
             <h2 className="text-2xl font-black uppercase tracking-tighter mb-2">
-              Todavía no hay suficiente para armar tu perfil
+              {t("profile.emptyTitle")}
             </h2>
             <p className="font-mono text-xs uppercase text-muted-foreground mb-5">
-              Importá tu Letterboxd o puntuá pelis desde la pantalla de recomendaciones.
+              {t("profile.emptyBody")}
             </p>
             <button
               onClick={() => navigate("/recommend")}
               className="inline-flex items-center gap-2 px-6 py-3 bg-accent text-accent-foreground font-mono text-xs uppercase tracking-widest hover:bg-foreground hover:text-background transition-colors"
             >
-              Ir a recomendar
+              {t("profile.goRecommend")}
             </button>
           </div>
         )}
@@ -401,7 +421,9 @@ export default function Profile() {
               {profile.genre_breakdown.length > 0 && (
                 <div className="lg:col-span-6">
                   <div className="flex items-baseline gap-4 mb-8">
-                    <span className="font-mono text-xs px-2 py-1 border border-foreground/20">[Firma de géneros]</span>
+                    <span className="font-mono text-xs px-2 py-1 border border-foreground/20">
+                      {t("profile.genreSignature")}
+                    </span>
                     <div className="h-px flex-grow bg-foreground/10" />
                   </div>
                   <GenreRadar genres={profile.genre_breakdown} />
@@ -411,7 +433,9 @@ export default function Profile() {
               {profile.decade_breakdown.length > 0 && (
                 <div className="lg:col-span-6">
                   <div className="flex items-baseline gap-4 mb-8">
-                    <span className="font-mono text-xs px-2 py-1 border border-foreground/20">[Timeline · décadas]</span>
+                    <span className="font-mono text-xs px-2 py-1 border border-foreground/20">
+                      {t("profile.decadeTimeline")}
+                    </span>
                     <div className="h-px flex-grow bg-foreground/10" />
                   </div>
                   <DecadeHeatmap decades={profile.decade_breakdown} />
@@ -423,7 +447,9 @@ export default function Profile() {
               {profile.top_directors.length > 0 && (
                 <div>
                   <div className="flex items-baseline gap-4 mb-8">
-                    <span className="font-mono text-xs px-2 py-1 border border-foreground/20">[Directores]</span>
+                    <span className="font-mono text-xs px-2 py-1 border border-foreground/20">
+                      {t("profile.directors")}
+                    </span>
                     <div className="h-px flex-grow bg-foreground/10" />
                   </div>
                   <PeopleList people={profile.top_directors} />
@@ -433,7 +459,9 @@ export default function Profile() {
               {profile.top_actors.length > 0 && (
                 <div>
                   <div className="flex items-baseline gap-4 mb-8">
-                    <span className="font-mono text-xs px-2 py-1 border border-foreground/20">[Reparto]</span>
+                    <span className="font-mono text-xs px-2 py-1 border border-foreground/20">
+                      {t("profile.cast")}
+                    </span>
                     <div className="h-px flex-grow bg-foreground/10" />
                   </div>
                   <PeopleList people={profile.top_actors} />
@@ -445,18 +473,19 @@ export default function Profile() {
 
         <section className="mt-24 border-t-2 border-destructive/40 pt-10">
           <div className="font-mono text-[10px] uppercase tracking-widest text-destructive mb-3">
-            [Zona de peligro]
+            {t("profile.dangerZone")}
           </div>
-          <h2 className="text-2xl font-black uppercase tracking-tighter mb-2">Borrar cuenta</h2>
+          <h2 className="text-2xl font-black uppercase tracking-tighter mb-2">
+            {t("profile.deleteTitle")}
+          </h2>
           <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground max-w-md mb-6">
-            Borra tu cuenta y todos tus datos (ratings, historial, perfil de gusto). No se puede
-            deshacer.
+            {t("profile.deleteBody")}
           </p>
 
           <div className="max-w-md space-y-4">
             <label className="block">
               <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                Escribí tu usuario ({user?.username}) para confirmar
+                {t("profile.deleteConfirmLabel", { username: user?.username ?? "" })}
               </span>
               <input
                 value={confirmUsername}
@@ -467,7 +496,7 @@ export default function Profile() {
             </label>
             <label className="block">
               <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                Contraseña
+                {t("profile.deletePassword")}
               </span>
               <input
                 type="password"
@@ -482,7 +511,7 @@ export default function Profile() {
               disabled={deleting || confirmUsername !== user?.username || !deletePassword}
               className="w-full py-3 border-2 border-destructive text-destructive font-mono text-xs uppercase tracking-widest hover:bg-destructive hover:text-destructive-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-destructive"
             >
-              {deleting ? "Borrando…" : "Borrar mi cuenta para siempre"}
+              {deleting ? t("profile.deleting") : t("profile.deleteButton")}
             </button>
 
             {deleteError && (

@@ -3,6 +3,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { createPortal } from "react-dom";
 import { Link, useLocation } from "wouter";
 
+import { useLang } from "../lib/i18n";
+
 import "./StaggeredMenu.css";
 
 // Adaptado de React Bits (StaggeredMenu, variante JS+CSS) al sistema de
@@ -47,11 +49,12 @@ export function StaggeredMenu({
   displaySocials = true,
   displayItemNumbering = true,
   eyebrow,
-  triggerLabel = "Menú",
+  triggerLabel,
   closeOnClickAway = true,
   onMenuOpen,
   onMenuClose,
 }: StaggeredMenuProps) {
+  const { t } = useLang();
   const [open, setOpen] = useState(false);
   const [location] = useLocation();
   const openRef = useRef(false);
@@ -253,14 +256,14 @@ export function StaggeredMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls="staggered-menu-panel"
-        aria-label={open ? "Cerrar menú" : "Abrir menú"}
+        aria-label={open ? t("nav.menuClose") : t("nav.menuOpen")}
         className={`sm-toggle inline-flex items-center gap-2 px-4 py-2 font-mono text-[10px] uppercase tracking-widest border transition-colors ${
           open
             ? "bg-accent text-accent-foreground border-accent"
             : "bg-foreground text-background border-foreground hover:bg-accent hover:text-accent-foreground hover:border-accent"
         }`}
       >
-        {triggerLabel}
+        {triggerLabel ?? t("nav.menu")}
         <span ref={iconRef} className="sm-icon" aria-hidden="true">
           <span className="sm-icon-line" />
           <span className="sm-icon-line sm-icon-line-v" />

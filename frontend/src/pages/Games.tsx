@@ -4,21 +4,22 @@ import { Link, useLocation } from "wouter";
 
 import { PageTransition } from "@/components/PageTransition";
 import { useAuth } from "@/hooks/useAuth";
+import { useLang } from "@/lib/i18n";
 
 // Hub de juegos (idea de Matías, 2026-08-02). Criterio de selección: priorizar
 // los que además generan señal de gusto -- "¿cuál te gustó más?" cumple eso,
 // la trivia no (Matías la pidió igual, como puro entretenimiento).
-const GAMES = [
+const GAME_LINKS = [
   {
     href: "/games/pairwise",
-    title: "¿Cuál te gustó más?",
-    description: "Dos pósters, elegís uno. Cada elección afina tu perfil de gusto.",
+    titleKey: "games.pairwise.cardTitle",
+    descriptionKey: "games.pairwise.cardDescription",
     signal: true,
   },
   {
     href: "/games/trivia",
-    title: "Trivia de cine",
-    description: "Adiviná director, año o reparto. Puro entretenimiento, no toca tu perfil.",
+    titleKey: "games.trivia.cardTitle",
+    descriptionKey: "games.trivia.cardDescription",
     signal: false,
   },
 ];
@@ -26,6 +27,7 @@ const GAMES = [
 export default function Games() {
   const { isAuthenticated, loading: authLoading } = useAuth();
   const [, navigate] = useLocation();
+  const { t } = useLang();
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) navigate("/login");
@@ -44,25 +46,28 @@ export default function Games() {
       <main className="max-w-4xl mx-auto px-6 pt-16 pb-24">
         <header className="pb-8 border-b-2 border-foreground mb-8">
           <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-4">
-            [Juegos]
+            {t("games.tag")}
           </div>
           <h1 className="text-6xl md:text-7xl font-black uppercase tracking-tighter leading-[0.9]">
-            Jugá <span className="text-accent italic font-serif normal-case tracking-normal">un rato</span>
+            {t("games.titlePrefix")}
+            <span className="text-accent italic font-serif normal-case tracking-normal">
+              {t("games.titleAccent")}
+            </span>
           </h1>
         </header>
 
         <div className="grid sm:grid-cols-2 gap-6">
-          {GAMES.map((game) => (
+          {GAME_LINKS.map((game) => (
             <Link
               key={game.href}
               to={game.href}
               className="block p-6 border-2 border-foreground/20 hover:border-accent transition-colors"
             >
               <div className="font-mono text-[9px] uppercase tracking-widest text-accent mb-2">
-                {game.signal ? "Mejora tus picks" : "Solo por diversión"}
+                {game.signal ? t("games.badgeSignal") : t("games.badgeFun")}
               </div>
-              <h2 className="text-2xl font-black uppercase tracking-tighter mb-2">{game.title}</h2>
-              <p className="font-mono text-xs text-muted-foreground">{game.description}</p>
+              <h2 className="text-2xl font-black uppercase tracking-tighter mb-2">{t(game.titleKey)}</h2>
+              <p className="font-mono text-xs text-muted-foreground">{t(game.descriptionKey)}</p>
             </Link>
           ))}
         </div>

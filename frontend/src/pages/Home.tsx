@@ -7,6 +7,7 @@ import { MovieModal, type FeedbackStatus, type Recommendation } from "@/componen
 import { PageTransition } from "@/components/PageTransition";
 import { PosterCard } from "@/components/PosterCard";
 import { API_BASE_URL, useAuth } from "@/hooks/useAuth";
+import { useLang } from "@/lib/i18n";
 
 type RecommendationSession = {
   id: number;
@@ -27,23 +28,8 @@ type RecommendResponse = {
 const WEEKLY_POLL_INTERVAL_MS = 2500;
 const WEEKLY_POLL_MAX_ATTEMPTS = 6;
 
-const STEPS = [
-  {
-    number: "01",
-    title: "Contanos qué viste",
-    desc: "Subí tu export de Letterboxd, importalo por usuario, o puntuá a mano en un minuto, sin cuenta si querés.",
-  },
-  {
-    number: "02",
-    title: "Leemos tus patrones",
-    desc: "Ratings, reviews cuando las hay, género, director. Buscamos el patrón real detrás de lo que premiás o rechazás.",
-  },
-  {
-    number: "03",
-    title: "Recibís picks con razón",
-    desc: "Cada recomendación viene con una explicación basada en tu propio historial, no en un ranking genérico.",
-  },
-];
+// el texto vive en el diccionario (home.steps.N.*), acá solo el número
+const STEPS = ["01", "02", "03"];
 
 // Ritmo del marquee. Menos segundos = más rápido.
 const MARQUEE_SECONDS_PER_NAME = 0.5;
@@ -76,6 +62,7 @@ const MARQUEE_NAMES = [
 // typewriter. De paso empareja las cards — un why de 2 líneas contra uno de 5
 // dejaba la grilla del weekly visiblemente despareja.
 function PickText({ rec }: { rec: Recommendation }) {
+  const { t } = useLang();
   return (
     <>
       <h3 className="text-lg font-black uppercase tracking-tighter leading-none mb-1 group-hover:text-accent transition-colors">
@@ -83,7 +70,7 @@ function PickText({ rec }: { rec: Recommendation }) {
       </h3>
       <p className="font-mono text-[10px] text-muted-foreground">
         {rec.year}
-        {rec.kind === "series" ? " · Serie" : ""}
+        {rec.kind === "series" ? ` · ${t("common.show")}` : ""}
       </p>
     </>
   );
@@ -91,6 +78,7 @@ function PickText({ rec }: { rec: Recommendation }) {
 
 export default function Home() {
   const { isAuthenticated, token } = useAuth();
+  const { lang, t } = useLang();
   const { scrollY } = useScroll();
   const heroY = useTransform(scrollY, [0, 600], [0, -80]);
   const heroOpacity = useTransform(scrollY, [0, 500], [1, 0.3]);
@@ -121,7 +109,7 @@ export default function Home() {
       if (!response.ok) throw new Error();
       setFeedbackState((prev) => ({ ...prev, [recommendationId]: status }));
     } catch {
-      toast.error("No se pudo guardar el feedback.");
+      toast.error(t("home.toast.feedbackError"));
     }
   }
 
@@ -147,13 +135,13 @@ export default function Home() {
       if (!response.ok) throw new Error();
       const body = await response.json();
       if (body.status === "preserved") {
-        toast.info(`Tu ${body.rating}/5 de Letterboxd tiene prioridad. Cambialo ahí y volvé a importar.`);
+        toast.info(t("home.toast.ratePreserved", { rating: body.rating }));
         return true;
       }
-      toast.success(`Guardado en tu perfil: ${finalTitle}`);
+      toast.success(t("home.toast.rateSaved", { title: finalTitle }));
       return true;
     } catch {
-      toast.error("No se pudo guardar el puntaje.");
+      toast.error(t("home.toast.rateError"));
       return false;
     }
   }
@@ -162,7 +150,7 @@ export default function Home() {
   // "Empezar gratis" caía en "Entrá" y el usuario nuevo tenía que buscar el
   // link chico de abajo).
   const ctaHref = isAuthenticated ? "/recommend" : "/login?register=1";
-  const ctaLabel = isAuthenticated ? "Ir a mis recomendaciones" : "Empezar gratis";
+  const ctaLabel = isAuthenticated ? t("home.cta.authed") : t("home.cta.guest");
 
   useEffect(() => {
     if (!token) {
@@ -193,9 +181,11 @@ export default function Home() {
     let pollTimer: ReturnType<typeof setTimeout> | undefined;
 
     function loadWeekly(): Promise<RecommendResponse | null> {
-      return fetch(`${API_BASE_URL}/weekly`, token ? { headers: { Authorization: `Bearer ${token}` } } : {}).then(
-        (response) => (response.ok ? response.json() : null),
-      );
+      // el idioma va al backend: los "why" los escribe el LLM allá
+      return fetch(
+        `${API_BASE_URL}/weekly?lang=${lang}`,
+        token ? { headers: { Authorization: `Bearer ${token}` } } : {},
+      ).then((response) => (response.ok ? response.json() : null));
     }
 
     function applyWeekly(body: RecommendResponse) {
@@ -239,7 +229,7 @@ export default function Home() {
       cancelled = true;
       clearTimeout(pollTimer);
     };
-  }, [token]);
+  }, [token, lang]);
 
   const currentPicks = latestSession?.recommendations.slice(0, 3) ?? [];
 
@@ -262,11 +252,11 @@ export default function Home() {
             className="flex items-center gap-3 mb-10 font-mono text-[10px] uppercase tracking-[0.3em] text-foreground"
           >
             <span className="size-2 bg-accent rounded-full animate-pulse" />
-            <span>Basado en tu gusto real, no en un ranking</span>
+            <span>{t("home.hero.badge")}</span>
           </motion.div>
 
           <h1 className="text-[15vw] md:text-[11vw] font-black tracking-tighter leading-[0.85] uppercase mb-10">
-            {["Pelis que", "te", "conocen."].map((word, i) => (
+            {[t("home.hero.title1"), t("home.hero.title2"), t("home.hero.title3")].map((word, i) => (
               <motion.span
                 key={word}
                 initial={{ opacity: 0, y: 80, rotateX: -60 }}
@@ -287,10 +277,7 @@ export default function Home() {
               transition={{ delay: 0.7 }}
               className="max-w-md font-mono text-xs uppercase leading-relaxed text-muted-foreground"
             >
-              [Método] Importás tu Letterboxd o puntuás a mano, sin cuenta si querés.
-              Leemos tus ratings, tus reviews cuando las hay, tus patrones. Después
-              recomendamos con explicaciones basadas en tu gusto real, no en un ranking
-              genérico.
+              {t("home.hero.method")}
             </motion.p>
             <motion.div
               initial={{ opacity: 0, y: 20 }}
@@ -300,7 +287,7 @@ export default function Home() {
             >
               {!isAuthenticated && (
                 <span className="font-mono text-[10px] uppercase text-muted-foreground">
-                  Sync con Letterboxd →
+                  {t("home.hero.sync")}
                 </span>
               )}
               <Link
@@ -346,22 +333,21 @@ export default function Home() {
         <section className="max-w-7xl mx-auto px-6 py-24 border-b-2 border-foreground">
           <div className="flex items-baseline gap-4 mb-10">
             <span className="font-mono text-xs px-2 py-1 border border-foreground/20">
-              [Recomendaciones de la semana]
+              {t("home.weekly.label")}
             </span>
             <div className="h-px flex-grow bg-foreground/10" />
           </div>
           <p className="font-serif italic text-lg text-muted-foreground mb-10 max-w-2xl">
-            3 de tendencia esta semana + 2 de otras épocas, todo TMDb real — las mismas para
-            todo el mundo —
+            {t("home.weekly.blurbLead")}
             {isAuthenticated ? (
-              " esto es lo que tu perfil dice sobre cada una."
+              t("home.weekly.blurbAuthed")
             ) : (
               <>
                 {" "}
                 <Link href="/login" className="text-accent underline decoration-dotted hover:text-foreground">
-                  Iniciá sesión
+                  {t("home.weekly.loginLink")}
                 </Link>{" "}
-                para ver qué tan bien va cada una con vos.
+                {t("home.weekly.blurbGuest")}
               </>
             )}
           </p>
@@ -399,13 +385,15 @@ export default function Home() {
       {currentPicks.length > 0 && (
         <section className="max-w-7xl mx-auto px-6 py-24 border-b-2 border-foreground">
           <div className="flex items-baseline gap-4 mb-10">
-            <span className="font-mono text-xs px-2 py-1 border border-foreground/20">[Current picks]</span>
+            <span className="font-mono text-xs px-2 py-1 border border-foreground/20">
+              {t("home.currentPicks.label")}
+            </span>
             <div className="h-px flex-grow bg-foreground/10" />
             <Link
               href="/history"
               className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground hover:text-foreground transition-colors"
             >
-              Ver todo →
+              {t("home.currentPicks.seeAll")}
             </Link>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
@@ -429,26 +417,29 @@ export default function Home() {
               transition={{ duration: 0.6 }}
               className="text-5xl font-black uppercase tracking-tighter mb-4"
             >
-              La metodología
+              {t("home.method.title")}
             </motion.h2>
             <p className="font-mono text-xs uppercase leading-relaxed text-muted-foreground">
-              Detrás de cada elección hay un patrón rastreable en tu historial — nunca un
-              ranking global.
+              {t("home.method.subtitle")}
             </p>
           </div>
           <div className="md:col-span-8 grid grid-cols-1 md:grid-cols-3 gap-8">
-            {STEPS.map((step, i) => (
+            {STEPS.map((number, i) => (
               <motion.div
-                key={step.number}
+                key={number}
                 initial={{ opacity: 0, y: 30 }}
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true, margin: "-40px" }}
                 transition={{ duration: 0.6, delay: i * 0.15 }}
                 className="space-y-4"
               >
-                <div className="font-mono text-xl font-bold text-accent">[{step.number}]</div>
-                <h4 className="text-sm font-bold uppercase tracking-widest">{step.title}</h4>
-                <p className="text-sm leading-relaxed text-foreground/80">{step.desc}</p>
+                <div className="font-mono text-xl font-bold text-accent">[{number}]</div>
+                <h4 className="text-sm font-bold uppercase tracking-widest">
+                  {t(`home.steps.${i + 1}.title`)}
+                </h4>
+                <p className="text-sm leading-relaxed text-foreground/80">
+                  {t(`home.steps.${i + 1}.desc`)}
+                </p>
               </motion.div>
             ))}
           </div>
@@ -457,11 +448,13 @@ export default function Home() {
         {/* CTA */}
         <section className="py-24 border-t-2 border-foreground text-center">
           <h2 className="text-4xl md:text-6xl font-black uppercase tracking-tighter mb-6">
-            ¿Lista tu próxima{" "}
-            <span className="text-accent italic font-serif normal-case tracking-normal">peli?</span>
+            {t("home.finalCta.title")}{" "}
+            <span className="text-accent italic font-serif normal-case tracking-normal">
+              {t("home.finalCta.titleAccent")}
+            </span>
           </h2>
           <p className="font-mono text-xs uppercase text-muted-foreground mb-10 max-w-xl mx-auto">
-            Subí tu historial y recibí recomendaciones personalizadas en menos de un minuto.
+            {t("home.finalCta.subtitle")}
           </p>
           <Link
             href={ctaHref}

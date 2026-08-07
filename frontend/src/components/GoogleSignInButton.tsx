@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
+import { useLang } from "@/lib/i18n";
+
 // Botón propio (no el que renderiza Google) para que entre en el sistema
 // "Hybrid critic notebook": mono uppercase, radius 0, borde grueso.
 //
@@ -78,7 +80,8 @@ type Props = {
   label?: string;
 };
 
-export function GoogleSignInButton({ onCredential, disabled, label = "Continuar con Google" }: Props) {
+export function GoogleSignInButton({ onCredential, disabled, label }: Props) {
+  const { t } = useLang();
   const [ready, setReady] = useState(false);
   const clientRef = useRef<TokenClient | null>(null);
   // el cliente de Google se crea una sola vez, así que el callback se lee de
@@ -129,7 +132,7 @@ export function GoogleSignInButton({ onCredential, disabled, label = "Continuar 
       <span className="grid place-items-center size-6 bg-white">
         <GoogleLogo />
       </span>
-      {label}
+      {label ?? t("auth.googleButton")}
     </button>
   );
 }

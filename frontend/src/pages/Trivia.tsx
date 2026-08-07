@@ -4,6 +4,7 @@ import { useLocation } from "wouter";
 
 import { PageTransition } from "@/components/PageTransition";
 import { API_BASE_URL, useAuth } from "@/hooks/useAuth";
+import { useLang } from "@/lib/i18n";
 
 // Trivia de cine (idea de Matías, 2026-08-02, rediseñada 2026-08-03: la
 // película preguntada ahora sale de tu propio historial visto, no de
@@ -22,6 +23,7 @@ type Question = {
 export default function Trivia() {
   const { isAuthenticated, loading: authLoading, token } = useAuth();
   const [, navigate] = useLocation();
+  const { t } = useLang();
 
   const [question, setQuestion] = useState<Question | null>(null);
   const [picked, setPicked] = useState<string | null>(null);
@@ -37,7 +39,8 @@ export default function Trivia() {
     fetch(`${API_BASE_URL}/games/trivia`, { headers: { Authorization: `Bearer ${token}` } })
       .then((response) => (response.ok ? response.json() : Promise.reject()))
       .then((body: Question | null) => setQuestion(body))
-      .catch(() => setError("No pude armar una pregunta."))
+      // se guarda la CLAVE, no el texto: el cartel sigue el toggle de idioma
+      .catch(() => setError("games.trivia.error"))
       .finally(() => setLoading(false));
   }, [token]);
 
@@ -71,37 +74,38 @@ export default function Trivia() {
       <main className="max-w-2xl mx-auto px-6 pt-16 pb-24">
         <header className="pb-8 border-b-2 border-foreground mb-8">
           <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-4">
-            [Juego]
+            {t("games.tagSingle")}
           </div>
           <h1 className="text-6xl md:text-7xl font-black uppercase tracking-tighter leading-[0.9]">
-            Trivia de <span className="text-accent italic font-serif normal-case tracking-normal">cine</span>
+            {t("games.trivia.titlePrefix")}
+            <span className="text-accent italic font-serif normal-case tracking-normal">
+              {t("games.trivia.titleAccent")}
+            </span>
           </h1>
-          <p className="font-mono text-xs text-muted-foreground mt-4">
-            Sobre pelis y series que ya viste. Puro entretenimiento -- esto no toca tu perfil de gusto.
-          </p>
+          <p className="font-mono text-xs text-muted-foreground mt-4">{t("games.trivia.intro")}</p>
         </header>
 
         {loading && (
           <div className="py-20 text-center">
             <Loader2 className="w-7 h-7 text-accent animate-spin mx-auto mb-4" />
-            <p className="font-mono text-xs uppercase text-muted-foreground">Armando una pregunta...</p>
+            <p className="font-mono text-xs uppercase text-muted-foreground">{t("games.trivia.loading")}</p>
           </div>
         )}
 
         {!loading && error && (
-          <div className="p-4 border-2 border-destructive/50 font-mono text-xs text-destructive">{error}</div>
+          <div className="p-4 border-2 border-destructive/50 font-mono text-xs text-destructive">{t(error)}</div>
         )}
 
         {!loading && !error && !question && (
           <div className="p-10 border-2 border-dashed border-foreground/20 text-center">
             <h2 className="text-2xl font-black uppercase tracking-tighter mb-2">
-              Necesitás tener pelis puntuadas (y variedad de otras en el catálogo) para armar una pregunta.
+              {t("games.trivia.empty")}
             </h2>
             <button
               onClick={loadQuestion}
               className="mt-4 px-5 py-3 font-mono text-[10px] uppercase tracking-widest bg-accent text-accent-foreground hover:bg-foreground hover:text-background transition-colors"
             >
-              Reintentar
+              {t("common.retry")}
             </button>
           </div>
         )}
@@ -109,7 +113,7 @@ export default function Trivia() {
         {!loading && !error && question && (
           <div>
             <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground text-center mb-6">
-              {score.correct}/{score.total} correctas
+              {t("games.trivia.score", { correct: score.correct, total: score.total })}
             </div>
 
             <div className="flex gap-4 items-start mb-6">
@@ -158,7 +162,7 @@ export default function Trivia() {
                 onClick={loadQuestion}
                 className="mt-6 w-full py-3 font-mono text-[10px] uppercase tracking-widest bg-accent text-accent-foreground hover:bg-foreground hover:text-background transition-colors"
               >
-                Siguiente
+                {t("common.next")}
               </button>
             )}
           </div>

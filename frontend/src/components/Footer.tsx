@@ -2,6 +2,7 @@ import { Github, Linkedin } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { API_BASE_URL } from "@/hooks/useAuth";
+import { useLang } from "@/lib/i18n";
 import { SECONDARY_QUOTE } from "@/lib/quotes";
 
 type CatalogStats = { movies: number; series: number; genres: number };
@@ -15,6 +16,7 @@ const compactNumber = new Intl.NumberFormat("en", { notation: "compact" });
 
 export function Footer() {
   const [stats, setStats] = useState<CatalogStats | null>(null);
+  const { t } = useLang();
 
   useEffect(() => {
     let cancelled = false;
@@ -38,12 +40,12 @@ export function Footer() {
           <div className="flex items-center gap-2 font-mono text-xs uppercase tracking-widest opacity-70">
             <span>Butaca</span>
             <span className="opacity-40">—</span>
-            <span>para el que mira con criterio</span>
+            <span>{t("home.footer.tagline")}</span>
           </div>
 
           <div>
             <div className="font-mono text-[10px] uppercase tracking-widest opacity-50 mb-3">
-              Un proyecto de Matías Russo Lacerna
+              {t("home.footer.author")}
             </div>
             <div className="flex gap-3">
               {SOCIAL_LINKS.map(({ label, href, Icon }) => (
@@ -65,20 +67,20 @@ export function Footer() {
           {stats && (
             <div>
               <div className="font-mono text-[10px] uppercase tracking-widest opacity-50 mb-3">
-                Catalog statistics
+                {t("home.footer.stats")}
               </div>
               <div className="flex gap-10">
                 <div>
                   <div className="text-2xl font-black">{compactNumber.format(stats.movies)}</div>
-                  <div className="font-mono text-[10px] uppercase tracking-widest opacity-50">Películas</div>
+                  <div className="font-mono text-[10px] uppercase tracking-widest opacity-50">{t("common.movies")}</div>
                 </div>
                 <div>
                   <div className="text-2xl font-black">{compactNumber.format(stats.series)}</div>
-                  <div className="font-mono text-[10px] uppercase tracking-widest opacity-50">Series</div>
+                  <div className="font-mono text-[10px] uppercase tracking-widest opacity-50">{t("common.series")}</div>
                 </div>
                 <div>
                   <div className="text-2xl font-black">{stats.genres}</div>
-                  <div className="font-mono text-[10px] uppercase tracking-widest opacity-50">Géneros</div>
+                  <div className="font-mono text-[10px] uppercase tracking-widest opacity-50">{t("home.footer.genres")}</div>
                 </div>
               </div>
             </div>
@@ -93,7 +95,7 @@ export function Footer() {
             — {SECONDARY_QUOTE.author}
           </div>
           <p className="font-mono text-[10px] uppercase tracking-widest opacity-50">
-            Datos de películas por{" "}
+            {t("home.footer.tmdbCredit")}{" "}
             <a
               href="https://www.themoviedb.org"
               target="_blank"

@@ -349,6 +349,61 @@ def test_both_prompts_share_the_same_voice_and_writing_rules() -> None:
         assert shared in verdict_prompt
 
 
+def test_both_prompts_share_the_same_voice_in_english() -> None:
+    # mismo invariante que el test de arriba pero para lang="en" (pedido de
+    # Matías, 2026-08-06): si alguien traduce un prompt y se olvida del otro,
+    # la voz se parte entre pantallas igual que se partía antes en español.
+    ratings = [RatedItem(title="Old Movie", rating=5, review="dark")]
+
+    recommend_prompt = llm_client._build_prompt(ratings, "funny", HEURISTIC, lang="en")
+    verdict_prompt = llm_client._build_verdict_prompt(ratings, HEURISTIC, lang="en")
+
+    for shared in (
+        llm_client.AGENT_VOICE_EN,
+        llm_client.WRITING_RULES_EN,
+        llm_client.SCORE_RULE_EN,
+    ):
+        assert shared in recommend_prompt
+        assert shared in verdict_prompt
+    # las reglas en español no pueden colarse: el modelo mezclaría idiomas
+    assert llm_client.WRITING_RULES not in recommend_prompt
+    assert llm_client.WRITING_RULES not in verdict_prompt
+
+
+def test_verdict_cache_is_keyed_by_language() -> None:
+    # sin el idioma en la clave, el primer usuario que pide /weekly en español
+    # deja cacheado ese resultado y el siguiente que lo pide en inglés recibe
+    # los why en español (y viceversa).
+    ratings = [RatedItem(title="Old Movie", rating=5, review="dark")]
+
+    key_es = llm_client._verdict_cache_key(1, ratings, HEURISTIC, "es")
+    key_en = llm_client._verdict_cache_key(1, ratings, HEURISTIC, "en")
+
+    assert key_es != key_en
+
+
+def test_refine_cache_is_keyed_by_language() -> None:
+    ratings = [RatedItem(title="Old Movie", rating=5, review="dark")]
+
+    key_es = llm_client._refine_cache_key(ratings, "funny", HEURISTIC, "es")
+    key_en = llm_client._refine_cache_key(ratings, "funny", HEURISTIC, "en")
+
+    assert key_es != key_en
+
+
+def test_already_seen_why_is_translated() -> None:
+    # el why de "ya la viste" no pasa por el LLM (se arma en Python), así que
+    # sin traducirlo explícitamente quedaba en español dentro de una página en
+    # inglés.
+    ratings = [RatedItem(title="Fake Thriller", rating=5, review="dark")]
+
+    result_en = llm_client._apply_verdict_result(ratings, HEURISTIC, None, lang="en")
+    seen = next(r for r in result_en.recommendations if r.title == "Fake Thriller")
+
+    assert "You already watched this" in seen.why
+    assert "Ya la viste" not in seen.why
+
+
 def test_build_prompt_does_not_cite_a_numeric_score_for_manual_ratings() -> None:
     # bug reportado por Matías (2026-07-30): un click de "Me encantó" en el
     # modo "Sin cuenta" es un rating sintético (4.5 interno para el scoring),
