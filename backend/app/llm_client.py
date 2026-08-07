@@ -11,7 +11,12 @@ from pathlib import Path
 from urllib.error import URLError
 
 from .models import RatedItem, RecommendResponse
-from .recommender import TAG_PHRASES, capitalize_sentence, positive_tags_from_text
+from .recommender import (
+    MIN_MATCH_SCORE,
+    TAG_PHRASES,
+    capitalize_sentence,
+    positive_tags_from_text,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -304,11 +309,17 @@ def _build_prompt(
         f"{language_line}"
         f"{_profile_block(ratings)}\n\n"
         f"Mood de hoy: {mood or 'sin preferencia'}\n\n"
-        "Candidatos ya filtrados por un motor heurístico. Elegí y ordená exactamente 6 "
-        "si hay al menos 6. Estos son PICKS FINALES: todos deben tener match_score entre "
-        "51 y 99 y un why que explique por qué sí pueden funcionarle. Si tu veredicto sería "
-        "que no le va a gustar, no incluyas ese título: elegí otro del pool. "
-        "usando SOLO títulos de esta lista (no inventes ni agregues otros):\n"
+        # el piso sale de recommender.MIN_MATCH_SCORE en vez de estar escrito a
+        # mano: decía "entre 51 y 99" mientras _finish_recommend descartaba todo
+        # lo que estuviera abajo de 60, o sea que le pedíamos al modelo puntajes
+        # que después tirábamos — y cada uno tirado achicaba la tanda (reportado
+        # por Matías, 2026-08-07: 4 picks, el más bajo en 65).
+        f"Candidatos ya filtrados por un motor heurístico. Elegí y ordená exactamente 6 "
+        f"si hay al menos 6. Estos son PICKS FINALES: todos deben tener match_score entre "
+        f"{MIN_MATCH_SCORE} y 99 y un why que explique por qué sí pueden funcionarle. Un "
+        f"pick que no te dé para {MIN_MATCH_SCORE} o más no va: si tu veredicto sería que "
+        f"no le va a gustar, no incluyas ese título, elegí otro del pool. "
+        f"Usando SOLO títulos de esta lista (no inventes ni agregues otros):\n"
         f"{_candidate_lines(heuristic)}\n\n"
         "Devolvé un resumen breve del gusto del usuario que use el perfil de arriba, no una "
         "frase genérica, y para cada pick elegido una razón de 1-2 frases.\n\n"

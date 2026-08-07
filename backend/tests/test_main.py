@@ -594,9 +594,12 @@ def test_recommend_zip_uses_llm_refinement_when_configured(monkeypatch) -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["taste_summary"] == "resumen del agente"
-    assert len(body["recommendations"]) == 1
     assert body["recommendations"][0]["why"] == "elegido por el agente"
     assert body["recommendations"][0]["id"] is not None
+    # el pick del agente va primero, y la tanda se completa desde el pool
+    # heurístico: que el LLM devuelva menos de 6 no es razón para mostrarle
+    # 1 sola card al usuario (2026-08-07)
+    assert len(body["recommendations"]) == 6
 
 
 def test_recommend_zip_falls_back_to_heuristic_when_llm_fails(monkeypatch) -> None:
@@ -669,6 +672,45 @@ def test_recommend_zip_filled_with_old_still_respects_match_floor(monkeypatch) -
     second = _post_zip(headers, zip_files={"reviews.csv": broad_tags_csv}).json()["recommendations"]
 
     assert all(item["match_score"] >= 60 for item in second)
+
+
+def test_recommend_refills_when_the_match_floor_drops_llm_picks(monkeypatch) -> None:
+    # bug reportado por Matías con captura (2026-08-07): la tanda salió con 4
+    # picks (65/70/75/85) en vez de 6. El LLM le pone su propio match_score a
+    # cada pick que elige, así que títulos que el heurístico había puntuado
+    # >=60 volvían en 55 y el filtro del piso los borraba SIN reponer nada.
+    # Los candidatos del pool heurístico que el LLM no eligió siguen estando
+    # por encima del piso, así que la tanda tiene que volver a 6.
+    monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
+    broad_tags_csv = (
+        "Name,Rating,Review,Tags\n"
+        'An Old Favorite,5,,"dialogue-heavy,romantic,intimate,walking,'
+        "psychological,dark,stylized,thriller,quiet,architectural,"
+        "melancholic,slow,kinetic,action,loud,blockbuster,mysterious,drama,"
+        'light,indie,restless,character,existential,sad,prestige,mystery,'
+        'funny,sharp,messy"'
+    )
+    headers = _auth_headers("floorrefill")
+
+    def fake_refine(ratings, mood, heuristic, lang="es"):
+        # el LLM elige 6 y le baja el puntaje a 2 al hueco 51-59 (el que el
+        # filtro descarta), igual que en el caso real
+        picks = [
+            rec.model_copy(update={"match_score": 55 if i < 2 else 80, "refined": True})
+            for i, rec in enumerate(heuristic.recommendations[:6])
+        ]
+        return heuristic.model_copy(update={"recommendations": picks})
+
+    monkeypatch.setattr("backend.app.main.llm_client.refine_recommendations", fake_refine)
+    body = _post_zip(headers, zip_files={"reviews.csv": broad_tags_csv}).json()
+    picks = body["recommendations"]
+
+    # sin el refill esto daba 4
+    assert len(picks) == 6
+    # y sin bajar la vara: el piso se sigue respetando
+    assert all(item["match_score"] >= 60 for item in picks)
+    # los repuestos vienen del heurístico, así que se distinguen en pantalla
+    assert any(not item["refined"] for item in picks)
 
 
 def test_recommend_zip_rejects_invalid_mode() -> None:

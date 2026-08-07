@@ -1150,6 +1150,12 @@ def _finish_recommend(
             if len(response.recommendations) == 6:
                 break
 
+    # el pool heurístico ANTES del LLM: todos sus picks ya pasan el piso
+    # (_score corre con min_score=MIN_MATCH_SCORE) y vienen ordenados por
+    # score. Es de acá que se repone lo que el filtro de abajo descarte —
+    # la llamada al LLM pisa `response`, así que hay que guardarlo antes.
+    pre_llm_picks = list(response.recommendations)
+
     refined = False
     if refine and not use_llm:
         logger.warning("LLM refine skipped: NVIDIA_API_KEY no está configurada.")
@@ -1173,10 +1179,34 @@ def _finish_recommend(
     # filled_with_old -- no tiene piso, así que el LLM podía devolver 35-40%
     # sin que nada lo frenara (reportado por Matías, 2026-08-05: picks
     # mezclados con 82%/78% junto a 35%/40%).
-    response.recommendations = [
-        rec for rec in response.recommendations if rec.match_score >= MIN_MATCH_SCORE
-    ]
-    response.recommendations = response.recommendations[:6]
+    strong = [rec for rec in response.recommendations if rec.match_score >= MIN_MATCH_SCORE]
+
+    # ...y REPONER lo que se descartó. Filtrar sin reponer era la mitad del
+    # trabajo: el LLM le pone su propio match_score a cada pick que elige, así
+    # que un título que el heurístico había puntuado >=60 puede volver en 55 y
+    # desaparecer, dejando la tanda en 4 (reportado por Matías con captura,
+    # 2026-08-07: picks=4 con 65/70/75/85). Los candidatos del pool heurístico
+    # que el LLM no eligió siguen estando por encima del piso, así que la
+    # tanda vuelve a 6 sin bajar la vara. Quedan con `refined=False`, que es
+    # justo lo que el frontend usa para marcar los picks sin voz del LLM.
+    if len(strong) < 6:
+        dropped = len(response.recommendations) - len(strong)
+        chosen = {rec.title.casefold() for rec in strong}
+        for rec in pre_llm_picks:
+            if len(strong) == 6:
+                break
+            if rec.title.casefold() in chosen or rec.match_score < MIN_MATCH_SCORE:
+                continue
+            strong.append(rec)
+            chosen.add(rec.title.casefold())
+        logger.info(
+            "Match floor dropped %d pick(s) below %d; refilled the batch to %d",
+            dropped,
+            MIN_MATCH_SCORE,
+            len(strong),
+        )
+
+    response.recommendations = strong[:6]
 
     session_id = None
     if ephemeral:
