@@ -972,6 +972,13 @@ def _finish_recommend(
             status_code=400, detail=errors.msg("no_genre_selected", lang)
         )
 
+    # títulos ya recomendados antes a este usuario. Se lee acá arriba (y no
+    # junto al resto de las exclusiones, más abajo) porque su TAMAÑO decide
+    # desde qué página de TMDb se pide el pool personalizado: sin eso el pool
+    # era siempre la misma página 1 y "Nuevos picks" no tenía de dónde sacar
+    # algo nuevo.
+    already_recommended = set() if ephemeral else db.get_recently_recommended_titles(user["id"])
+
     if mode == "watchlist":
         # recommend FROM the user's Letterboxd watchlist instead of discover.
         # The list is persisted per import; username imports don't carry one,
@@ -1012,7 +1019,17 @@ def _finish_recommend(
         if tmdb_client.is_configured():
             try:
                 if profile and profile.get("genre_breakdown"):
-                    candidates = tmdb_client.fetch_personalized_candidates(profile, mood, kind_filter)
+                    # avanzar en el catálogo a medida que el usuario consume
+                    # picks: sin esto el pool era siempre la misma página 1 y
+                    # "Nuevos picks" se quedaba sin nada nuevo que ofrecer
+                    # (ver tmdb_client.PERSONALIZED_PAGES). Da la vuelta al
+                    # llegar al tope de la ventana; para entonces la exclusión
+                    # de ya-recomendados ya no tiene casi nada que filtrar.
+                    consumed_pages = len(already_recommended) // 20
+                    start_page = 1 + (consumed_pages % tmdb_client.PERSONALIZED_PAGE_WINDOW)
+                    candidates = tmdb_client.fetch_personalized_candidates(
+                        profile, mood, kind_filter, start_page
+                    )
                 else:
                     candidates = tmdb_client.fetch_candidates(mood)
             except tmdb_client.TmdbError as exc:
@@ -1041,7 +1058,8 @@ def _finish_recommend(
     # exclude titles already recommended to this user before, so hitting
     # "nuevos picks" and regenerating with the same source+mood surfaces
     # different movies instead of the same deterministic top 5
-    already_recommended = set() if ephemeral else db.get_recently_recommended_titles(user["id"])
+    # (ya calculado más arriba, antes del fetch de candidatos, porque su
+    # tamaño decide desde qué página de TMDb se pide el pool)
     # bug real (reportado por Matías, 2026-07-30): puntuar en "Sin cuenta" y
     # después generar con el .zip/username de Letterboxd (u otra sesión
     # manual) recomendaba de vuelta esas mismas películas — `extra_seen`

@@ -221,6 +221,20 @@ _catalog_stats_cache: tuple[float, dict] | None = None
 # if latency allows enriching more per personalized recommend request.
 CREDITS_ENRICH_CAP = 30
 
+# El pool personalizado pedía UNA página (20 títulos) y siempre la misma, así
+# que "Nuevos picks" volvía a mirar los mismos 20 de siempre y, con la
+# exclusión de ya-recomendados, se quedaba sin nada para ofrecer (reportado por
+# Matías, 2026-08-07: "¿en serio hay solo 4 películas en todo el mundo?" —
+# medido contra TMDb, un perfil de género típico devuelve ~7.500 títulos en
+# ~376 páginas). Mismo bug que ya se había arreglado para el swipe de /rate el
+# 2026-08-03, que nunca se llevó acá.
+PERSONALIZED_PAGES = 3  # páginas por consulta de discover: 20 títulos cada una
+# Las páginas arrancan en un offset que avanza a medida que el usuario consume
+# picks, y da la vuelta al llegar al tope. Acotado (y no "seguir avanzando para
+# siempre") porque sort_by=vote_average.desc hace que la página 300 sea
+# relleno, y porque un offset más allá del total_pages real devolvería vacío.
+PERSONALIZED_PAGE_WINDOW = 10
+
 
 class TmdbError(Exception):
     pass
@@ -1366,13 +1380,17 @@ def _fetch_personalized_discover(
     person_ids: list[int],
     decade: int | None,
     api_key: str,
+    start_page: int = 1,
+    pages: int = PERSONALIZED_PAGES,
 ) -> list[dict]:
     # confirmed empirically (docs/(C) research-tmdb-discover-personalization.md):
     # pipe within a param is OR (any of these genres/people), different
     # with_*/date params combine with AND — so genre OR + people OR + a soft
     # decade window all narrow together in a single request, no need to
     # split into one request per filter.
-    cache_key = (kind, tuple(sorted(genre_ids)), tuple(sorted(person_ids)), decade)
+    cache_key = (
+        kind, tuple(sorted(genre_ids)), tuple(sorted(person_ids)), decade, start_page, pages,
+    )
     cached = _get_cached_personalized(cache_key)
     if cached is not None:
         return cached
@@ -1383,7 +1401,6 @@ def _fetch_personalized_discover(
         "sort_by": "vote_average.desc",
         "vote_count.gte": 200,
         "include_adult": "false",
-        "page": 1,
     }
     if genre_ids:
         params["with_genres"] = "|".join(str(gid) for gid in genre_ids)
@@ -1396,12 +1413,14 @@ def _fetch_personalized_discover(
         params[f"{date_field}.gte"] = f"{decade - 10}-01-01"
         params[f"{date_field}.lte"] = f"{decade + 19}-12-31"
 
-    data = _get_json(f"{url}?{urllib.parse.urlencode(params)}")
-    mapped = [
-        result
-        for raw in data.get("results", [])
-        if (result := _map_result(raw, kind, genre_tag_map)) is not None
-    ]
+    mapped: list[dict] = []
+    for page in range(start_page, start_page + pages):
+        data = _get_json(f"{url}?{urllib.parse.urlencode({**params, 'page': page})}")
+        mapped.extend(
+            result
+            for raw in data.get("results", [])
+            if (result := _map_result(raw, kind, genre_tag_map)) is not None
+        )
     for item in mapped:
         item["_source"] = "profile"
 
@@ -1409,7 +1428,9 @@ def _fetch_personalized_discover(
     return mapped
 
 
-def fetch_personalized_candidates(profile: dict, mood: str, kind_filter: str = "both") -> list[dict]:
+def fetch_personalized_candidates(
+    profile: dict, mood: str, kind_filter: str = "both", start_page: int = 1
+) -> list[dict]:
     """Builds the candidate pool from the user's persisted taste profile
     (top genres, directors/actors, favorite decade) instead of TMDb's global
     top-rated list, so two users with different tastes see different pools.
@@ -1449,11 +1470,30 @@ def fetch_personalized_candidates(profile: dict, mood: str, kind_filter: str = "
 
     if has_profile_signal and kind_filter in ("movie", "both"):
         movie_genre_ids = [GENRE_NAME_ID_MAP[name] for name in genre_names if name in GENRE_NAME_ID_MAP]
+        # pasadas de precisión: angostas a propósito (la de acá abajo pide
+        # género Y persona en la misma película), así que se quedan en una
+        # página — medido, la query combinada tiene 2-3 páginas EN TOTAL, pedir
+        # la 7 devuelve vacío.
         movie_pools = [
             _fetch_personalized_discover(
-                DISCOVER_URL, "movie", GENRE_ID_TAG_MAP, movie_genre_ids, person_ids, top_decade, api_key
+                DISCOVER_URL, "movie", GENRE_ID_TAG_MAP, movie_genre_ids, person_ids,
+                top_decade, api_key, pages=1,
             )
         ]
+        if movie_genre_ids and person_ids:
+            # pasada solo-por-género, que es la que tiene margen de verdad:
+            # medido contra TMDb, género+década da ~7.500 títulos en ~376
+            # páginas, mientras que las dos pasadas angostas de arriba se
+            # agotan en la primera. Sin esto, un perfil con directores/actores
+            # conocidos NUNCA veía una consulta ancha — el pool entero salía de
+            # queries con with_people, y de ahí "solo 4 películas en todo el
+            # mundo" (Matías, 2026-08-07). Es la única que pagina en profundidad.
+            movie_pools.append(
+                _fetch_personalized_discover(
+                    DISCOVER_URL, "movie", GENRE_ID_TAG_MAP, movie_genre_ids, [],
+                    top_decade, api_key, start_page,
+                )
+            )
         if person_ids:
             # with_genres and with_people combine with AND (confirmed in
             # docs/(C) research-tmdb-discover-personalization.md and again
@@ -1469,7 +1509,8 @@ def fetch_personalized_candidates(profile: dict, mood: str, kind_filter: str = "
             # genuinely are by/with the favorite person regardless of genre.
             movie_pools.append(
                 _fetch_personalized_discover(
-                    DISCOVER_URL, "movie", GENRE_ID_TAG_MAP, [], person_ids, top_decade, api_key
+                    DISCOVER_URL, "movie", GENRE_ID_TAG_MAP, [], person_ids,
+                    top_decade, api_key, pages=1,
                 )
             )
         for movies in movie_pools:
@@ -1492,7 +1533,8 @@ def fetch_personalized_candidates(profile: dict, mood: str, kind_filter: str = "
         # — the param is silently ignored), so series only get genre/decade bias
         tv_genre_ids = [TV_GENRE_NAME_ID_MAP[name] for name in genre_names if name in TV_GENRE_NAME_ID_MAP]
         series = _fetch_personalized_discover(
-            DISCOVER_TV_URL, "series", TV_GENRE_ID_TAG_MAP, tv_genre_ids, [], top_decade, api_key
+            DISCOVER_TV_URL, "series", TV_GENRE_ID_TAG_MAP, tv_genre_ids, [],
+            top_decade, api_key, start_page,
         )
         # los keywords, a diferencia de with_people, SÍ funcionan en /tv — así
         # que este es el primer enriquecimiento por item que reciben las series

@@ -201,8 +201,23 @@ WRITING_RULES = (
     "PROHIBIDO nombrar una película que el usuario no puntuó, aunque supongas que la vio "
     "o que le gustaría. Si no hay un título que te sirva, describí el patrón sin nombrar "
     "ninguno. Nunca aclares entre paréntesis que estás suponiendo.\n"
+    # el modelo leía la lista de candidatos como si fuera historial y escribía
+    # "lo que disfrutaste en Memento" sobre OTRO pick de la misma tanda, que el
+    # usuario nunca vio (reportado por Matías, 2026-08-07). La regla de arriba
+    # ya lo prohibía, pero no nombraba esta confusión puntual.
+    "- La lista de títulos sobre los que escribís NO es su historial. Son cosas que "
+    "todavía no vio. Está PROHIBIDO decir que vio, disfrutó o puntuó cualquiera de "
+    "ellos, y PROHIBIDO comparar uno con otro de la misma lista como si conociera "
+    "alguno. Lo único que el usuario vio es lo que está en el perfil y las reseñas.\n"
     "- Citá siempre algo concreto de su perfil o su historial — nada de elogios genéricos "
     "que podrían aplicar a cualquier usuario.\n"
+    # todos los why salían con "tono oscuro + misterio psicológico" porque son
+    # los tags que dominan el perfil (reportado por Matías, 2026-08-07)
+    "- No apoyes todos los textos en los mismos dos o tres rasgos. Si ya usaste uno "
+    "(por ejemplo el tono oscuro, o lo psicológico), el siguiente tiene que entrar por "
+    "otro lado: el ritmo, la estructura, las actuaciones, el humor, la época, la "
+    "dirección, lo que va a sentir al terminarla. Repetir el mismo par de adjetivos en "
+    "los 6 hace que se lean como el mismo texto.\n"
     "- Escribí SOLO palabras reales de español, separadas por espacios. Prohibido pegar "
     "dos palabras o títulos en una sola (ej: \"Zodiacomodoro\") — si dudás de un título, no "
     "lo nombres."
@@ -254,8 +269,17 @@ WRITING_RULES_EN = (
     "a movie the user didn't rate, even if you assume they saw it or would like it. If "
     "there's no title that fits, describe the pattern without naming one. Never clarify in "
     "parentheses that you're guessing.\n"
+    "- The list of titles you're writing about is NOT their history. These are things they "
+    "haven't seen yet. It's FORBIDDEN to say they watched, enjoyed or rated any of them, "
+    "and FORBIDDEN to compare one against another from that same list as if they knew it. "
+    "The only things the user has seen are in the profile and the reviews.\n"
     "- Always cite something concrete from their profile or history — no generic praise "
     "that could apply to any user.\n"
+    "- Don't lean every text on the same two or three traits. If you already used one (say "
+    "the dark tone, or the psychological angle), the next one has to come in from somewhere "
+    "else: the pacing, the structure, the performances, the humor, the era, the directing, "
+    "how they'll feel when it ends. Repeating the same pair of adjectives across all 6 "
+    "makes them read as the same text.\n"
     "- Write ONLY real English words, separated by spaces. Never glue two words or titles "
     "together into one (e.g. \"Zodiacobsession\") — if you're unsure about a title, don't "
     "name it."
@@ -333,7 +357,9 @@ def _build_prompt(
         # pero repetirla acá, pegada al schema de salida, es donde más pesa.
         "IMPORTANTE: cada \"title\" que devuelvas tiene que ser una copia exacta de un título "
         "de la lista de candidatos de arriba. No seleccionés una película o serie real que no "
-        "esté en esa lista, aunque le quede mejor al usuario.\n\n"
+        "esté en esa lista, aunque le quede mejor al usuario. En particular, los títulos del "
+        "perfil y de las reseñas NO son elegibles: esos ya los vio, recomendárselos de vuelta "
+        "no le sirve de nada. Están ahí solo para que entiendas su gusto y los cites.\n\n"
         "Respondé ÚNICAMENTE con un JSON válido, sin texto ni markdown alrededor, con esta forma "
         'exacta: {"taste_summary": "...", "picks": [{"title": "...", "why": "...", '
         '"match_score": 85}, ...]}'

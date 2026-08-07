@@ -803,7 +803,10 @@ def test_fetch_personalized_candidates_adds_people_only_pass_for_director_matche
 
     movie_calls = [url for url in calls if "discover/movie" in url]
     people_only_calls = [url for url in movie_calls if "with_people" in url and "with_genres" not in url]
-    assert len(people_only_calls) == 1  # la pasada people-only existe, separada de género+exploration
+    # la pasada people-only existe, separada de género+exploration. Se queda en
+    # UNA página a propósito: es angosta (todo lo del director/actor), se agota
+    # enseguida, y la que pagina en profundidad es la de solo-género.
+    assert len(people_only_calls) == 1
 
     director_movie = next(c for c in candidates if c["title"] == "Director Movie")
     assert director_movie["director"] == "A Director"
@@ -1557,3 +1560,38 @@ def test_fetch_popular_titles_excludes_unreleased_titles(monkeypatch) -> None:
 
     titles = {item["title"] for item in popular}
     assert titles == {"Ya Estrenada"}
+
+
+def test_personalized_pool_advances_pages_instead_of_always_page_one(monkeypatch) -> None:
+    # "¿en serio hay solo 4 películas en todo el mundo?" (Matías, 2026-08-07):
+    # el pool pedía SIEMPRE la página 1, así que con la exclusión de
+    # ya-recomendados "Nuevos picks" se quedaba sin nada nuevo. Medido contra
+    # TMDb: un perfil de género típico tiene ~7.500 títulos, y mirábamos 20.
+    calls: list[str] = []
+
+    def fake_get_json(url: str) -> dict:
+        calls.append(url)
+        return {"results": []}
+
+    monkeypatch.setattr(tmdb_client, "_get_json", fake_get_json)
+    monkeypatch.setattr(tmdb_client, "_resolve_person_id", lambda name, dept: 525)
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    # con directores conocidos: es justo el caso que quedaba sin ninguna
+    # consulta ancha, porque todas las pasadas llevaban with_people
+    profile = {
+        "genre_breakdown": [{"genre": "Drama", "weight": 10.0}],
+        "decade_breakdown": [],
+        "top_directors": [{"name": "A Director", "count": 3}],
+        "top_actors": [],
+    }
+
+    tmdb_client.fetch_personalized_candidates(profile, mood="", kind_filter="movie", start_page=4)
+
+    movie_calls = [url for url in calls if "discover/movie" in url]
+    # la pasada ancha: género sin with_people, que es la que tiene cientos de
+    # páginas de margen. Arranca donde se le pide en vez de la página 1 fija.
+    wide = [url for url in movie_calls if "with_genres=18" in url and "with_people" not in url]
+    assert sorted(url.rsplit("page=", 1)[1] for url in wide) == ["4", "5", "6"]
+    # las angostas siguen en una sola página: pedirles la 6 devuelve vacío
+    narrow = [url for url in movie_calls if "with_people" in url]
+    assert all(url.endswith("page=1") for url in narrow)

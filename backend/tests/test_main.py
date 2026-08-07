@@ -784,7 +784,7 @@ def test_recommend_genres_mode_uses_targeted_fetch_not_profile_pool(monkeypatch)
     )
     monkeypatch.setattr(
         "backend.app.main.tmdb_client.fetch_personalized_candidates",
-        lambda profile, mood, kind_filter: (_ for _ in ()).throw(
+        lambda profile, mood, kind_filter, start_page=1: (_ for _ in ()).throw(
             AssertionError("no debería llamarse en mode=genres")
         ),
     )
@@ -1289,7 +1289,7 @@ def test_recommend_zip_persists_taste_profile_for_reuse(monkeypatch) -> None:
     )
     seen_kind_filters: list[str] = []
 
-    def fake_personalized(profile, mood, kind_filter):
+    def fake_personalized(profile, mood, kind_filter, start_page=1):
         seen_kind_filters.append(kind_filter)
         return [{"title": "Dark Pick", "year": 2020, "kind": "movie", "tags": ["dark"]}]
 
@@ -1598,7 +1598,7 @@ def _mock_strong_profile_match(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         "backend.app.main.tmdb_client.fetch_personalized_candidates",
-        lambda profile, mood, kind_filter: [
+        lambda profile, mood, kind_filter, start_page=1: [
             {
                 "title": "Directed By Fave",
                 "year": 2020,
@@ -2256,7 +2256,7 @@ def test_new_picks_keeps_available_unseen_titles_with_llm_enabled(monkeypatch) -
     ]
     monkeypatch.setattr(
         "backend.app.main.tmdb_client.fetch_personalized_candidates",
-        lambda profile, mood, kind_filter: strong_pool,
+        lambda profile, mood, kind_filter, start_page=1: strong_pool,
     )
     monkeypatch.setattr("backend.app.main.tmdb_client.fetch_candidates", lambda mood, pages=2: [])
 
