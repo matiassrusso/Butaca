@@ -514,25 +514,18 @@ def _pick_match_score(pick: dict, fallback: int) -> int:
     return score if 1 <= score <= 99 else fallback
 
 
-def refine_recommendations(
-    ratings: list[RatedItem], mood: str, heuristic: RecommendResponse, lang: str = "es"
-) -> RecommendResponse:
-    api_key = os.environ.get("NVIDIA_API_KEY")
-    if not api_key:
-        raise LlmError("NVIDIA_API_KEY no configurada.")
-    if not heuristic.recommendations:
-        raise LlmError("No hay candidatos para refinar.")
+def _select_picks(
+    result: dict, heuristic: RecommendResponse
+) -> tuple[list, set[str], list[str]]:
+    """Mapea los picks que devolvió el modelo contra los candidatos reales.
 
-    cache_key = _refine_cache_key(ratings, mood, heuristic, lang)
-    result = _get_cached_refine(cache_key)
-    cache_hit = result is not None
-    if result is None:
-        result = _call_nvidia_with_fallback(_build_prompt(ratings, mood, heuristic, lang), api_key)
-
+    Devuelve (picks_válidos, claves_elegidas, títulos_que_no_matchearon).
+    Extraído para poder correrlo dos veces: una por la respuesta original y
+    otra por la del reintento (ver refine_recommendations)."""
     by_title = {_title_key(rec.title): rec for rec in heuristic.recommendations}
-    reordered = []
-    selected_keys = set()
-    unmatched = []
+    reordered: list = []
+    selected_keys: set[str] = set()
+    unmatched: list[str] = []
     for pick in result.get("picks", []):
         raw_title = str(pick.get("title", ""))
         key = _title_key(raw_title)
@@ -548,14 +541,56 @@ def refine_recommendations(
             continue
         reordered.append(
             rec.model_copy(
-                update={
-                    "why": why or rec.why,
-                    "match_score": match_score,
-                    "refined": True,
-                }
+                update={"why": why or rec.why, "match_score": match_score, "refined": True}
             )
         )
         selected_keys.add(key)
+    return reordered, selected_keys, unmatched
+
+
+def refine_recommendations(
+    ratings: list[RatedItem], mood: str, heuristic: RecommendResponse, lang: str = "es"
+) -> RecommendResponse:
+    api_key = os.environ.get("NVIDIA_API_KEY")
+    if not api_key:
+        raise LlmError("NVIDIA_API_KEY no configurada.")
+    if not heuristic.recommendations:
+        raise LlmError("No hay candidatos para refinar.")
+
+    cache_key = _refine_cache_key(ratings, mood, heuristic, lang)
+    result = _get_cached_refine(cache_key)
+    cache_hit = result is not None
+    if result is None:
+        result = _call_nvidia_with_fallback(_build_prompt(ratings, mood, heuristic, lang), api_key)
+
+    reordered, selected_keys, unmatched = _select_picks(result, heuristic)
+
+    # Reintento con corrección explícita cuando NINGÚN pick matcheó.
+    #
+    # El modelo devuelve JSON perfectamente válido pero elige títulos que no
+    # están en la lista de candidatos — casi siempre películas del historial
+    # del propio usuario, que ya vio (medido con el perfil de Matías,
+    # 2026-08-07: una tanda entera devolvió 6 de 6 así, y se perdieron los 6
+    # "why"). Como la respuesta no es un error, el reintento de
+    # _call_nvidia_with_fallback no se dispara: solo cubre timeouts y JSON roto.
+    #
+    # La regla del prompt que prohíbe esto ya existe y aun así pasa, así que
+    # este es el segundo intento nombrándole lo que rechazó. Solo cuando la
+    # pérdida es total: reintentar también las tandas parciales duplicaría la
+    # llamada casi siempre, por una mejora bastante menor.
+    if not reordered and unmatched and not cache_hit:
+        logger.info("Ningún pick del LLM matcheó; reintentando con corrección explícita")
+        result = _call_nvidia_with_fallback(
+            _build_prompt(ratings, mood, heuristic, lang)
+            + "\n\nINTENTO ANTERIOR RECHAZADO: devolviste "
+            + ", ".join(f'"{title}"' for title in unmatched[:6])
+            + ". Ninguno de esos está en la lista de candidatos de arriba — varios "
+            "son títulos que el usuario YA VIO y que están en su perfil solo para "
+            "que entiendas su gusto. Elegí de nuevo, COPIANDO los títulos "
+            "exactamente como aparecen en la lista de candidatos.",
+            api_key,
+        )
+        reordered, selected_keys, unmatched = _select_picks(result, heuristic)
 
     if unmatched:
         logger.warning(

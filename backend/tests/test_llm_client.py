@@ -565,21 +565,45 @@ def test_refine_does_not_cache_a_response_that_failed_validation(monkeypatch) ->
     monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
     calls: list[int] = []
 
-    def failing_then_ok(prompt: str, api_key: str) -> dict:
+    def always_invented(prompt: str, api_key: str) -> dict:
         calls.append(1)
-        if len(calls) == 1:
-            return {"taste_summary": "x", "picks": [{"title": "Peli Inventada", "why": "no"}]}
-        return {"taste_summary": "ok", "picks": [{"title": "Fake Thriller", "why": "sí"}]}
+        return {"taste_summary": "x", "picks": [{"title": "Peli Inventada", "why": "no"}]}
 
-    monkeypatch.setattr(llm_client, "_call_nvidia_with_fallback", failing_then_ok)
+    monkeypatch.setattr(llm_client, "_call_nvidia_with_fallback", always_invented)
 
     with pytest.raises(llm_client.LlmError):
         llm_client.refine_recommendations([], "dark", HEURISTIC)
+    assert len(calls) == 2  # la original + el reintento con corrección
+
+    with pytest.raises(llm_client.LlmError):
+        llm_client.refine_recommendations([], "dark", HEURISTIC)
+    assert len(calls) == 4  # volvió a preguntar, no sirvió la respuesta mala cacheada
+
+
+def test_refine_retries_when_the_model_picks_titles_outside_the_list(monkeypatch) -> None:
+    """Medido con el perfil real de Matías (2026-08-07): una tanda entera vino
+    con 6 de 6 títulos fuera de la lista -- todos películas que él ya había
+    visto -- y se perdieron los 6 "why". La respuesta es JSON válido, así que
+    el reintento de _call_nvidia_with_fallback no se disparaba."""
+    monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
+    prompts: list[str] = []
+
+    def invented_then_valid(prompt: str, api_key: str) -> dict:
+        prompts.append(prompt)
+        if len(prompts) == 1:
+            return {"taste_summary": "x", "picks": [{"title": "Una Que Ya Vio", "why": "no"}]}
+        return {"taste_summary": "ok", "picks": [{"title": "Fake Thriller", "why": "sí"}]}
+
+    monkeypatch.setattr(llm_client, "_call_nvidia_with_fallback", invented_then_valid)
 
     result = llm_client.refine_recommendations([], "dark", HEURISTIC)
 
-    assert len(calls) == 2  # volvió a preguntar en vez de servir la respuesta mala
+    # sin el reintento esto caía al heurístico y perdía el why del agente
     assert [r.title for r in result.recommendations] == ["Fake Thriller"]
+    assert result.recommendations[0].why == "Sí"
+    # y el segundo prompt le nombra lo que rechazó, si no repetiría el error
+    assert "Una Que Ya Vio" in prompts[1]
+    assert "YA VIO" in prompts[1]
 
 
 def test_predict_fit_requires_api_key(monkeypatch) -> None:
