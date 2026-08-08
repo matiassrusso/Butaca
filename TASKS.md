@@ -33,6 +33,71 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
 
 ## Pending
 
+- [ ] **[monetizacion-2026-08-07] Monetización y distribución — pensado con
+      Matías, sin implementar nada todavía.** El objetivo que él fijó no es
+      lucro: es **cubrir el hosting** para sacar el cold start de Render y que
+      la página aguante más gente. Eso baja la vara enormemente — el target
+      real son **~USD 7-26/mes** (Render Starter, y eventualmente Neon), no
+      "un negocio".
+
+      **La restricción que define todo:** cada recomendación cuesta 1-2
+      llamadas al LLM más varias a TMDb. PERO el costo está mucho más acotado
+      de lo que parecía: una sola llamada escribe los 6 "why" (no una por
+      película), y con el tope de 20/día el techo es **40 llamadas al LLM por
+      usuario por día**, en el peor caso. Y si la cuota se agota **la página
+      no se rompe**: `_finish_recommend` degrada al heurístico y sigue
+      devolviendo 6 picks con su why. Desde que el motor dueña el match_score
+      (2026-08-07), ese modo sin LLM es totalmente coherente. Conclusión: hay
+      margen para el orden de los 100 usuarios antes de que el costo importe.
+
+      **Descartado con razón, no volver a proponerlo:**
+      - **BYOK** — Matías: "es un quilombo para el usuario promedio conseguir
+        la key de algún LLM". Correcto, es un no-arrancás para el 99%.
+      - **Suscripción por uso ilimitado** — forma equivocada para un producto
+        con costo marginal real: tu usuario más entusiasta es el que te hace
+        perder plata. Y la aritmética no cierra: a USD 2/mes hacen falta ~100
+        suscriptores (o sea ~5.000 usuarios activos al 2% de conversión).
+
+      **La forma que sí encaja: productos de compute ACOTADO**, donde sabés
+      lo que cuesta producirlos antes de cobrar. "Tu año en Butaca" tiene
+      exactamente esa forma (se genera una vez, alto valor percibido,
+      compartible por naturaleza). "¿Qué vemos juntos?" también.
+
+      **Anuncios (preguntado 2026-08-07) — el riesgo grande a verificar
+      ANTES de nada:** los términos de la API de TMDb distinguen uso comercial
+      de no comercial, y poner publicidad probablemente convierta al sitio en
+      comercial. Eso puede costar la API key, o sea el sitio entero. **Hay que
+      leer los términos y/o escribirles antes de tocar un ad.** Aparte:
+      con tráfico LATAM el RPM es bajo (~USD 0,50-1,50), así que cubrir USD 7
+      pide del orden de 10.000 pageviews/mes; suma cookie consent, política de
+      privacidad, y rompe la estética "Hybrid critic notebook" que costó armar.
+      Mala relación riesgo/beneficio para el objetivo real.
+
+      **Mejor encaje para "cubrir el hosting": donaciones.** Cafecito (argentino,
+      cobra en pesos, sin fricción de cambio) o Ko-fi. Un link chico en el
+      footer, cero daño visual, cero carga legal, y con 2-3 personas ya cubrís
+      un Render Starter. Es lo que hace todo proyecto indie y nadie lo juzga.
+
+      **El bloqueante real no es el modelo, es la distribución.** La ventaja
+      construida el 2026-08-07 sin buscarlo: el sitio es bilingüe y **el
+      mercado hispanohablante está desatendido** para esto (Letterboxd y las
+      herramientas de recomendación son en inglés). Es más fácil ser conocido
+      en un espacio vacío que competir en el saturado.
+
+      **Orden propuesto:** (1) "Tu año en Butaca" gratis y compartible como
+      motor de tráfico; (2) salir a buscar usuarios en español (comunidades de
+      cine latinas, Reddit, Twitter de cine) con el hook "importá tu Letterboxd
+      y te digo por qué te va a gustar, en castellano"; (3) link de donación
+      cuando haya gente; (4) cobrar un artefacto acotado recién si hay demanda
+      real. Los pasos 1-2 valen aunque nunca entre un peso: son lo que
+      convierte a Butaca en un proyecto con usuarios reales, que es lo que le
+      sirve a Matías para conseguir trabajo.
+
+      **Palancas de costo si algún día aprieta** (ninguna toca al usuario):
+      bajar el tope diario de 20 a 10 (una env var, cero código), sacar el
+      reintento del `llm_client` (corta el peor caso a la mitad), o dejar que
+      degrade al heurístico.
+
 - [ ] **[wow-features-2026-08-03] Tres features "para asombrarse", aprobadas
       por Matías** — pidió "opciones interactivas... para divertirse, o para
       asombrarse con la producción que tiene la página detrás". Se investigaron
