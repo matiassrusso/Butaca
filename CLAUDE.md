@@ -47,14 +47,16 @@ Solo yo (Matías), con posible coordinación multi-agente (Claude, Codex) docume
 ## Estado actual
 _Última actualización: 2026-08-07_
 
-**Qué se hizo (sesión larga, 13 commits `5157503`..`5abb1f6`, 395 → 422 tests, todo pusheado y deployado):**
+**Qué se hizo (sesión larga, 15 commits `5157503`..`287dc0c`, 395 → 423 tests, todo pusheado y deployado):**
 
 - **Cerrado lo de la sesión anterior** (piso de match + palabras pegadas), verificado contra la API real de NVIDIA antes de commitear.
 - **Toda la página en ES/EN**, incluidos los "why" del agente: toggle en la navbar persistido en `localStorage`, variantes en inglés de `AGENT_VOICE`/`WRITING_RULES`/`SCORE_RULE`, el idioma dentro de las cache keys del `llm_client`, y el "why" heurístico traducido con su propio vocabulario de tags. Los errores del backend también siguen el idioma (`backend/app/errors.py`).
 - **Cuatro bugs de fondo del motor**, todos reportados por Matías usando la página y todos con causa raíz distinta a la que parecía: la tanda quedaba en 4 picks (el filtro de piso descartaba sin reponer); el pool era **siempre las mismas 20 películas** (`page: 1` hardcodeado, y todas las consultas llevaban `with_people`, que se agota en 2-3 páginas); rechazar anime no filtraba nada (el género 16 mapeaba solo a `"stylized"`); y el LLM devolvía **títulos del propio historial** como picks, perdiendo tandas enteras de "why".
 - **Feedback y datos:** "Me interesa" pasó a mover el motor (era un botón muerto), botón "La quiero ver" en `/rate` que va a la watchlist, y una **migración one-off ya corrida en producción** que rellenó el vocabulario de tags viejo (406 filas escaneadas, 85 actualizadas, idempotente).
+- **El cambio más grande en calidad de recomendación, y el último del día:** el pool estaba sesgado a anime y cine nicho por el **piso de votos** (`vote_count.gte=200` con `sort_by=vote_average.desc` premia lo nicho-pero-adorado). Medido sobre 60 títulos: **26% animadas y 48% no-inglesas**. Subido a `MIN_VOTE_COUNT=3000` → 10% y 25%, con la cabeza del pool pasando de "Attack on Titan, Demon Slayer" a "The Dark Knight, Interstellar, Memento". Matías lo probó y confirmó mejora.
+- **Se anotó el análisis de monetización y distribución** en `TASKS.md` (`monetizacion-2026-08-07`), sin implementar nada.
 
-**Dónde retomar:** Nada a medio hacer, working tree limpio y todo deployado. Lo que sigue es **que Matías use la página con su cuenta real** y reporte — cambiaron el pool, el piso, el número, el prompt y los tags históricos, y varias de esas solo se juzgan con su historial. Dos cosas que él ya marcó como pendientes de decisión suya: (1) el **relleno heurístico** puede poner cards flojas al final de la tanda, "6 con relleno" vs "4 buenas" es llamada suya; (2) las **3 features "wow"** (`TASKS.md`, `wow-features-2026-08-03`) siguen esperando que defina qué sumarles.
+**Dónde retomar:** Nada a medio hacer, working tree limpio y todo deployado. Matías ya probó lo del pool y confirmó mejora ("noto unas mejorías", y las animadas dejaron de aparecerle). Las tres opciones que quedaron sobre la mesa, en sus palabras: **embeddings para el matching** (los 940 de la Fase 4 hoy alimentan SOLO el picker de movimientos, el scoring no los toca — es la pieza más grande que queda, y se justifica más como portfolio que por calidad de picks), **"¿qué vemos juntos?"** (mergear perfiles de gusto; la mejor feature de producto que salió de la charla, y Letterboxd no la tiene), y las **3 features "wow"** (`wow-features-2026-08-03`), que siguen esperando que defina qué sumarles. Además, decisión suya pendiente: el **relleno heurístico** puede poner cards flojas al final de la tanda, "6 con relleno" vs "4 buenas".
 
 **Bloqueos / decisiones pendientes:** Ninguno técnico. Quedó sin hacer una **auditoría de frentes que no se revisaron** (deuda de código, ops, cobertura de tests): el workflow que la iba a correr murió por límite de sesión y después se priorizó lo que Matías iba reportando en vivo.
 
@@ -64,7 +66,8 @@ _Última actualización: 2026-08-07_
 - **El orden de los picks es una mezcla y nunca hubo un sort en la respuesta final** (verificado en el historial de git): primero los que eligió el LLM en SU orden, después el relleno en orden del motor. Una tanda se ve perfectamente ordenada solo cuando el LLM no aportó nada.
 - **La única fuente de idioma del backend es el header `Accept-Language`.** No hay query param ni campo de body: se unificó porque habían quedado dos mecanismos y el sitio respondía en idiomas distintos según el endpoint. El frontend lo manda envolviendo `fetch` una vez al arrancar (`frontend/src/lib/apiLang.ts`) en vez de tocar las ~40 llamadas sueltas.
 - **Los tags se guardan CONGELADOS en `recommendations_served` al servir cada pick**, y `get_feedback_signals` los lee de ahí. Por eso agregar un tag al vocabulario no cuenta retroactivamente, y por eso existe `POST /admin/retag-served` (aditivo: suma los que faltan y **nunca pisa** los keyword tags ni los `vibe-l2:N`, que TMDb no devuelve al re-resolver).
-- **`BUTACA_RECOMMEND_DAILY_LIMIT` se subió a 200 en Render** (default del código: 20). Matías se comió el límite probando. Ojo: el reintento nuevo del `llm_client` puede hacer **2 llamadas al LLM por recomendación**, así que la cuota de NVIDIA rinde la mitad en el peor caso.
+- **El tope diario de recomendaciones quedó en 20**, el default del código: `BUTACA_RECOMMEND_DAILY_LIMIT` se subió a 200 un rato para que Matías pudiera probar y después **se borró la env var a pedido suyo** ("si no todo el mundo se puede poner a hacer requests y no termina más"). Verificado: corta en el intento 21. Ojo: el reintento nuevo del `llm_client` puede hacer **2 llamadas al LLM por recomendación**, así que el techo real es ~40 llamadas por usuario por día.
+- **Un cambio de env var en Render NO dispara redeploy solo**, y las env vars se leen al arrancar el proceso — así que el valor queda guardado pero muerto hasta que corra un deploy. Costó un diagnóstico equivocado hoy: chequear que el backend responda 200 no prueba nada, porque contesta el proceso viejo.
 - **Para cambiar env vars de Render usar el endpoint de UNA key** (`PUT /v1/services/{id}/env-vars/{key}`); el plural reemplaza TODAS y borraría el resto.
 - **Los tests corren desde la raíz del repo**, `python -m pytest` (no `cd backend && pytest`). El typecheck real del frontend es `npm run build`.
 - **Un chequeo mecánico que vale la pena repetir** al tocar i18n: comparar las claves definidas en `lib/translations/` contra las usadas con `t()`. Encontró 10 claves huérfanas que en realidad eran texto todavía hardcodeado en `MovieModal.tsx`.
@@ -409,8 +412,12 @@ un reintento en código, porque la regla en el prompt ya existía y no alcanzaba
 Cerró con una discusión de diseño que vale releer: Matías propuso que las
 tandas fueran estrictamente descendentes, y tras discutir los costos lo
 descartó él mismo. El fix real era otro: el número lo volvió a dueñar el motor
-y el descenso apareció solo. 13 commits, 422 tests, migración de tags corrida
-en producción.
+y el descenso apareció solo. Y el último hallazgo fue el más grande: "son
+pésimas recomendaciones" resultó ser el **piso de votos** del pool (200),
+que con `sort_by=vote_average.desc` premiaba lo nicho-pero-adorado — 26% del
+pool era anime sin importar el gusto. Subirlo a 3000 cambió la cabeza del
+pool de "Attack on Titan" a "The Dark Knight", y Matías confirmó la mejora
+probándolo. 15 commits, 423 tests, migración de tags corrida en producción.
 
 ### 2026-08-05 — piso de match roto en "Nuevos picks", y una palabra inventada por el LLM
 Matías mandó capturas de `/recommend` con 35%/40%/55% mezclados con 78%/82% y un
