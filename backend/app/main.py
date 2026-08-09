@@ -31,6 +31,8 @@ from . import (
 from .models import (
     AuthResponse,
     CatalogStatsResponse,
+    ChatRequest,
+    ChatResponse,
     DeleteAccountRequest,
     EmailVerificationConfirmRequest,
     FeedbackRequest,
@@ -74,6 +76,11 @@ RECENT_WINDOW = 10  # how many of the user's most-recently-watched titles count 
 MAX_SELECTED_OPTIONS = 5
 MIN_MANUAL_RATINGS = 10  # onboarding without Letterboxd needs at least this many rated seed titles
 DEFAULT_RECOMMEND_DAILY_LIMIT = 20  # per user; protects TMDb/NIM quotas. 0 = off.
+# Contador propio, separado del de recomendaciones: una charla es la forma más
+# fácil de fundir la cuota de NVIDIA (compartida con /recommend, /weekly y el
+# labeling de clusters), y un mensaje cuesta bastante menos que una tanda de
+# picks, así que el número no puede ser el mismo. Conservador a propósito.
+DEFAULT_CHAT_DAILY_LIMIT = 30  # per user; 0 = off.
 WATCHLIST_MATCH_CAP = 60  # how many watchlist titles to resolve against TMDb per request
 MOVEMENT_MEMBER_CAP = 40  # títulos por movimiento elegido que se resuelven contra TMDb
 MIN_MOVEMENT_SIZE = 6  # un movimiento con menos títulos que una tanda de picks no se ofrece
@@ -132,6 +139,39 @@ def _rebuild_ratings(user_id: int) -> list[RatedItem]:
         )
         for item in db.get_watched_items(user_id)
     ]
+
+
+def _chat_daily_limit() -> int:
+    raw = os.environ.get("BUTACA_CHAT_DAILY_LIMIT", "").strip()
+    if not raw:
+        return DEFAULT_CHAT_DAILY_LIMIT
+    try:
+        return int(raw)
+    except ValueError:
+        return DEFAULT_CHAT_DAILY_LIMIT
+
+
+# ponytail: contador en memoria, no una tabla — el de recomendaciones cuenta
+# filas que ya existían (sessions), y el chat no persiste nada, así que una
+# tabla nueva existiría SOLO para contar. El techo conocido: se resetea al
+# reiniciar el proceso y no se comparte entre workers (Render free corre uno
+# solo). Si algún día hay más de un worker, esto pasa a una tabla o a Redis.
+_CHAT_USAGE: dict[int, tuple[str, int]] = {}
+_CHAT_USAGE_LOCK = threading.Lock()
+
+
+def _enforce_chat_rate_limit(user_id: int, lang: str = "es") -> None:
+    limit = _chat_daily_limit()
+    if limit <= 0:
+        return
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    with _CHAT_USAGE_LOCK:
+        day, count = _CHAT_USAGE.get(user_id, (today, 0))
+        if day != today:
+            count = 0
+        if count >= limit:
+            raise HTTPException(status_code=429, detail=errors.msg("chat_rate_limited", lang))
+        _CHAT_USAGE[user_id] = (today, count + 1)
 
 
 def _enforce_recommend_rate_limit(user_id: int, lang: str = "es") -> None:
@@ -2071,6 +2111,53 @@ def rate_title(
     )
     db.invalidate_taste_profile(user["id"])
     return {"status": "saved", "rating": payload.rating, "source": "star"}
+
+
+@app.post("/chat", response_model=ChatResponse)
+def chat(
+    payload: ChatRequest,
+    user: sqlite3.Row = Depends(auth.get_current_user),
+    lang: str = Depends(errors.request_lang),
+) -> ChatResponse:
+    """Charla libre con el agente de Butaca, que ya conoce el gusto real de
+    esta persona (pedido de Matías, aprobado 2026-08-09). Es la versión
+    conversacional de lo que hoy solo se puede pedir por el wizard de
+    /recommend; misma voz y mismas reglas de escritura que el resto del sitio
+    (llm_client.AGENT_VOICE), lo único distinto es la TAREA.
+
+    Pide sesión a propósito: sin perfil el chat no aporta nada que no dé
+    cualquier chatbot, y el rate limit necesita un user_id contra el que
+    contar. Un usuario logueado SIN historial sí entra, y el prompt le avisa
+    al agente que no lo conoce en vez de dejarlo inventar.
+
+    Sin historial de conversación en la base: lo sostiene el cliente y lo
+    manda en cada turno. Una tabla existiría solo para reconstruir lo que ya
+    viene en el request.
+
+    No se llama a _enrich_loved_ratings_with_genre_tags como /weekly: son
+    hasta 30 requests a TMDb, y por mensaje de chat es carísimo. El contexto
+    de géneros/directores sale del taste_profile ya persistido, que es más
+    rico y cuesta una query."""
+    messages = [(m.role, m.content.strip()) for m in payload.messages if m.content.strip()]
+    if not messages or messages[-1][0] != "user":
+        raise HTTPException(status_code=400, detail=errors.msg("chat_empty", lang))
+    if not llm_client.is_configured():
+        raise HTTPException(status_code=503, detail=errors.msg("chat_unavailable", lang))
+
+    _enforce_chat_rate_limit(user["id"], lang)
+
+    ratings = _rebuild_ratings(user["id"])
+    profile = db.get_taste_profile(user["id"])
+    try:
+        reply = llm_client.chat_reply(ratings, profile, messages, lang)
+    except llm_client.LlmError as exc:
+        # el fallback de modelos ya se agotó adentro — acá degradamos con un
+        # mensaje honesto en vez de un 500 que el frontend muestra como
+        # "Failed to fetch"
+        logger.warning("Chat LLM failed for user %s: %s", user["id"], exc)
+        raise HTTPException(status_code=503, detail=errors.msg("chat_unavailable", lang)) from exc
+
+    return ChatResponse(reply=reply)
 
 
 @app.post("/profile/watchlist", status_code=201)

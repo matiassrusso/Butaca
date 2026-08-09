@@ -795,6 +795,138 @@ def peek_verdict(
     return _apply_verdict_result(ratings, heuristic, cached_result, lang)
 
 
+def _profile_facts(profile: dict | None) -> str:
+    """Directores/actores/décadas/géneros ya agregados por taste_profile.
+    _profile_block sale de los ratings crudos y no los tiene: el chat es la
+    única pantalla donde el usuario puede preguntar "¿qué directores me
+    gustan?" y esperar una respuesta directa."""
+    if not profile:
+        return ""
+    def _names(key: str) -> str:
+        return ", ".join(entry["name"] for entry in profile.get(key, [])[:5])
+    def _labels(key: str, field: str) -> str:
+        return ", ".join(str(entry[field]) for entry in profile.get(key, [])[:5])
+
+    parts = []
+    if directors := _names("top_directors"):
+        parts.append(f"Directores que más se repiten: {directors}.")
+    if actors := _names("top_actors"):
+        parts.append(f"Actores que más se repiten: {actors}.")
+    if genres := _labels("genre_breakdown", "genre"):
+        parts.append(f"Géneros con más peso: {genres}.")
+    if decades := _labels("decade_breakdown", "decade"):
+        parts.append(f"Décadas que más ve: {decades}.")
+    return " ".join(parts)
+
+
+# Sin tope, una charla larga manda el historial entero en CADA turno: el
+# prompt (y la cuota de NVIDIA, compartida con recomendaciones y veredictos)
+# crece sin techo. El historial lo sostiene el cliente, así que el tope real
+# se aplica acá, no confiando en lo que mande.
+CHAT_HISTORY_TURNS = 10
+
+
+def _chat_history_lines(messages: list[tuple[str, str]], lang: str = "es") -> str:
+    labels = {"es": ("Usuario", "Vos"), "en": ("User", "You")}[normalize_lang(lang)]
+    return "\n".join(
+        f"{labels[0] if role == 'user' else labels[1]}: {content}"
+        for role, content in messages[-CHAT_HISTORY_TURNS:]
+    )
+
+
+# La tarea del chat necesita levantar UNA regla de WRITING_RULES: la que
+# prohíbe nombrar títulos fuera del perfil. Existe porque en /recommend y
+# /weekly los títulos salen de un pool cerrado y nombrar otro rompe el
+# matcheo; en una charla libre, poder decir "mirate Heat" ES la feature. Lo
+# que NO se levanta es lo importante: sigue prohibido afirmar que el usuario
+# vio algo que no puntuó (ese era el bug de fondo, no el nombrar títulos).
+_CHAT_TITLE_OVERRIDE = (
+    "EXCEPCIÓN a la regla de títulos, solo acá: en esta charla SÍ podés nombrar películas "
+    "y series que no están en su historial, porque parte de tu trabajo es recomendarle "
+    "cosas nuevas. Lo que sigue PROHIBIDO es dar por sentado que las vio: si no está en el "
+    "perfil de arriba, no la vio y no la puntuó. Preguntale si la vio en vez de suponerlo."
+)
+_CHAT_TITLE_OVERRIDE_EN = (
+    "EXCEPTION to the title rule, only here: in this conversation you CAN name movies and "
+    "shows that aren't in their history, because part of your job is recommending new "
+    "things. What's still FORBIDDEN is assuming they watched them: if it's not in the "
+    "profile above, they haven't seen it and haven't rated it. Ask instead of assuming."
+)
+_CHAT_TASK = (
+    "Estás charlando con esta persona sobre cine. Respondé su último mensaje: contestá lo "
+    "que preguntó, recomendale algo si lo pide, discutí si no estás de acuerdo. Máximo 4 "
+    "frases, es una charla y no un ensayo. Si el mensaje no tiene nada que ver con cine, "
+    "decilo con humor y volvé al tema."
+)
+_CHAT_TASK_EN = (
+    "You're chatting with this person about movies. Answer their last message: address what "
+    "they asked, recommend something if they want it, push back if you disagree. Four "
+    "sentences max, this is a conversation and not an essay. If the message has nothing to "
+    "do with film, say so with some humor and steer back."
+)
+_CHAT_NO_HISTORY = (
+    "OJO: esta persona todavía no puntuó nada, así que no conocés su gusto. No inventes que "
+    "sabés qué le gusta: decíselo de frente y sugerile que importe su historial de "
+    "Letterboxd o puntúe algunos títulos para que la puedas ayudar en serio."
+)
+_CHAT_NO_HISTORY_EN = (
+    "HEADS UP: this person hasn't rated anything yet, so you don't know their taste. Don't "
+    "pretend you do: tell them straight and suggest importing their Letterboxd history or "
+    "rating a few titles so you can actually help."
+)
+_CHAT_TASK_BY_LANG = {"es": _CHAT_TASK, "en": _CHAT_TASK_EN}
+_CHAT_OVERRIDE_BY_LANG = {"es": _CHAT_TITLE_OVERRIDE, "en": _CHAT_TITLE_OVERRIDE_EN}
+_CHAT_NO_HISTORY_BY_LANG = {"es": _CHAT_NO_HISTORY, "en": _CHAT_NO_HISTORY_EN}
+
+
+def _build_chat_prompt(
+    ratings: list[RatedItem],
+    profile: dict | None,
+    messages: list[tuple[str, str]],
+    lang: str = "es",
+) -> str:
+    """Tarea: conversar. Misma voz y mismas reglas de escritura que
+    _build_prompt y _build_verdict_prompt — ver AGENT_VOICE arriba."""
+    lang = normalize_lang(lang)
+    language_line = "" if lang == "es" else "Write your ENTIRE reply in English.\n\n"
+    facts = _profile_facts(profile)
+    no_history = "" if ratings else f"{_CHAT_NO_HISTORY_BY_LANG[lang]}\n\n"
+    return (
+        f"{_AGENT_VOICE_BY_LANG[lang]}\n\n"
+        f"{language_line}"
+        f"{_profile_block(ratings)}\n"
+        f"{facts}\n\n"
+        f"{no_history}"
+        f"{_CHAT_TASK_BY_LANG[lang]}\n\n"
+        f"{_chat_history_lines(messages, lang)}\n\n"
+        f"{_WRITING_RULES_BY_LANG[lang]}\n\n"
+        f"{_CHAT_OVERRIDE_BY_LANG[lang]}\n\n"
+        f"{_SCORE_RULE_BY_LANG[lang]}\n\n"
+        "Respondé ÚNICAMENTE con un JSON válido, sin texto ni markdown alrededor, con esta "
+        'forma exacta: {"reply": "..."}'
+    )
+
+
+def chat_reply(
+    ratings: list[RatedItem],
+    profile: dict | None,
+    messages: list[tuple[str, str]],
+    lang: str = "es",
+) -> str:
+    """La versión conversacional del agente (/chat). Sin cache: cada turno es
+    distinto del anterior por definición, así que una clave de cache nunca
+    pegaría dos veces — el tope de gasto lo pone el rate limit del endpoint."""
+    api_key = os.environ.get("NVIDIA_API_KEY")
+    if not api_key:
+        raise LlmError("NVIDIA_API_KEY no configurada.")
+
+    result = _call_nvidia_with_fallback(_build_chat_prompt(ratings, profile, messages, lang), api_key)
+    reply = capitalize_sentence(str(result.get("reply", "")).strip())
+    if not reply:
+        raise LlmError("El modelo devolvió una respuesta vacía.")
+    return reply
+
+
 def kickoff_verdict(
     user_id: int, ratings: list[RatedItem], heuristic: RecommendResponse, lang: str = "es"
 ) -> None:

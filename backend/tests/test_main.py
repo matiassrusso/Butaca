@@ -3059,3 +3059,158 @@ def test_engine_owns_the_match_score_but_the_llm_keeps_its_veto(monkeypatch) -> 
     # el veto sigue vivo: el titulo que el LLM puntuo 20 no sobrevive con su
     # score del motor, se cae igual
     assert len(picks) == 6
+
+
+# ─── Chat con tu perfil (/chat) ─────────────────────────────────────────────
+
+
+def _mock_chat(monkeypatch, reply: str = "mirate Heat") -> list[tuple]:
+    """Reemplaza la llamada real al LLM y devuelve la lista de llamadas, para
+    poder afirmar qué contexto le llegó al agente."""
+    monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
+    calls: list[tuple] = []
+
+    def fake_chat_reply(ratings, profile, messages, lang="es"):
+        calls.append((ratings, profile, messages, lang))
+        return reply
+
+    monkeypatch.setattr("backend.app.main.llm_client.chat_reply", fake_chat_reply)
+    return calls
+
+
+def _reset_chat_usage() -> None:
+    from backend.app.main import _CHAT_USAGE
+
+    _CHAT_USAGE.clear()
+
+
+def test_chat_requires_a_session() -> None:
+    # sin sesión no hay perfil que consultar ni contador contra el cual
+    # limitar: el endpoint pide login en vez de degradar a un chatbot genérico
+    response = client.post("/chat", json={"messages": [{"role": "user", "content": "hola"}]})
+
+    assert response.status_code == 401
+
+
+def test_chat_returns_the_agents_reply(monkeypatch) -> None:
+    _reset_chat_usage()
+    calls = _mock_chat(monkeypatch, "Mirate Heat, te va a cerrar.")
+    headers = _auth_headers("chatuser")
+
+    response = client.post(
+        "/chat", headers=headers, json={"messages": [{"role": "user", "content": "algo de acción"}]}
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"reply": "Mirate Heat, te va a cerrar."}
+    assert calls[0][2] == [("user", "algo de acción")]
+
+
+def test_chat_works_without_any_rated_history(monkeypatch) -> None:
+    # usuario recién registrado: el chat tiene que contestar igual (el prompt
+    # le avisa al agente que no lo conoce), no reventar
+    _reset_chat_usage()
+    calls = _mock_chat(monkeypatch)
+    headers = _auth_headers("chatnohistory")
+
+    response = client.post(
+        "/chat", headers=headers, json={"messages": [{"role": "user", "content": "hola"}]}
+    )
+
+    assert response.status_code == 200
+    assert calls[0][0] == []  # sin ratings
+
+
+def test_chat_rejects_an_empty_conversation(monkeypatch) -> None:
+    _reset_chat_usage()
+    _mock_chat(monkeypatch)
+    headers = _auth_headers("chatempty")
+
+    assert client.post("/chat", headers=headers, json={"messages": []}).status_code == 400
+    # el último mensaje tiene que ser del usuario: si no, no hay nada a qué
+    # contestar y se gastaría una llamada al LLM al pedo
+    assert (
+        client.post(
+            "/chat", headers=headers, json={"messages": [{"role": "agent", "content": "hola"}]}
+        ).status_code
+        == 400
+    )
+
+
+def test_chat_503_when_the_llm_is_not_configured(monkeypatch) -> None:
+    _reset_chat_usage()
+    monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
+    headers = _auth_headers("chatnollm")
+
+    response = client.post(
+        "/chat", headers=headers, json={"messages": [{"role": "user", "content": "hola"}]}
+    )
+
+    assert response.status_code == 503
+
+
+def test_chat_degrades_with_an_honest_message_when_the_llm_fails(monkeypatch) -> None:
+    # el fallback de modelos ya se agotó adentro de chat_reply: acá no puede
+    # salir un 500 (el frontend lo muestra como "Failed to fetch")
+    _reset_chat_usage()
+    monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
+
+    def boom(ratings, profile, messages, lang="es"):
+        raise LlmError("NVIDIA caída")
+
+    monkeypatch.setattr("backend.app.main.llm_client.chat_reply", boom)
+    headers = _auth_headers("chatllmdown")
+
+    response = client.post(
+        "/chat", headers=headers, json={"messages": [{"role": "user", "content": "hola"}]}
+    )
+
+    assert response.status_code == 503
+    assert "agente" in response.json()["detail"]
+
+
+def test_chat_enforces_its_own_daily_limit(monkeypatch) -> None:
+    _reset_chat_usage()
+    _mock_chat(monkeypatch)
+    monkeypatch.setenv("BUTACA_CHAT_DAILY_LIMIT", "2")
+    headers = _auth_headers("chatlimited")
+    body = {"messages": [{"role": "user", "content": "hola"}]}
+
+    assert client.post("/chat", headers=headers, json=body).status_code == 200
+    assert client.post("/chat", headers=headers, json=body).status_code == 200
+    assert client.post("/chat", headers=headers, json=body).status_code == 429
+
+
+def test_chat_limit_is_per_user(monkeypatch) -> None:
+    _reset_chat_usage()
+    _mock_chat(monkeypatch)
+    monkeypatch.setenv("BUTACA_CHAT_DAILY_LIMIT", "1")
+    headers_a = _auth_headers("chatlim_a")
+    headers_b = _auth_headers("chatlim_b")
+    body = {"messages": [{"role": "user", "content": "hola"}]}
+
+    assert client.post("/chat", headers=headers_a, json=body).status_code == 200
+    assert client.post("/chat", headers=headers_a, json=body).status_code == 429
+    assert client.post("/chat", headers=headers_b, json=body).status_code == 200
+
+
+def test_chat_rejects_an_oversized_message(monkeypatch) -> None:
+    _reset_chat_usage()
+    _mock_chat(monkeypatch)
+    headers = _auth_headers("chatbigmsg")
+
+    response = client.post(
+        "/chat", headers=headers, json={"messages": [{"role": "user", "content": "x" * 5000}]}
+    )
+
+    assert response.status_code == 422
+
+
+def test_chat_follows_the_accept_language_header(monkeypatch) -> None:
+    _reset_chat_usage()
+    calls = _mock_chat(monkeypatch)
+    headers = {**_auth_headers("chatlangs"), "Accept-Language": "en"}
+
+    client.post("/chat", headers=headers, json={"messages": [{"role": "user", "content": "hi"}]})
+
+    assert calls[0][3] == "en"

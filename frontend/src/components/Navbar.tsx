@@ -23,6 +23,8 @@ export function Navbar() {
   const { t } = useLang();
 
   const menuItems: StaggeredMenuItem[] = [
+    // primero de la lista: es la feature nueva y la que menos se descubre sola
+    { label: t("chat.navLabel"), ariaLabel: t("chat.navAria"), link: "/chat" },
     { label: t("nav.profile"), ariaLabel: t("nav.profileAria"), link: "/profile" },
     { label: t("nav.rate"), ariaLabel: t("nav.rateAria"), link: "/rate" },
     { label: t("nav.games"), ariaLabel: t("nav.gamesAria"), link: "/games" },

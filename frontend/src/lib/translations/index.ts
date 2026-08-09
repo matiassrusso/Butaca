@@ -3,6 +3,7 @@
 // que no colisionan entre módulos.
 
 import { AUTH } from "./auth";
+import { CHAT } from "./chat";
 import { GAMES } from "./games";
 import { HISTORY } from "./history";
 import { HOME } from "./home";
@@ -23,5 +24,6 @@ export const DICTIONARY: Record<string, Entry> = {
   ...PROFILE,
   ...RATE,
   ...GAMES,
+  ...CHAT,
   ...MODAL,
 };

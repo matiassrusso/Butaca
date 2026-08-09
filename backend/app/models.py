@@ -253,6 +253,24 @@ class WatchlistAddRequest(BaseModel):
     tmdb_id: int | None = None
 
 
+class ChatMessage(BaseModel):
+    role: Literal["user", "agent"]
+    # el tope de largo es la primera línea de defensa del prompt: sin esto un
+    # solo mensaje pegado infla la llamada al LLM sin límite
+    content: str = Field(min_length=1, max_length=1000)
+
+
+class ChatRequest(BaseModel):
+    # el historial lo sostiene el cliente y lo manda entero en cada turno (no
+    # hay tabla de conversaciones a propósito); el backend igual lo recorta a
+    # llm_client.CHAT_HISTORY_TURNS antes de armar el prompt
+    messages: list[ChatMessage] = Field(default_factory=list, max_length=60)
+
+
+class ChatResponse(BaseModel):
+    reply: str
+
+
 class LetterboxdUsernameRequest(BaseModel):
     # "" desvincula la cuenta; el largo tope es el de Letterboxd
     letterboxd_username: str = Field(default="", max_length=100)

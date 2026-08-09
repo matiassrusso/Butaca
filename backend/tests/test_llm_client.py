@@ -859,3 +859,100 @@ def test_taste_digest_counts_ratings_without_a_review() -> None:
     # sin el fix, no había línea de patrones en absoluto
     assert "Patrones que se repiten" in digest
     assert TAG_PHRASES["dark"] in digest
+
+
+# ─── Chat (/chat) ───────────────────────────────────────────────────────────
+
+CHAT_RATINGS = [RatedItem(title="Old Movie", rating=5, review="dark and psychological")]
+
+
+def test_chat_prompt_shares_the_same_voice_and_writing_rules() -> None:
+    # mismo invariante que los dos prompts anteriores: el chat es una TAREA
+    # nueva, no una voz nueva (pedido de Matías, 2026-07-31).
+    prompt_es = llm_client._build_chat_prompt(CHAT_RATINGS, None, [("user", "hola")])
+    prompt_en = llm_client._build_chat_prompt(CHAT_RATINGS, None, [("user", "hi")], lang="en")
+
+    for shared in (llm_client.AGENT_VOICE, llm_client.WRITING_RULES, llm_client.SCORE_RULE):
+        assert shared in prompt_es
+    for shared in (llm_client.AGENT_VOICE_EN, llm_client.WRITING_RULES_EN, llm_client.SCORE_RULE_EN):
+        assert shared in prompt_en
+    # las reglas en español no pueden colarse en el prompt inglés
+    assert llm_client.WRITING_RULES not in prompt_en
+
+
+def test_chat_prompt_lifts_the_title_ban_without_lifting_the_seen_ban() -> None:
+    # WRITING_RULES prohíbe nombrar títulos fuera del perfil (existe para el
+    # pool cerrado de /recommend). En una charla eso mataría la feature, así
+    # que la tarea la levanta -- pero NO la regla de no inventar que lo vio.
+    prompt = llm_client._build_chat_prompt(CHAT_RATINGS, None, [("user", "recomendame algo")])
+
+    assert "EXCEPCIÓN" in prompt
+    assert "no la vio y no la puntuó" in prompt
+
+
+def test_chat_prompt_warns_the_agent_when_there_is_no_history() -> None:
+    # usuario logueado sin nada puntuado: el agente tiene que decir que no lo
+    # conoce en vez de improvisar un perfil
+    prompt = llm_client._build_chat_prompt([], None, [("user", "que me recomendas")])
+
+    assert "todavía no puntuó nada" in prompt
+    assert "todavía no puntuó nada" not in llm_client._build_chat_prompt(
+        CHAT_RATINGS, None, [("user", "hola")]
+    )
+
+
+def test_chat_prompt_caps_the_conversation_history() -> None:
+    # sin tope el prompt (y la cuota de NVIDIA) crece con cada turno
+    messages = [("user", f"mensaje {n}") for n in range(30)]
+
+    prompt = llm_client._build_chat_prompt(CHAT_RATINGS, None, messages)
+
+    assert "mensaje 29" in prompt
+    assert f"mensaje {30 - llm_client.CHAT_HISTORY_TURNS}" in prompt
+    assert f"mensaje {30 - llm_client.CHAT_HISTORY_TURNS - 1}" not in prompt
+
+
+def test_chat_prompt_includes_persisted_taste_profile_facts() -> None:
+    profile = {
+        "top_directors": [{"name": "David Fincher", "count": 4}],
+        "top_actors": [{"name": "Toni Collette", "count": 3}],
+        "genre_breakdown": [{"genre": "Thriller", "weight": 20.0}],
+        "decade_breakdown": [{"decade": 1990, "count": 7}],
+    }
+
+    prompt = llm_client._build_chat_prompt(CHAT_RATINGS, profile, [("user", "hola")])
+
+    assert "David Fincher" in prompt
+    assert "Toni Collette" in prompt
+    assert "Thriller" in prompt
+    assert "1990" in prompt
+
+
+def test_chat_reply_requires_api_key(monkeypatch) -> None:
+    monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
+
+    with pytest.raises(llm_client.LlmError):
+        llm_client.chat_reply([], None, [("user", "hola")])
+
+
+def test_chat_reply_returns_the_models_text(monkeypatch) -> None:
+    monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        llm_client,
+        "_call_nvidia_with_fallback",
+        lambda prompt, api_key: {"reply": "mirate Heat, te va a cerrar"},
+    )
+
+    assert llm_client.chat_reply(CHAT_RATINGS, None, [("user", "algo de acción")]) == (
+        "Mirate Heat, te va a cerrar"
+    )
+
+
+def test_chat_reply_rejects_an_empty_answer(monkeypatch) -> None:
+    # un reply vacío llega a pantalla como una burbuja en blanco; mejor que el
+    # endpoint degrade con su mensaje honesto
+    monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
+    monkeypatch.setattr(llm_client, "_call_nvidia_with_fallback", lambda prompt, api_key: {"reply": "  "})
+
+    with pytest.raises(llm_client.LlmError):
+        llm_client.chat_reply(CHAT_RATINGS, None, [("user", "hola")])

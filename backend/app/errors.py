@@ -78,6 +78,19 @@ MESSAGES: dict[str, dict[str, str]] = {
         "es": "Modo de recomendación inválido.",
         "en": "Invalid recommendation mode.",
     },
+    # ─── Chat ───────────────────────────────────────────────────────────
+    "chat_rate_limited": {
+        "es": "Llegaste al límite de mensajes de hoy. Seguimos mañana.",
+        "en": "You've hit today's message limit. Let's pick this up tomorrow.",
+    },
+    "chat_unavailable": {
+        "es": "El agente no está disponible ahora mismo. Probá de nuevo en un rato.",
+        "en": "The agent isn't available right now. Try again in a bit.",
+    },
+    "chat_empty": {
+        "es": "Escribí algo para arrancar la charla.",
+        "en": "Type something to start the conversation.",
+    },
     "invalid_kind_filter": {"es": "Filtro de tipo inválido.", "en": "Invalid type filter."},
     "no_usable_ratings": {
         "es": "No encontré ratings ni reviews usables para armar recomendaciones.",
