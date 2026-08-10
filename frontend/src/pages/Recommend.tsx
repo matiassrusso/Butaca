@@ -707,7 +707,7 @@ export default function Recommend() {
                       type="button"
                       onClick={() => done && setStep(n)}
                       disabled={!done}
-                      className={`flex items-center gap-2 transition-colors ${
+                      className={`flex items-center gap-2 p-2 -m-2 transition-colors ${
                         current
                           ? "text-foreground"
                           : done

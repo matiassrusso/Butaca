@@ -263,7 +263,11 @@ export function StaggeredMenu({
             : "bg-foreground text-background border-foreground hover:bg-accent hover:text-accent-foreground hover:border-accent"
         }`}
       >
-        {triggerLabel ?? t("nav.menu")}
+        {/* username puede ser hasta 50 chars (ver backend/app/models.py) — sin
+            este cap, un username largo empuja el boton fuera del viewport y
+            fuerza scroll horizontal en TODA la pagina (confirmado: 84px de
+            overflow en 375px de ancho con un username de 22 chars) */}
+        <span className="max-w-14 truncate sm:max-w-28">{triggerLabel ?? t("nav.menu")}</span>
         <span ref={iconRef} className="sm-icon" aria-hidden="true">
           <span className="sm-icon-line" />
           <span className="sm-icon-line sm-icon-line-v" />

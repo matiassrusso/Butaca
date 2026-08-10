@@ -46,6 +46,12 @@ function formatMemberSince(value: string, lang: Lang): string {
 const RADAR_SIZE = 360;
 const RADAR_CENTER = RADAR_SIZE / 2;
 const RADAR_RADIUS = 140;
+// las etiquetas de los extremos horizontales (ej "AVENTURA", "CIENCIA
+// FICCIÓN") se salen del viewBox y el SVG las corta -- confirmado en mobile,
+// "AVENTURA" quedaba como "/ENTURA" pegada al borde. El viewBox no tenia
+// margen extra: el label mas ancho posible mide ~105px, la mitad (por el
+// textAnchor=middle) no entraba en los ~18px que quedaban libres.
+const RADAR_LABEL_PAD = 56;
 
 function GenreRadar({ genres }: { genres: GenreWeight[] }) {
   const n = genres.length;
@@ -63,7 +69,10 @@ function GenreRadar({ genres }: { genres: GenreWeight[] }) {
   const dataPath = dataPoints.map((p) => `${p.x},${p.y}`).join(" ");
 
   return (
-    <svg viewBox={`0 0 ${RADAR_SIZE} ${RADAR_SIZE}`} className="w-full h-auto max-w-md mx-auto">
+    <svg
+      viewBox={`${-RADAR_LABEL_PAD} 0 ${RADAR_SIZE + RADAR_LABEL_PAD * 2} ${RADAR_SIZE}`}
+      className="w-full h-auto max-w-md mx-auto"
+    >
       {[0.25, 0.5, 0.75, 1].map((ring) => (
         <circle key={ring} cx={RADAR_CENTER} cy={RADAR_CENTER} r={RADAR_RADIUS * ring} fill="none" stroke="currentColor" strokeOpacity={0.08} />
       ))}
