@@ -696,3 +696,82 @@ def test_rejecting_animation_actually_penalizes_animated_titles() -> None:
     assert by_title["Anime Pick"].match_score < by_title["Live Action Stylized"].match_score
     # ...y lo estilizado no animado queda intacto, que era el daño colateral
     assert by_title["Live Action Stylized"].match_score == 50
+
+
+def _embedding_catalog() -> list[dict]:
+    return [
+        {"tmdb_id": 1, "title": "Cerca", "year": 2020, "kind": "movie", "tags": ["dark"]},
+        {"tmdb_id": 2, "title": "Lejos", "year": 2020, "kind": "movie", "tags": ["dark"]},
+    ]
+
+
+def test_embedding_affinity_separates_two_candidates_that_tie_on_tags() -> None:
+    """La razón de ser de la feature: dos candidatos idénticos para el
+    vocabulario de tags, pero uno se parece de verdad a lo que el usuario amó.
+    Sin el bonus los dos dan 50 y el orden lo decide el catálogo."""
+    catalog = _embedding_catalog()
+
+    baseline = recommend(ratings=[], mood="", catalog=catalog, min_score=0)
+    response = recommend(
+        ratings=[],
+        mood="",
+        catalog=catalog,
+        embedding_affinity={(1, "movie"): 2.0, (2, "movie"): -2.0},
+        min_score=0,
+    )
+
+    assert {item.match_score for item in baseline.recommendations} == {50}
+    by_title = {item.title: item for item in response.recommendations}
+    assert by_title["Cerca"].match_score > 50 > by_title["Lejos"].match_score
+    assert response.recommendations[0].title == "Cerca"
+
+
+def test_embedding_affinity_leaves_candidates_without_a_vector_untouched() -> None:
+    """Mismo criterio de "no match, no bonus" que director/actor/década: un
+    candidato que no está en el dict tiene que puntuar exactamente igual que
+    antes de que esto existiera."""
+    catalog = _embedding_catalog()
+
+    baseline = recommend(ratings=[], mood="", catalog=catalog, min_score=0)
+    response = recommend(
+        ratings=[],
+        mood="",
+        catalog=catalog,
+        embedding_affinity={(1, "movie"): 2.0},
+        min_score=0,
+    )
+
+    scores = {item.title: item.match_score for item in response.recommendations}
+    assert scores["Lejos"] == {i.title: i.match_score for i in baseline.recommendations}["Lejos"]
+
+
+def test_recommend_without_embeddings_scores_exactly_like_before() -> None:
+    """Invariante: sin embeddings de ningún lado, el motor no puede haber
+    cambiado ni un punto."""
+    catalog = _embedding_catalog()
+
+    plain = recommend(ratings=[], mood="", catalog=catalog, min_score=0)
+    empty = recommend(ratings=[], mood="", catalog=catalog, embedding_affinity={}, min_score=0)
+
+    assert [(i.title, i.match_score) for i in plain.recommendations] == [
+        (i.title, i.match_score) for i in empty.recommendations
+    ]
+
+
+def test_embedding_affinity_does_not_override_strong_tag_evidence() -> None:
+    """El peso está calibrado para empujar, no para dar vuelta la tanda: un
+    match completo de tags le gana a la peor afinidad semántica posible."""
+    catalog = [
+        {"tmdb_id": 1, "title": "Tags fuertes", "year": 2020, "kind": "movie", "tags": ["psychological"]},
+        {"tmdb_id": 2, "title": "Sin tags", "year": 2020, "kind": "movie", "tags": ["light"]},
+    ]
+
+    response = recommend(
+        ratings=[RatedItem(title="Vista", rating=5.0, review="psychological")],
+        mood="",
+        catalog=catalog,
+        embedding_affinity={(1, "movie"): -2.0, (2, "movie"): 2.0},
+        min_score=0,
+    )
+
+    assert response.recommendations[0].title == "Tags fuertes"

@@ -2,9 +2,17 @@ import io
 import json
 import zipfile
 
+import pytest
 from fastapi.testclient import TestClient
 
-from backend.app import db, letterboxd_scrape, llm_client, onboarding_titles, vibes_clustering
+from backend.app import (
+    db,
+    embeddings,
+    letterboxd_scrape,
+    llm_client,
+    onboarding_titles,
+    vibes_clustering,
+)
 from backend.app.llm_client import LlmError
 from backend.app.main import (
     TASTE_TAG_LOOKUP_CAP,
@@ -2753,7 +2761,10 @@ def test_recommend_without_a_selected_movement_does_not_dilute_tags_with_vibe_la
     seen: list[list[str]] = []
     monkeypatch.setenv("TMDB_API_KEY", "fake-key")
     monkeypatch.setattr("backend.app.main._enrich_loved_ratings_with_genre_tags", lambda ratings: None)
-    monkeypatch.setattr("backend.app.main.taste_profile.build_taste_profile", lambda watched: {})
+    monkeypatch.setattr("backend.app.main.taste_profile.match_titles", lambda watched: [])
+    monkeypatch.setattr(
+        "backend.app.main.taste_profile.build_taste_profile", lambda watched, matches=None: {}
+    )
     pool = [{"tmdb_id": 77, "title": "Pick", "year": 2000, "kind": "movie", "tags": ["romantic"]}]
     monkeypatch.setattr(
         "backend.app.main.tmdb_client.fetch_candidates_for_options",
@@ -2835,7 +2846,10 @@ def test_recommend_genres_mode_fetches_and_deduplicates_a_selected_movement(monk
     )
     monkeypatch.setenv("TMDB_API_KEY", "fake-key")
     monkeypatch.setattr("backend.app.main._enrich_loved_ratings_with_genre_tags", lambda ratings: None)
-    monkeypatch.setattr("backend.app.main.taste_profile.build_taste_profile", lambda watched: {})
+    monkeypatch.setattr("backend.app.main.taste_profile.match_titles", lambda watched: [])
+    monkeypatch.setattr(
+        "backend.app.main.taste_profile.build_taste_profile", lambda watched, matches=None: {}
+    )
     static = [{"tmdb_id": 77, "title": "Pick", "year": 2000, "kind": "movie", "tags": ["romantic"]}]
     monkeypatch.setattr(
         "backend.app.main.tmdb_client.fetch_candidates_for_options", lambda keys, kind_filter, pages=1: static
@@ -3214,3 +3228,103 @@ def test_chat_follows_the_accept_language_header(monkeypatch) -> None:
     client.post("/chat", headers=headers, json={"messages": [{"role": "user", "content": "hi"}]})
 
     assert calls[0][3] == "en"
+
+
+# ─── Embeddings en el match_score ───────────────────────────────────────────
+
+
+def _mock_embedding_pool(monkeypatch) -> None:
+    """Perfil con director repetido (única señal del modo manual) y un pool de
+    dos candidatos indistinguibles para el vocabulario de tags."""
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    ids = {row["title"]: 100 + index for index, row in enumerate(_MANUAL_RATINGS)}
+    monkeypatch.setattr(
+        "backend.app.taste_profile.tmdb_client.search_title",
+        lambda title: {
+            "tmdb_id": ids[title], "title": title, "year": 2015, "kind": "movie",
+            "genres": ["Acción"], "tags": [], "overview": "algo",
+        },
+    )
+    monkeypatch.setattr(
+        "backend.app.taste_profile.tmdb_client.fetch_taste_credits",
+        lambda tmdb_id, kind: {"director": "Fave Director", "actors": []},
+    )
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.fetch_personalized_candidates",
+        lambda profile, mood, kind_filter, start_page=1: [
+            {
+                "tmdb_id": tmdb_id, "title": title, "year": 2020, "kind": "movie", "tags": [],
+                "overview": "algo", "director": "Fave Director", "actors": [],
+            }
+            for tmdb_id, title in ((900, "Cerca Del Gusto"), (901, "Lejos Del Gusto"))
+        ],
+    )
+    monkeypatch.setattr("backend.app.main.tmdb_client.fetch_candidates", lambda mood, pages=2: [])
+    # cualquier embedding que falte se resuelve contra la DB de abajo: si algo
+    # se escapa a la red, el test falla en vez de tardar
+    monkeypatch.setattr(
+        vibes_clustering, "_embed_batch", lambda texts: pytest.fail(f"red inesperada: {texts}")
+    )
+
+
+def test_embeddings_move_the_match_score_of_the_engine(monkeypatch) -> None:
+    """El pool son dos candidatos idénticos salvo por su vector: sin
+    embeddings empatan y el orden lo decide el catálogo."""
+    _mock_embedding_pool(monkeypatch)
+    db.save_title_embeddings(
+        [(100 + index, "movie", [1.0, 0.0]) for index in range(len(_MANUAL_RATINGS))]
+        + [(900, "movie", [1.0, 0.0]), (901, "movie", [-1.0, 0.0])],
+        embeddings.MODEL,
+    )
+    headers = _auth_headers("embmueve")
+
+    picks = client.post(
+        "/recommend/manual", headers=headers, json={"ratings": _MANUAL_RATINGS}
+    ).json()["recommendations"]
+
+    by_title = {item["title"]: item["match_score"] for item in picks}
+    assert by_title["Cerca Del Gusto"] > by_title["Lejos Del Gusto"]
+    assert picks[0]["title"] == "Cerca Del Gusto"
+
+
+def test_recommend_survives_an_embedding_failure(monkeypatch) -> None:
+    """NVIDIA caído o sin cuota no puede tumbar un /recommend que ya tiene con
+    qué responder — mismo criterio que el resto de los enriquecimientos."""
+    _mock_embedding_pool(monkeypatch)
+
+    def explode(loved, candidates):
+        raise RuntimeError("NVIDIA sin cuota")
+
+    monkeypatch.setattr("backend.app.main.embeddings.affinity_by_key", explode)
+    headers = _auth_headers("embfalla")
+
+    response = client.post(
+        "/recommend/manual", headers=headers, json={"ratings": _MANUAL_RATINGS}
+    )
+
+    assert response.status_code == 200
+    picks = response.json()["recommendations"]
+    # sin embeddings los dos candidatos vuelven a empatar
+    assert len(picks) == 2
+    assert len({item["match_score"] for item in picks}) == 1
+
+
+def test_recommend_logs_embedding_coverage(monkeypatch, caplog) -> None:
+    """Sin este número, "el feature no mueve nada" y "el feature no corre" se
+    leen igual en los logs de producción."""
+    _mock_embedding_pool(monkeypatch)
+    db.save_title_embeddings(
+        [(100 + index, "movie", [1.0, 0.0]) for index in range(len(_MANUAL_RATINGS))]
+        + [(900, "movie", [1.0, 0.0])],
+        embeddings.MODEL,
+    )
+    # sin presupuesto para embeber lo que falta, "Lejos Del Gusto" queda sin
+    # vector: es justo el caso que el log tiene que poder distinguir
+    monkeypatch.setattr(embeddings, "MAX_NEW_CANDIDATES", 0)
+    headers = _auth_headers("embcobertura")
+
+    with caplog.at_level("INFO", logger="backend.app.main"):
+        client.post("/recommend/manual", headers=headers, json={"ratings": _MANUAL_RATINGS})
+
+    # 1 de los 2 candidatos del pool tenía vector
+    assert any("emb=1/2" in record.getMessage() for record in caplog.records)

@@ -38,6 +38,22 @@ POSITIVE_HINTS = {
 # antes de resignarse a devolver menos de 6.
 MIN_MATCH_SCORE = 60
 
+# Peso del parecido semántico (embeddings) en los puntos de evidencia. El valor
+# que llega ya viene centrado y recortado a ±2 (ver embeddings.affinity_by_key),
+# así que esto es ±12 puntos como máximo: por debajo de un director repetido
+# (+25) y de un match completo de tags (+30), por arriba de una década (+8).
+#
+# Medido sobre un pool real de 157 candidatos con un perfil de thriller de
+# autor, arrancando de una base de 20 puntos: el match_score se mueve entre -13
+# y +10. Es un empujón que se ve, no un desempate decorativo — que era el
+# pedido — pero no alcanza para dar vuelta un pick con evidencia fuerte de
+# tags. La cabeza del ranking dio Joker, Room, Pulp Fiction, Requiem for a
+# Dream, Nightcrawler, Oldboy y Zodiac; la cola, My Hero Academia, Legacies,
+# Anne with an E y Love Is in the Air. Si alguna vez hay que subirlo, ojo con
+# el piso: a peso 10 la cola del pool empieza a caerse abajo de MIN_MATCH_SCORE
+# y _finish_recommend se pone a pedir pools más grandes seguido.
+EMBEDDING_WEIGHT = 6
+
 NEGATIVE_HINTS = {
     "boring": ["slow", "quiet"],
     "empty": ["slow", "melancholic"],
@@ -490,6 +506,7 @@ def recommend(
     min_score: int = MIN_MATCH_SCORE,
     extra_phrases: dict[str, str] | None = None,
     pairwise_win_counts: dict[str, int] | None = None,
+    embedding_affinity: dict[tuple[int, str], float] | None = None,
     lang: str = "es",
 ) -> RecommendResponse:
     lang = normalize_lang(lang)
@@ -542,6 +559,10 @@ def recommend(
         if kind_filter == "both" or item["kind"] == kind_filter
     )
 
+    # el dict llega ya calculado desde main.py: acá no se hace red ni numpy,
+    # recommender.py sigue siendo puro scoring
+    affinity = embedding_affinity or {}
+
     scored: list[tuple[float, Recommendation, set[str], str]] = []
     for item in catalog:
         if _normalize(item["title"]) in seen_titles:
@@ -591,6 +612,11 @@ def recommend(
         points += 10 * min(len(matched_actors), 2)
         if matched_decade:
             points += 8
+        # parecido semántico con el centro del gusto. Un candidato que no está
+        # en el dict (sin tmdb_id, sin embedding, o pool sin señal) suma 0, que
+        # en esta escala centrada es "igual que el promedio del pool" — mismo
+        # criterio de "no match, no bonus" que director/actor/década.
+        points += EMBEDDING_WEIGHT * affinity.get((item.get("tmdb_id"), item["kind"]), 0.0)
 
         # affinity % via tanh instead of the old additive-then-clamp: 50 is
         # "no evidence", extra evidence has diminishing returns, and the
