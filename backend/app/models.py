@@ -296,3 +296,63 @@ class TasteProfileResponse(BaseModel):
     decade_breakdown: list[DecadeCount]
     top_directors: list[PersonCount]
     top_actors: list[PersonCount]
+
+
+# ─── "Tu año en Butaca" (resumen anual) ──────────────────────────────────
+
+
+class WrappedYear(BaseModel):
+    year: int
+    count: int
+
+
+class WrappedTitle(BaseModel):
+    title: str
+    rating: float
+    # 'import'/'star' = puntaje real; el resto es sintético y la UI no muestra
+    # estrellas para esos (mismo criterio que /history)
+    source: str
+    review: str = ""
+    # se resuelven contra TMDb, best-effort: quedan en None sin catálogo
+    poster_path: str | None = None
+    release_year: int | None = None
+    tmdb_id: int | None = None
+    kind: str | None = None
+
+
+class WrappedMonth(BaseModel):
+    month: int
+    count: int
+
+
+class WrappedMatchPoint(BaseModel):
+    month: str  # "YYYY-MM"
+    avg_match: int
+    count: int
+
+
+class WrappedLabelCount(BaseModel):
+    label: str
+    count: int
+
+
+class WrappedResponse(BaseModel):
+    # None solo cuando el usuario no tiene un solo título con fecha usable
+    year: int | None
+    available_years: list[WrappedYear]
+    enough_data: bool
+    total: int
+    precise_count: int
+    # cuántos de los `total` se contaron por fecha real de visto (el resto, por
+    # cuándo se registró) — la UI lo dice en vez de mostrar un número opaco
+    dated_count: int
+    review_count: int
+    average_rating: float | None
+    by_month: list[WrappedMonth]
+    top_month: int | None
+    favorites: list[WrappedTitle]
+    picks_count: int
+    match_curve: list[WrappedMatchPoint]
+    vibes: list[WrappedLabelCount]
+    decades: list[DecadeCount]
+    movements: list[WrappedLabelCount]

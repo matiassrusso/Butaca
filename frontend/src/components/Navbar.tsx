@@ -27,6 +27,7 @@ export function Navbar() {
     { label: t("nav.rate"), ariaLabel: t("nav.rateAria"), link: "/rate" },
     { label: t("nav.games"), ariaLabel: t("nav.gamesAria"), link: "/games" },
     { label: t("nav.history"), ariaLabel: t("nav.historyAria"), link: "/history" },
+    { label: t("wrapped.nav"), ariaLabel: t("wrapped.navAria"), link: "/wrapped" },
     {
       label: theme === "dark" ? t("nav.lightMode") : t("nav.darkMode"),
       ariaLabel: t("nav.themeAria"),

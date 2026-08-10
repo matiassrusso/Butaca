@@ -27,6 +27,7 @@ from . import (
     taste_profile,
     tmdb_client,
     vibes_clustering,
+    wrapped,
 )
 from .models import (
     AuthResponse,
@@ -61,6 +62,7 @@ from .models import (
     UserCredentials,
     WatchedHistoryResponse,
     WatchlistAddRequest,
+    WrappedResponse,
 )
 from .recommender import GENRE_OPTIONS, MIN_MATCH_SCORE, PICK_OPTIONS, recommend
 
@@ -853,6 +855,84 @@ def profile_summary(user: sqlite3.Row = Depends(auth.get_current_user)) -> dict:
             logger.warning("profile summary avatar lookup failed: %s", exc)
     summary["avatar_url"] = avatar_url
     return summary
+
+
+def _enrich_wrapped(data: dict) -> None:
+    """Le cuelga al resumen anual lo que necesita red: pósters y año de estreno
+    de las favoritas, décadas del año, y los movimientos de vibras.
+
+    Best-effort a propósito. Los títulos de `rated_items` NO tienen tmdb_id
+    (verificado sobre la base real: 0 de 2568 en el usuario más grande), así
+    que la única forma de cruzarlos con `title_clusters` es resolverlos por
+    nombre. Se hace acotado a las mejores del año, en paralelo, y contra el
+    cache de 24hs de search_title. Sin TMDb la página sale igual, solo que sin
+    pósters ni movimientos, que es lo que pasa en local con la key vieja.
+    """
+    titles = data.pop("_resolve_titles", [])
+    cluster_counts = Counter(
+        {int(key): value for key, value in data.pop("_served_cluster_ids", {}).items()}
+    )
+    resolved: dict[str, dict] = {}
+
+    if titles and tmdb_client.is_configured():
+        def _resolve(title: str) -> tuple[str, dict | None]:
+            try:
+                return title, tmdb_client.search_title(title)
+            except tmdb_client.TmdbError:
+                return title, None
+
+        try:
+            with ThreadPoolExecutor(max_workers=taste_profile.MATCH_WORKERS) as pool:
+                resolved = {title: match for title, match in pool.map(_resolve, titles) if match}
+        except Exception:  # noqa: BLE001 - mismo criterio que el avatar de /profile/summary
+            logger.warning("wrapped: la resolución contra TMDb falló", exc_info=True)
+
+    for favorite in data["favorites"]:
+        match = resolved.get(favorite["title"])
+        if match:
+            favorite["poster_path"] = match.get("poster_path")
+            favorite["release_year"] = match.get("year")
+            favorite["tmdb_id"] = match.get("tmdb_id")
+            favorite["kind"] = match.get("kind")
+
+    decade_counts = Counter(
+        (match["year"] // 10) * 10 for match in resolved.values() if match.get("year")
+    )
+    data["decades"] = [
+        {"decade": decade, "count": count} for decade, count in sorted(decade_counts.items())
+    ]
+
+    keys = [
+        (match["tmdb_id"], match["kind"])
+        for match in resolved.values()
+        if match.get("tmdb_id") is not None and match.get("kind")
+    ]
+    if keys:
+        cluster_counts.update(db.get_title_clusters_by_tmdb_ids(keys).values())
+    if cluster_counts:
+        labels = {row["cluster_id"]: row["label"] for row in db.get_vibe_clusters(level=2)}
+        data["movements"] = [
+            {"label": labels[cluster_id], "count": count}
+            for cluster_id, count in cluster_counts.most_common()
+            if cluster_id in labels
+        ][:5]
+
+
+@app.get("/wrapped", response_model=WrappedResponse)
+def wrapped_year(
+    year: int | None = None, user: sqlite3.Row = Depends(auth.get_current_user)
+) -> WrappedResponse:
+    """El resumen anual del usuario logueado, y nada más: no hay forma de pedir
+    el de otra persona. Un resumen público expondría reseñas y puntajes que el
+    dueño no eligió publicar, así que eso queda como decisión de Matías (ver
+    TASKS.md) y no se inventa acá."""
+    data = wrapped.summarize(
+        db.get_watched_items(user["id"]),
+        db.get_recommendation_history(user["id"]),
+        year,
+    )
+    _enrich_wrapped(data)
+    return WrappedResponse(**data)
 
 
 def _validate_recommend_params(mode: str, kind_filter: str, lang: str = "es") -> None:

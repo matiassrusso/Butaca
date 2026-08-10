@@ -21,6 +21,7 @@ import Recommend from "./pages/Recommend";
 import ResetPassword from "./pages/ResetPassword";
 import Trivia from "./pages/Trivia";
 import VerifyEmail from "./pages/VerifyEmail";
+import Wrapped from "./pages/Wrapped";
 
 function Router() {
   return (
@@ -36,6 +37,7 @@ function Router() {
       <Route path="/games/trivia" component={Trivia} />
       <Route path="/history" component={History} />
       <Route path="/profile" component={Profile} />
+      <Route path="/wrapped" component={Wrapped} />
       <Route component={NotFound} />
     </Switch>
   );
