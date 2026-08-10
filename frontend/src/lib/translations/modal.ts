@@ -78,6 +78,10 @@ export const MODAL: Record<string, Entry> = {
   // ─── Estrellas ────────────────────────────────────────────────────────
   "modal.yourRating": { es: "Tu rating", en: "Your rating" },
   "modal.pickRating": { es: "Elegí tu rating", en: "Pick your rating" },
+  // touch sin hover: el 1er tap arma preview, hace falta un 2do tap en la
+  // MISMA estrella para confirmar -- este texto es la única pista de que
+  // falta ese 2do tap (ver StarRating.tsx, pendingTap)
+  "modal.tapToConfirm": { es: "Tocá de nuevo: {n} · {label}", en: "Tap again: {n} · {label}" },
   "modal.starsAria": { es: "{n} estrellas: {label}", en: "{n} stars: {label}" },
   "modal.starsTitle": { es: "{n} estrellas · {label}", en: "{n} stars · {label}" },
   "modal.star0_5": { es: "No te gustó nada", en: "You hated it" },
