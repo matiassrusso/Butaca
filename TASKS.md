@@ -33,6 +33,17 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
 
 ## Pending
 
+- [ ] **[wrapped-share-2026-08-10] "Tu año en Butaca" — ¿modo público?**
+      Hoy `GET /wrapped` solo sirve el resumen del usuario logueado — no hay
+      forma de pedir el de otra persona, ni un link que un tercero pueda
+      abrir. Compartir hoy es "copiar texto/link para vos mismo", no un link
+      público real. El agente que lo construyó dejó la decisión de abrir un
+      modo público (¿todo visible? ¿algún campo se oculta?) para que Matías
+      la tome, en vez de inventar un criterio. Sin esto, "Tu año en Butaca"
+      no puede cumplir su rol de motor de tráfico (paso 1 del plan de
+      `monetizacion-2026-08-07`, abajo) — alguien tendría que loguearse con
+      la cuenta ajena para ver el resumen de otra persona.
+
 - [ ] **[monetizacion-2026-08-07] Monetización y distribución — pensado con
       Matías, sin implementar nada todavía.** El objetivo que él fijó no es
       lucro: es **cubrir el hosting** para sacar el cold start de Render y que
