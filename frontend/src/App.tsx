@@ -19,6 +19,7 @@ import Profile from "./pages/Profile";
 import Rate from "./pages/Rate";
 import Recommend from "./pages/Recommend";
 import ResetPassword from "./pages/ResetPassword";
+import Together from "./pages/Together";
 import Trivia from "./pages/Trivia";
 import VerifyEmail from "./pages/VerifyEmail";
 
@@ -30,6 +31,7 @@ function Router() {
       <Route path="/reset-password" component={ResetPassword} />
       <Route path="/verify-email" component={VerifyEmail} />
       <Route path="/recommend" component={Recommend} />
+      <Route path="/together" component={Together} />
       <Route path="/rate" component={Rate} />
       <Route path="/games" component={Games} />
       <Route path="/games/pairwise" component={PairwiseGame} />

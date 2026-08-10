@@ -23,6 +23,7 @@ export function Navbar() {
   const { t } = useLang();
 
   const menuItems: StaggeredMenuItem[] = [
+    { label: t("nav.together"), ariaLabel: t("nav.togetherAria"), link: "/together" },
     { label: t("nav.profile"), ariaLabel: t("nav.profileAria"), link: "/profile" },
     { label: t("nav.rate"), ariaLabel: t("nav.rateAria"), link: "/rate" },
     { label: t("nav.games"), ariaLabel: t("nav.gamesAria"), link: "/games" },

@@ -973,6 +973,7 @@ def _finish_recommend(
     persist: bool = True,
     ephemeral: bool = False,
     lang: str = "es",
+    audience_note: str = "",
 ) -> RecommendResponse:
     """Shared tail of both /recommend/zip and /recommend/letterboxd: once a
     source has produced (ratings, extra_seen), the rest of the flow —
@@ -1272,10 +1273,20 @@ def _finish_recommend(
             # predict_fit preserves the chosen set. refine_recommendations is
             # allowed to drop candidates, so after a fallback fill it could
             # discard every genuinely new title in favor of old high scorers.
+            # audience_note no viaja a predict_fit: ese camino (filled_with_old)
+            # necesita already_recommended no vacío, y /recommend/together corre
+            # ephemeral=True -> already_recommended siempre vacío -> nunca se toma.
+            # Llamada sin el 5to argumento cuando no hace falta (todo excepto
+            # /together): así los mocks existentes de refine_recommendations en
+            # los tests, con firma de 4 parámetros, no se rompen.
             response = (
                 llm_client.predict_fit(user["id"], ratings, response, lang)
                 if filled_with_old
-                else llm_client.refine_recommendations(ratings, mood, response, lang)
+                else (
+                    llm_client.refine_recommendations(ratings, mood, response, lang, audience_note)
+                    if audience_note
+                    else llm_client.refine_recommendations(ratings, mood, response, lang)
+                )
             )
             refined = True
         except llm_client.LlmError as exc:
@@ -1443,6 +1454,87 @@ def recommend_titles_from_letterboxd(
         persist=is_own_account,
         ephemeral=not is_own_account,
         lang=lang,
+    )
+
+
+@app.post("/recommend/together", response_model=RecommendResponse)
+def recommend_titles_together(
+    friend_username: str = Form(...),
+    mood: str = Form(""),
+    kind_filter: str = Form("both"),
+    refine: str = Form("1"),
+    user: sqlite3.Row = Depends(auth.get_current_user),
+    lang: str = Depends(errors.request_lang),
+) -> RecommendResponse:
+    """«¿Qué vemos juntos?»: picks para DOS, mezclando el historial del usuario
+    logueado con el diario público de Letterboxd de un amigo.
+
+    El amigo NO necesita cuenta de Butaca: su diario ya es público y el
+    proyecto ya sabe leerlo (el mismo `fetch_letterboxd_diary` del import por
+    username), así que inventar un flujo de invitaciones sería trabajo de más
+    para llegar exactamente a los mismos datos.
+
+    persist=False + ephemeral=True es el punto delicado de todo esto: los
+    ratings del amigo son datos de OTRA persona y contaminarían el perfil de
+    gusto del usuario para siempre. persist=False no los escribe en
+    `rated_items`; ephemeral=True evita el `save_taste_profile` y la sesión
+    persistida, y de paso hace que `watched` (la base de la exclusión) sea la
+    lista mergeada de los dos en vez de solo el historial del usuario — que es
+    justo lo que hace falta para que ningún pick sea algo que el amigo ya vio.
+    """
+    # sin `mode`/`genres` a propósito: acá la pregunta es "¿qué vemos hoy?", y
+    # los otros modos (watchlist, géneros elegidos a mano) son de una sola
+    # persona. "profile" es el que usa el gusto mergeado.
+    _validate_recommend_params("profile", kind_filter, lang)
+
+    friend_name = friend_username.strip()
+    try:
+        friend_ratings, friend_seen = letterboxd_scrape.fetch_letterboxd_diary(friend_name)
+    except letterboxd_scrape.ScrapeError as exc:
+        # el texto del ScrapeError está hardcodeado en español; lo que ve el
+        # usuario tiene que seguir el Accept-Language como todo el resto
+        raise HTTPException(
+            status_code=400,
+            detail=errors.msg("friend_diary_unavailable", lang, name=friend_name),
+        ) from exc
+
+    if not friend_ratings:
+        raise HTTPException(
+            status_code=400,
+            detail=errors.msg("friend_no_ratings", lang, name=friend_name),
+        )
+
+    own_ratings = _rebuild_ratings(user["id"])
+    if not own_ratings:
+        raise HTTPException(status_code=400, detail=errors.msg("no_saved_profile", lang))
+
+    # Merge por título normalizado, quedándose con el puntaje MÁS BAJO de los
+    # dos: para ver algo juntos manda el que menos lo disfrutó. Si a uno le
+    # encantó y al otro no, ese gusto compartido no existe y no debería
+    # arrastrar la tanda entera hacia ese lado.
+    merged: dict[str, RatedItem] = {}
+    for item in own_ratings + friend_ratings:
+        key = item.title.strip().lower()
+        current = merged.get(key)
+        if current is None or item.rating < current.rating:
+            merged[key] = item
+
+    return _finish_recommend(
+        list(merged.values()),
+        # lo que el amigo vio sin puntuar: no llega por `ratings`, así que sin
+        # esto podría salir recomendado algo que él ya vio
+        friend_seen,
+        mood,
+        "profile",
+        kind_filter,
+        "",
+        user,
+        refine=_refine_enabled(refine),
+        persist=False,
+        ephemeral=True,
+        lang=lang,
+        # lang ya viene normalizado ("es"/"en") por errors.request_lang
+        audience_note=llm_client.TOGETHER_NOTE_BY_LANG[lang],
     )
 
 

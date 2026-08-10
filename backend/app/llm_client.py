@@ -336,8 +336,36 @@ def _profile_block(ratings: list[RatedItem]) -> str:
     )
 
 
+# "¿Qué vemos juntos?" (/recommend/together): el perfil que recibe el prompt es
+# la MEZCLA de dos personas, así que atribuirle a "vos" un puntaje que puso la
+# otra es directamente falso. Visto en vivo la primera vez que corrió la
+# feature: "eso que resonó con vos en Punch-Drunk Love", una película que el
+# usuario nunca vio (venía del historial del amigo). Es una mitigación
+# probabilística, no una garantía — misma clase de regla que la de palabras
+# pegadas de WRITING_RULES.
+TOGETHER_NOTE = (
+    "IMPORTANTE: el perfil de arriba es la MEZCLA de DOS personas que van a ver algo JUNTAS. "
+    'No sabés cuál de las dos puntuó cada título, así que nunca digas "vos", "te gustó" ni cites '
+    'un puntaje como si fuera de una sola. Hablá siempre en plural ("a ustedes", "les") y citá el '
+    'historial como gusto compartido ("algo que ya vieron"). El pick tiene que funcionarles a las '
+    "dos: si algo le pega a una sola, no es un buen pick para esta tanda."
+)
+TOGETHER_NOTE_EN = (
+    "IMPORTANT: the profile above is the BLEND of TWO people who are going to watch something "
+    'TOGETHER. You don\'t know which of them rated each title, so never say "you loved it" or '
+    'quote a score as if it belonged to one of them. Always speak to both of them ("the two of '
+    'you", "you both") and cite their history as shared taste ("something you\'ve both seen"). '
+    "The pick has to work for BOTH: if it only lands for one of them, it isn't a good pick here."
+)
+TOGETHER_NOTE_BY_LANG = {"es": TOGETHER_NOTE, "en": TOGETHER_NOTE_EN}
+
+
 def _build_prompt(
-    ratings: list[RatedItem], mood: str, heuristic: RecommendResponse, lang: str = "es"
+    ratings: list[RatedItem],
+    mood: str,
+    heuristic: RecommendResponse,
+    lang: str = "es",
+    audience_note: str = "",
 ) -> str:
     """Tarea: elegir y ordenar picks de un pool de candidatos (/recommend).
     La voz y las reglas de escritura son las mismas que en _build_verdict_prompt
@@ -350,6 +378,8 @@ def _build_prompt(
         f"{_AGENT_VOICE_BY_LANG[lang]}\n\n"
         f"{language_line}"
         f"{_profile_block(ratings)}\n\n"
+        # vacío en todos los caminos menos /recommend/together — ver TOGETHER_NOTE
+        f"{audience_note}{chr(10) * 2 if audience_note else ''}"
         f"Mood de hoy: {mood or 'sin preferencia'}\n\n"
         # el piso sale de recommender.MIN_MATCH_SCORE en vez de estar escrito a
         # mano: decía "entre 51 y 99" mientras _finish_recommend descartaba todo
@@ -459,13 +489,25 @@ def _now_monotonic() -> float:
 
 
 def _refine_cache_key(
-    ratings: list[RatedItem], mood: str, heuristic: RecommendResponse, lang: str = "es"
-) -> tuple[str, str, tuple, str]:
+    ratings: list[RatedItem],
+    mood: str,
+    heuristic: RecommendResponse,
+    lang: str = "es",
+    audience_note: str = "",
+) -> tuple[str, str, tuple, str, str]:
     candidates = tuple(
         rec.tmdb_id if rec.tmdb_id is not None else rec.title.strip().lower()
         for rec in heuristic.recommendations
     )
-    return (_profile_block(ratings), mood.strip().lower(), candidates, normalize_lang(lang))
+    # audience_note entra en la clave: el mismo historial con y sin la nota de
+    # "son dos personas" tiene que dar dos respuestas distintas, no reusar una
+    return (
+        _profile_block(ratings),
+        mood.strip().lower(),
+        candidates,
+        normalize_lang(lang),
+        audience_note,
+    )
 
 
 def _get_cached_refine(cache_key: tuple[str, tuple]) -> dict | None:
@@ -549,7 +591,11 @@ def _select_picks(
 
 
 def refine_recommendations(
-    ratings: list[RatedItem], mood: str, heuristic: RecommendResponse, lang: str = "es"
+    ratings: list[RatedItem],
+    mood: str,
+    heuristic: RecommendResponse,
+    lang: str = "es",
+    audience_note: str = "",
 ) -> RecommendResponse:
     api_key = os.environ.get("NVIDIA_API_KEY")
     if not api_key:
@@ -557,11 +603,13 @@ def refine_recommendations(
     if not heuristic.recommendations:
         raise LlmError("No hay candidatos para refinar.")
 
-    cache_key = _refine_cache_key(ratings, mood, heuristic, lang)
+    cache_key = _refine_cache_key(ratings, mood, heuristic, lang, audience_note)
     result = _get_cached_refine(cache_key)
     cache_hit = result is not None
     if result is None:
-        result = _call_nvidia_with_fallback(_build_prompt(ratings, mood, heuristic, lang), api_key)
+        result = _call_nvidia_with_fallback(
+            _build_prompt(ratings, mood, heuristic, lang, audience_note), api_key
+        )
 
     reordered, selected_keys, unmatched = _select_picks(result, heuristic)
 
@@ -581,7 +629,7 @@ def refine_recommendations(
     if not reordered and unmatched and not cache_hit:
         logger.info("Ningún pick del LLM matcheó; reintentando con corrección explícita")
         result = _call_nvidia_with_fallback(
-            _build_prompt(ratings, mood, heuristic, lang)
+            _build_prompt(ratings, mood, heuristic, lang, audience_note)
             + "\n\nINTENTO ANTERIOR RECHAZADO: devolviste "
             + ", ".join(f'"{title}"' for title in unmatched[:6])
             + ". Ninguno de esos está en la lista de candidatos de arriba — varios "
