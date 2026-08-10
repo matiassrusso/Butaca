@@ -270,3 +270,82 @@ def test_recompute_keeps_completed_embedding_batches_when_a_later_one_fails(monk
         vibes_clustering.recompute(seed_cap=3)
 
     assert saved == [[(0, "movie", [1.0]), (1, "movie", [1.0])]]
+
+
+def _grid_cluster(center: tuple[float, float, float], count: int) -> list[list[float]]:
+    """Vectores apiñados alrededor de un centro, en 3 dimensiones."""
+    return [[center[0] + i * 0.001, center[1] - i * 0.001, center[2]] for i in range(count)]
+
+
+def test_project_2d_keeps_each_title_next_to_its_own_movement() -> None:
+    """El invariante del mapa: un título tiene que caer más cerca del
+    centroide de SU cluster L2 que del de cualquier otro. PCA directo sobre
+    los embeddings reales lo cumple solo para el 22,9% de los puntos (medido
+    sobre los 1023 de la base) -- por eso el layout se ancla a los clusters."""
+    vectors = _grid_cluster((10, 0, 0), 5) + _grid_cluster((-10, 0, 0), 5) + _grid_cluster((0, 10, 5), 5)
+    l1 = [1] * 5 + [1] * 5 + [2] * 5
+    l2 = [1] * 5 + [2] * 5 + [3] * 5
+
+    points = vibes_clustering.project_2d(vectors, l1, l2)
+
+    assert len(points) == len(vectors)
+    centroids = {
+        movement: (
+            sum(p[0] for p, m in zip(points, l2) if m == movement) / 5,
+            sum(p[1] for p, m in zip(points, l2) if m == movement) / 5,
+        )
+        for movement in (1, 2, 3)
+    }
+    for point, movement in zip(points, l2):
+        distances = {
+            other: (point[0] - c[0]) ** 2 + (point[1] - c[1]) ** 2 for other, c in centroids.items()
+        }
+        assert min(distances, key=distances.get) == movement
+
+
+def test_project_2d_survives_degenerate_clusters() -> None:
+    """Un cluster de 1 o 2 títulos deja la SVD sin dos componentes: tiene que
+    devolver coordenadas igual, no reventar armando el layout."""
+    assert vibes_clustering.project_2d([], [], []) == []
+    assert vibes_clustering.project_2d([[1.0, 2.0]], [1], [1]) == [(0.0, 0.0)]
+
+    points = vibes_clustering.project_2d([[1.0, 0.0], [0.0, 1.0], [0.5, 0.5]], [1, 1, 2], [1, 2, 3])
+
+    assert len(points) == 3
+    assert all(isinstance(x, float) and isinstance(y, float) for x, y in points)
+
+
+def test_recompute_persists_the_title_of_every_clustered_id(monkeypatch) -> None:
+    """title_embeddings solo guarda el id, así que el nombre se congela en
+    title_clusters al clusterizar -- si no, el mapa necesitaría ~1000
+    requests a TMDb por visita para poder mostrar algo."""
+    seed = [
+        {"tmdb_id": identifier, "kind": "movie", "title": f"Peli {identifier}", "year": 1999,
+         "poster_path": f"http://img/{identifier}.jpg", "tags": []}
+        for identifier in range(4)
+    ]
+    saved: dict = {}
+    monkeypatch.setattr(vibes_clustering, "_seed_titles", lambda cap: seed)
+    monkeypatch.setattr(
+        vibes_clustering,
+        "_metadata_for_item",
+        lambda item: {**item, "metadata_text": item["title"], "keywords": [], "credits": {}},
+    )
+    monkeypatch.setattr(vibes_clustering.db, "get_title_embeddings", lambda keys, model: {})
+    monkeypatch.setattr(vibes_clustering.db, "save_title_embeddings", lambda entries, model: None)
+    monkeypatch.setattr(
+        vibes_clustering.db,
+        "save_vibe_clusters",
+        lambda labels, assignments: saved.update(assignments=assignments),
+    )
+    monkeypatch.setattr(vibes_clustering, "_label_cluster", lambda samples: "Etiqueta")
+    monkeypatch.setattr(
+        vibes_clustering, "_embed_batch", lambda texts: [[1.0, float(i)] for i, _ in enumerate(texts)]
+    )
+
+    vibes_clustering.recompute(seed_cap=4, k=1)
+
+    by_id = {row["tmdb_id"]: row for row in saved["assignments"]}
+    assert by_id[2]["title"] == "Peli 2"
+    assert by_id[2]["year"] == 1999
+    assert by_id[2]["poster_path"] == "http://img/2.jpg"

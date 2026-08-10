@@ -303,6 +303,73 @@ def _sample_cluster(members: list[int], records: list[dict], vectors: list[list[
     return [records[members[index]] for index in ordered[:6]]
 
 
+def _svd_2d(matrix: np.ndarray) -> np.ndarray:
+    """Proyección a 2D por SVD, centrada y normalizada a [-1, 1].
+
+    Devuelve siempre (n, 2) aunque la matriz tenga menos de 2 filas o rango 1
+    (un cluster de 1 o 2 títulos): en esos casos `u` no tiene dos columnas y
+    hay que completar con ceros en vez de reventar armando el layout.
+    """
+    if len(matrix) == 0:
+        return np.zeros((0, 2), dtype=np.float32)
+    centered = matrix - matrix.mean(axis=0)
+    if len(matrix) < 2:
+        return np.zeros((len(matrix), 2), dtype=np.float32)
+    u, s, _ = np.linalg.svd(centered, full_matrices=False)
+    projected = u[:, :2] * s[:2]
+    if projected.shape[1] < 2:
+        projected = np.pad(projected, ((0, 0), (0, 2 - projected.shape[1])))
+    scale = float(np.abs(projected).max())
+    return (projected / scale if scale else projected).astype(np.float32)
+
+
+# radios del layout jerárquico: cada nivel entra adentro del anterior. Están
+# elegidos para que un movimiento se lea como una isla y no se pise con la de
+# al lado; si se agrandan, los clusters empiezan a solaparse.
+_L2_RADIUS = 0.28
+_MEMBER_RADIUS = 0.05
+
+
+def project_2d(vectors: list[list[float]], l1_ids: list[int], l2_ids: list[int]) -> list[tuple[float, float]]:
+    """Layout 2D anclado a los clusters que ya encontró Leiden, en vez de PCA
+    directo sobre los vectores.
+
+    Medido sobre los 1023 embeddings reales (2048 dimensiones): PCA explica
+    5,90% + 3,19% = 9,09% de la varianza en dos componentes, y en ese plano
+    solo el 22,9% de los puntos cae más cerca del centroide de SU cluster L2
+    (17,3% tiene un vecino inmediato del mismo cluster) — o sea, una mancha
+    donde los movimientos no se distinguen. Este layout proyecta primero los
+    7 centroides L1 (que sí capturan 67,1% de su varianza en 2D), adentro de
+    cada uno los centroides L2, y adentro de cada L2 sus miembros: 88,1% de
+    los puntos queda junto a su L1 y 77,0% junto a su L2 (95,9% / 74,6% mirando
+    el vecino más cercano). Usa la estructura que Leiden ya encontró en vez de
+    pedirle a dos dimensiones que la redescubran.
+    """
+    if not vectors:
+        return []
+    matrix = np.asarray(vectors, dtype=np.float32)
+    matrix = matrix - matrix.mean(axis=0)
+    l1 = np.asarray(l1_ids)
+    l2 = np.asarray(l2_ids)
+
+    groups = np.unique(l1)
+    l1_layout = _svd_2d(np.stack([matrix[l1 == group].mean(axis=0) for group in groups]))
+
+    points = np.zeros((len(matrix), 2), dtype=np.float32)
+    for group_index, group in enumerate(groups):
+        movements = np.unique(l2[l1 == group])
+        l2_layout = _svd_2d(np.stack([matrix[l2 == movement].mean(axis=0) for movement in movements]))
+        for movement_index, movement in enumerate(movements):
+            members = l2 == movement
+            offsets = _svd_2d(matrix[members])
+            points[members] = (
+                l1_layout[group_index]
+                + l2_layout[movement_index] * _L2_RADIUS
+                + offsets * _MEMBER_RADIUS
+            )
+    return [(round(float(x), 4), round(float(y), 4)) for x, y in points]
+
+
 def recompute(seed_cap: int = 1500, k: int = 15) -> dict:
     seed = _seed_titles(seed_cap)
     if not seed:
@@ -363,6 +430,11 @@ def recompute(seed_cap: int = 1500, k: int = 15) -> dict:
                         "kind": records[index]["kind"],
                         "l1_cluster_id": l1_id,
                         "l2_cluster_id": next_l2_id,
+                        # se guardan acá porque el mapa de vibras los necesita
+                        # para ~1000 puntos y title_embeddings solo tiene el id
+                        "title": records[index]["title"],
+                        "year": records[index]["year"],
+                        "poster_path": records[index].get("poster_path"),
                     }
                 )
             next_l2_id += 1

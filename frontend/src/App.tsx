@@ -21,6 +21,7 @@ import Recommend from "./pages/Recommend";
 import ResetPassword from "./pages/ResetPassword";
 import Trivia from "./pages/Trivia";
 import VerifyEmail from "./pages/VerifyEmail";
+import VibesMap from "./pages/VibesMap";
 
 function Router() {
   return (
@@ -31,6 +32,7 @@ function Router() {
       <Route path="/verify-email" component={VerifyEmail} />
       <Route path="/recommend" component={Recommend} />
       <Route path="/rate" component={Rate} />
+      <Route path="/map" component={VibesMap} />
       <Route path="/games" component={Games} />
       <Route path="/games/pairwise" component={PairwiseGame} />
       <Route path="/games/trivia" component={Trivia} />

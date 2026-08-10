@@ -296,3 +296,31 @@ class TasteProfileResponse(BaseModel):
     decade_breakdown: list[DecadeCount]
     top_directors: list[PersonCount]
     top_actors: list[PersonCount]
+
+
+class VibeMapPoint(BaseModel):
+    # un título del mapa de vibras. x/y salen del layout jerárquico anclado a
+    # clusters (vibes_clustering.project_2d), en [-1, 1] aprox.
+    tmdb_id: int
+    kind: str
+    title: str
+    year: int
+    poster_path: str | None = None
+    x: float
+    y: float
+    group_id: int  # cluster L1: el color y la leyenda
+    movement_id: int  # cluster L2: el movimiento con nombre propio
+    # lo puntuó/vio ESTE usuario (siempre False sin sesión)
+    rated: bool = False
+
+
+class VibeMapCluster(BaseModel):
+    id: int
+    label: str
+    size: int
+
+
+class VibeMapResponse(BaseModel):
+    points: list[VibeMapPoint]
+    groups: list[VibeMapCluster]  # L1, los que pintan el mapa
+    movements: list[VibeMapCluster]  # L2, el nombre fino de cada isla

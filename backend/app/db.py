@@ -184,6 +184,13 @@ CREATE TABLE IF NOT EXISTS title_clusters (
     kind TEXT NOT NULL,
     l1_cluster_id INTEGER NOT NULL,
     l2_cluster_id INTEGER NOT NULL,
+    -- título/año/póster congelados acá al clusterizar: el mapa de vibras
+    -- necesita mostrar ~1000 nombres y title_embeddings solo guarda el id.
+    -- Resolverlos contra TMDb en cada visita serían ~1000 requests por
+    -- pageview; acá ya los teníamos en la mano cuando corrió el job.
+    title TEXT NOT NULL DEFAULT '',
+    year INTEGER NOT NULL DEFAULT 0,
+    poster_path TEXT,
     computed_at TEXT NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (tmdb_id, kind)
 );
@@ -340,6 +347,9 @@ CREATE TABLE IF NOT EXISTS title_clusters (
     kind TEXT NOT NULL,
     l1_cluster_id INTEGER NOT NULL,
     l2_cluster_id INTEGER NOT NULL,
+    title TEXT NOT NULL DEFAULT '',
+    year INTEGER NOT NULL DEFAULT 0,
+    poster_path TEXT,
     computed_at TEXT NOT NULL DEFAULT ({_PG_NOW}),
     PRIMARY KEY (tmdb_id, kind)
 );
@@ -450,6 +460,13 @@ def _run_migrations(conn) -> None:
         conn.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_sub ON users(google_sub)"
         )
+    if not _has_column(conn, "title_clusters", "title"):
+        # las filas que ya estaban quedan con title='' hasta que corra
+        # /admin/vibes/backfill-titles (o el próximo recompute): el mapa las
+        # saltea en vez de mostrar puntos sin nombre.
+        conn.execute("ALTER TABLE title_clusters ADD COLUMN title TEXT NOT NULL DEFAULT ''")
+        conn.execute("ALTER TABLE title_clusters ADD COLUMN year INTEGER NOT NULL DEFAULT 0")
+        conn.execute("ALTER TABLE title_clusters ADD COLUMN poster_path TEXT")
     if not _has_column(conn, "sessions", "expires_at"):
         # Las filas preexistentes quedan con expires_at=0 → expiradas. A la vez
         # se pasó a guardar el token hasheado, así que esas filas viejas (token
@@ -1316,11 +1333,15 @@ def save_vibe_clusters(labels: list[dict], assignments: list[dict]) -> None:
         if assignments:
             conn.executemany(
                 """
-                INSERT INTO title_clusters (tmdb_id, kind, l1_cluster_id, l2_cluster_id)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO title_clusters
+                    (tmdb_id, kind, l1_cluster_id, l2_cluster_id, title, year, poster_path)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
-                    (row["tmdb_id"], row["kind"], row["l1_cluster_id"], row["l2_cluster_id"])
+                    (
+                        row["tmdb_id"], row["kind"], row["l1_cluster_id"], row["l2_cluster_id"],
+                        row.get("title") or "", row.get("year") or 0, row.get("poster_path"),
+                    )
                     for row in assignments
                 ],
             )
@@ -1378,6 +1399,43 @@ def get_random_cluster_keys(limit: int) -> list[tuple[int, str]]:
             (limit,),
         ).fetchall()
     return [(row["tmdb_id"], row["kind"]) for row in rows]
+
+
+def get_vibe_map_rows(model: str) -> list[dict]:
+    """Todo lo que necesita el mapa de vibras en una sola query: la asignación
+    de clusters de Leiden más el vector que la produjo. El JOIN es por
+    (tmdb_id, kind) porque los ids de TMDb se pisan entre película y serie."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT c.tmdb_id, c.kind, c.title, c.year, c.poster_path,
+                   c.l1_cluster_id, c.l2_cluster_id, e.vector_json
+            FROM title_clusters c
+            JOIN title_embeddings e
+              ON e.tmdb_id = c.tmdb_id AND e.kind = c.kind AND e.model = ?
+            ORDER BY c.l1_cluster_id, c.l2_cluster_id, c.tmdb_id
+            """,
+            (model,),
+        ).fetchall()
+    return [{**dict(row), "vector": json.loads(row["vector_json"])} for row in rows]
+
+
+def get_cluster_keys_without_title() -> list[tuple[int, str]]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT tmdb_id, kind FROM title_clusters WHERE title = '' ORDER BY tmdb_id"
+        ).fetchall()
+    return [(row["tmdb_id"], row["kind"]) for row in rows]
+
+
+def update_cluster_titles(entries: list[tuple[int, str, str, int, str | None]]) -> None:
+    if not entries:
+        return
+    with get_connection() as conn:
+        conn.executemany(
+            "UPDATE title_clusters SET title = ?, year = ?, poster_path = ? WHERE tmdb_id = ? AND kind = ?",
+            [(title, year, poster, tmdb_id, kind) for tmdb_id, kind, title, year, poster in entries],
+        )
 
 
 def get_vibe_clusters(level: int | None = None, min_size: int = 0) -> list[dict]:

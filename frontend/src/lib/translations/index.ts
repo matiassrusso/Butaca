@@ -6,6 +6,7 @@ import { AUTH } from "./auth";
 import { GAMES } from "./games";
 import { HISTORY } from "./history";
 import { HOME } from "./home";
+import { MAP } from "./map";
 import { MODAL } from "./modal";
 import { PROFILE } from "./profile";
 import { RATE } from "./rate";
@@ -23,5 +24,6 @@ export const DICTIONARY: Record<string, Entry> = {
   ...PROFILE,
   ...RATE,
   ...GAMES,
+  ...MAP,
   ...MODAL,
 };

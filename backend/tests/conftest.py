@@ -37,6 +37,19 @@ def no_debug_mode(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def clear_vibe_map_cache():
+    # mismo problema que _VERDICT_CACHE de acá abajo: el mapa de vibras se
+    # cachea a nivel de módulo (la proyección solo cambia cuando corre el
+    # recompute), así que sin esto el primer test que lo pide le deja sus
+    # puntos a todos los que siguen, que corren con otra DB.
+    from backend.app import main
+
+    main._invalidate_vibe_map_cache()
+    yield
+    main._invalidate_vibe_map_cache()
+
+
+@pytest.fixture(autouse=True)
 def clear_llm_verdict_cache():
     # _VERDICT_CACHE/_INFLIGHT_VERDICTS son dicts a nivel de módulo, NO
     # aislados por test como la DB (isolated_db de arriba). Dos tests que
