@@ -398,7 +398,7 @@ export function MovieModal({
           <span className="font-mono text-[10px] uppercase tracking-widest">
             [Detail] · {rec.id}
           </span>
-          <button onClick={onClose} className="font-mono text-xs hover:text-accent">
+          <button onClick={onClose} className="font-mono text-xs hover:text-accent p-2 -m-2">
             [close ×]
           </button>
         </div>

@@ -58,13 +58,17 @@ export function AccountBanner() {
     <Banner>
       <span>{t("home.banner.verify")}</span>
       <div className="flex items-center gap-4 shrink-0">
-        <button onClick={resend} disabled={sending} className="underline hover:opacity-70 disabled:opacity-50">
+        <button
+          onClick={resend}
+          disabled={sending}
+          className="underline hover:opacity-70 disabled:opacity-50 p-2 -m-2"
+        >
           {sending ? t("home.banner.sending") : t("home.banner.resend")}
         </button>
         <button
           onClick={() => setDismissed(true)}
           aria-label={t("home.banner.dismissAria")}
-          className="hover:opacity-70"
+          className="hover:opacity-70 p-2 -m-2"
         >
           ✕
         </button>
