@@ -127,6 +127,19 @@ MESSAGES: dict[str, dict[str, str]] = {
         "es": "Todavía no tenés un perfil guardado — importá tu historial primero.",
         "en": "You don't have a saved profile yet — import your history first.",
     },
+    # ─── "¿Qué vemos juntos?" ───────────────────────────────────────────
+    # {name} — el username de Letterboxd del amigo. Un solo mensaje para
+    # todos los modos de falla (no existe, perfil privado, feed vacío,
+    # Letterboxd caído) porque ScrapeError no distingue entre ellos y al
+    # usuario le sirve la misma lista de cosas para chequear.
+    "friend_diary_unavailable": {
+        "es": "No pude leer el Letterboxd de «{name}». Fijate que el usuario exista, que el perfil sea público y que tenga actividad reciente.",
+        "en": "I couldn't read “{name}”'s Letterboxd. Check that the user exists, that the profile is public, and that it has recent activity.",
+    },
+    "friend_no_ratings": {
+        "es": "«{name}» tiene actividad pública pero sin puntajes ni likes, así que no puedo saber qué le gusta.",
+        "en": "“{name}” has public activity but no ratings or likes, so I can't tell what they like.",
+    },
     "session_not_found": {"es": "Sesión no encontrada.", "en": "Session not found."},
     "recommendation_not_found": {
         "es": "Recomendación no encontrada.",

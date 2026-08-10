@@ -18,6 +18,11 @@ export const SHARED: Record<string, Entry> = {
   "nav.menu": { es: "Menú", en: "Menu" },
   "nav.menuOpen": { es: "Abrir menú", en: "Open menu" },
   "nav.menuClose": { es: "Cerrar menú", en: "Close menu" },
+  "nav.together": { es: "¿Qué vemos juntos?", en: "What do we watch together?" },
+  "nav.togetherAria": {
+    es: "Recomendaciones para ver de a dos",
+    en: "Recommendations for watching with someone",
+  },
   "nav.profile": { es: "Perfil", en: "Profile" },
   "nav.profileAria": { es: "Ir a tu perfil", en: "Go to your profile" },
   "nav.rate": { es: "Puntuar más", en: "Rate more" },

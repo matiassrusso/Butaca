@@ -13,6 +13,7 @@ from backend.app import (
     onboarding_titles,
     vibes_clustering,
 )
+from backend.app import main as main_module
 from backend.app.llm_client import LlmError
 from backend.app.main import (
     TASTE_TAG_LOOKUP_CAP,
@@ -3435,3 +3436,146 @@ def test_backfill_fills_the_titles_of_rows_clustered_before_the_map_existed(monk
     }
     # idempotente: una segunda corrida no tiene nada que hacer
     assert _backfill_cluster_titles() == {"rows_missing": 0, "rows_updated": 0}
+
+
+# ─── "¿Qué vemos juntos?" (/recommend/together) ─────────────────────────────
+
+
+def _friend_diary(ratings, extra_seen=None):
+    return lambda username: (list(ratings), set(extra_seen or ()))
+
+
+def _post_together(headers, friend_username="elamigo", **extra):
+    return client.post(
+        "/recommend/together",
+        headers=headers,
+        data={"friend_username": friend_username, **extra},
+    )
+
+
+def test_together_never_writes_the_friends_data_into_your_account(monkeypatch) -> None:
+    """El requisito duro de la feature: los ratings del amigo son datos de otra
+    persona y contaminarían el perfil de gusto del usuario para siempre."""
+    headers = _auth_headers("togetherclean")
+    user_id = db.get_user_by_username("togetherclean")["id"]
+    _post_zip(headers)  # el usuario necesita historial propio para poder mergear
+    before = {item["title"] for item in db.get_watched_items(user_id)}
+    sessions_before = len(db.get_recommendation_history(user_id))
+
+    saved_profiles: list[object] = []
+    monkeypatch.setattr(
+        "backend.app.main.db.save_taste_profile",
+        lambda uid, profile: saved_profiles.append(profile),
+    )
+    monkeypatch.setattr(
+        letterboxd_scrape,
+        "fetch_letterboxd_diary",
+        _friend_diary([RatedItem(title="Perfect Blue", rating=5, review="dark psychological")]),
+    )
+
+    response = _post_together(headers)
+
+    assert response.status_code == 200
+    assert {item["title"] for item in db.get_watched_items(user_id)} == before
+    assert "Perfect Blue" not in before  # o sea que el assert de arriba prueba algo
+    assert saved_profiles == [], "un /together no debe reescribir el taste_profile guardado"
+    assert len(db.get_recommendation_history(user_id)) == sessions_before
+    body = response.json()
+    assert body["ephemeral"] is True
+    assert body["session_id"] is None
+    assert all(item["id"] < 0 for item in body["recommendations"])
+
+
+def test_together_excludes_everything_either_of_them_saw(monkeypatch) -> None:
+    headers = _auth_headers("togetherexclude")
+    _post_zip(headers)
+    monkeypatch.setattr(
+        letterboxd_scrape,
+        "fetch_letterboxd_diary",
+        _friend_diary(
+            [RatedItem(title="Perfect Blue", rating=5, review="dark psychological")],
+            # visto sin puntuar: solo llega por extra_seen, no por los ratings
+            extra_seen={"burning"},
+        ),
+    )
+
+    titles = {item["title"] for item in _post_together(headers).json()["recommendations"]}
+
+    assert titles, "la tanda no puede venir vacía"
+    assert "Perfect Blue" not in titles
+    assert "Burning" not in titles
+
+
+def test_together_merges_both_histories_keeping_the_lower_rating(monkeypatch) -> None:
+    """Para ver algo juntos manda el que menos lo disfrutó: si a uno le encantó
+    y al otro no, ese gusto compartido no existe."""
+    headers = _auth_headers("togethermerge")
+    _post_zip(headers)  # deja "An Old Favorite" en 5
+    monkeypatch.setattr(
+        letterboxd_scrape,
+        "fetch_letterboxd_diary",
+        _friend_diary(
+            [
+                RatedItem(title="An Old Favorite", rating=1.5, review=""),
+                RatedItem(title="Solo Del Amigo", rating=4.5, review="funny sharp"),
+            ]
+        ),
+    )
+
+    seen: dict[str, float] = {}
+    real_recommend = main_module.recommend
+
+    def spy(ratings, *args, **kwargs):
+        seen.update({item.title: item.rating for item in ratings})
+        return real_recommend(ratings, *args, **kwargs)
+
+    monkeypatch.setattr("backend.app.main.recommend", spy)
+    assert _post_together(headers).status_code == 200
+
+    assert seen["An Old Favorite"] == 1.5  # el 5 del usuario pierde contra el 1.5 del amigo
+    assert seen["Solo Del Amigo"] == 4.5   # y lo que solo vio uno entra igual
+
+
+def test_together_needs_your_own_history_first(monkeypatch) -> None:
+    headers = _auth_headers("togethernoprofile")
+    monkeypatch.setattr(
+        letterboxd_scrape,
+        "fetch_letterboxd_diary",
+        _friend_diary([RatedItem(title="Perfect Blue", rating=5, review="")]),
+    )
+
+    assert _post_together(headers).status_code == 400
+
+
+def test_together_rejects_a_friend_with_no_ratings(monkeypatch) -> None:
+    headers = _auth_headers("togethernofriendratings")
+    _post_zip(headers)
+    monkeypatch.setattr(
+        letterboxd_scrape, "fetch_letterboxd_diary", _friend_diary([], extra_seen={"burning"})
+    )
+
+    response = _post_together(headers)
+
+    assert response.status_code == 400
+    assert "elamigo" in response.json()["detail"]
+
+
+def test_together_surfaces_scrape_errors_in_the_requested_language(monkeypatch) -> None:
+    headers = _auth_headers("togetherscrapefail")
+    _post_zip(headers)
+
+    def boom(username: str):
+        raise letterboxd_scrape.ScrapeError("mensaje interno en español")
+
+    monkeypatch.setattr(letterboxd_scrape, "fetch_letterboxd_diary", boom)
+
+    response = client.post(
+        "/recommend/together",
+        headers={**headers, "Accept-Language": "en"},
+        data={"friend_username": "nosuchuser"},
+    )
+
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert "nosuchuser" in detail
+    assert "español" not in detail, "el mensaje al usuario sale de errors.msg, no del ScrapeError"

@@ -13,6 +13,7 @@ import { PROFILE } from "./profile";
 import { RATE } from "./rate";
 import { RECOMMEND } from "./recommend";
 import { SHARED, type Entry } from "./shared";
+import { TOGETHER } from "./together";
 import { WRAPPED } from "./wrapped";
 
 export type { Entry };
@@ -29,5 +30,6 @@ export const DICTIONARY: Record<string, Entry> = {
   ...CHAT,
   ...MAP,
   ...MODAL,
+  ...TOGETHER,
   ...WRAPPED,
 };
