@@ -370,6 +370,18 @@ export default function Profile() {
               ))}
             </div>
           )}
+
+          {/* el resumen anual se descubre desde acá además de la navbar: el
+              perfil es donde el usuario ya vino a mirarse a sí mismo */}
+          <button
+            onClick={() => navigate("/wrapped")}
+            className="mt-4 w-full px-5 py-4 border-2 border-foreground flex items-center justify-between gap-4 hover:bg-accent hover:border-accent hover:text-accent-foreground transition-colors text-left"
+          >
+            <span className="font-black uppercase tracking-tighter text-xl">{t("wrapped.title")}</span>
+            <span className="font-mono text-[10px] uppercase tracking-widest shrink-0">
+              {t("wrapped.kicker")} →
+            </span>
+          </button>
         </header>
 
         <div className="flex items-baseline gap-4 mb-10">
