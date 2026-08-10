@@ -17,6 +17,7 @@ from . import (
     auth,
     catalog,
     db,
+    embeddings,
     errors,
     google_auth,
     letterboxd_scrape,
@@ -1015,9 +1016,14 @@ def _finish_recommend(
     # fields it expects, see TASKS.md) should degrade to the unpersonalized
     # pool below, not fail an otherwise-servable recommend call.
     profile: dict | None = None
+    # los mismos matches que alimentan el perfil, reusados más abajo para los
+    # embeddings — resolverlos es lo caro (~150 búsquedas contra TMDb) y acá ya
+    # está pago (ver taste_profile.match_titles)
+    taste_matches: list[tuple[dict, dict]] = []
     if tmdb_client.is_configured():
         try:
-            profile = taste_profile.build_taste_profile(watched)
+            taste_matches = taste_profile.match_titles(watched)
+            profile = taste_profile.build_taste_profile(watched, taste_matches)
             if not ephemeral:
                 db.save_taste_profile(user["id"], profile)
         except Exception:
@@ -1172,6 +1178,29 @@ def _finish_recommend(
 
     pairwise_win_counts = db.get_pairwise_win_counts(user["id"])
 
+    # Parecido semántico entre lo que el usuario amó y el pool. Toda la red y
+    # el numpy quedan de este lado: recommender.recommend() solo recibe el dict
+    # y suma puntos.
+    #
+    # Se calcula una sola vez, sobre el pool inicial. Si más abajo hace falta un
+    # pool más ancho, esos títulos nuevos quedan sin entrada y suman 0, que en
+    # la escala centrada es "igual que el promedio" — vale mucho más que pagar
+    # otra ida y vuelta a NVIDIA en un camino que ya es el lento.
+    #
+    # Guardado ancho a propósito, igual que el resto de los enriquecimientos de
+    # esta función: NVIDIA caído o sin cuota degrada al scoring de siempre, no
+    # tumba un /recommend que ya tiene con qué responder.
+    embedding_affinity: dict[tuple[int, str], float] = {}
+    try:
+        loved_matches = [match for item, match in taste_matches if item["rating"] >= 4]
+        embedding_affinity = embeddings.affinity_by_key(loved_matches, candidates)
+    except Exception:
+        logger.warning("Embedding affinity failed, scoring without it", exc_info=True)
+    # cuántos candidatos del pool llegaron a tener vector: sin esto, "el feature
+    # no mueve nada" y "el feature no se está ejecutando" se leen igual en los
+    # logs de producción (error de diagnóstico que ya pasó en este proyecto)
+    embedding_coverage = f"{len(embedding_affinity)}/{len(candidates)}"
+
     def _score(pool: list[dict], seen: frozenset[str], limit: int) -> RecommendResponse:
         return recommend(
             ratings,
@@ -1187,6 +1216,7 @@ def _finish_recommend(
             limit=limit,
             extra_phrases=vibe_labels,
             pairwise_win_counts=pairwise_win_counts,
+            embedding_affinity=embedding_affinity or None,
             lang=lang,
         )
 
@@ -1357,7 +1387,7 @@ def _finish_recommend(
     response.refined = refined
     response.ephemeral = ephemeral
     logger.info(
-        "recommend done user=%s mode=%s kind=%s personalized=%s llm=%s refined=%s picks=%d discarded_rows=%d",
+        "recommend done user=%s mode=%s kind=%s personalized=%s llm=%s refined=%s picks=%d emb=%s discarded_rows=%d",
         user["id"],
         mode,
         kind_filter,
@@ -1365,6 +1395,7 @@ def _finish_recommend(
         llm_client.is_configured(),
         refined,
         len(response.recommendations),
+        embedding_coverage,
         discarded_rows,
     )
     return response

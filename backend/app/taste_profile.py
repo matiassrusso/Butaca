@@ -47,8 +47,17 @@ def _fetch_credits(pair: tuple[dict, dict]) -> tuple[dict, dict | None]:
         return item, None
 
 
-def build_taste_profile(watched_items: list[dict]) -> dict:
-    total_count = len(watched_items)
+def match_titles(watched_items: list[dict]) -> list[tuple[dict, dict]]:
+    """Resuelve contra TMDb los títulos que más definen el gusto del usuario.
+
+    Sale de build_taste_profile, que lo hacía y después tiraba los matches
+    quedándose solo con géneros/décadas/credits. Los embeddings de
+    /recommend necesitan el match completo (tmdb_id, kind, tags, overview), y
+    este es el único lugar del flujo donde ya está pago: separarlo lo hace
+    reusable sin una sola llamada extra de red.
+
+    Viene ordenado por rating descendente, igual que antes.
+    """
     # highest-rated first: within the cap, prioritize the titles that most
     # define this user's taste, not just the most recently imported ones
     ranked = sorted(watched_items, key=lambda item: item["rating"], reverse=True)
@@ -56,7 +65,17 @@ def build_taste_profile(watched_items: list[dict]) -> dict:
 
     with ThreadPoolExecutor(max_workers=MATCH_WORKERS) as pool:
         matched = pool.map(_match_title, candidates)
-    matches: list[tuple[dict, dict]] = [(item, match) for item, match in matched if match]
+    return [(item, match) for item, match in matched if match]
+
+
+def build_taste_profile(
+    watched_items: list[dict], matches: list[tuple[dict, dict]] | None = None
+) -> dict:
+    total_count = len(watched_items)
+    # `matches` se pasa cuando el caller ya los resolvió (ver match_titles) para
+    # no repetir las ~150 búsquedas contra TMDb; sin eso se resuelven acá.
+    if matches is None:
+        matches = match_titles(watched_items)
 
     genre_weight: dict[str, float] = {}
     decade_count: dict[int, int] = {}
