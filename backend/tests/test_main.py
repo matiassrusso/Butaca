@@ -3328,3 +3328,110 @@ def test_recommend_logs_embedding_coverage(monkeypatch, caplog) -> None:
 
     # 1 de los 2 candidatos del pool tenía vector
     assert any("emb=1/2" in record.getMessage() for record in caplog.records)
+
+
+# ─── Mapa interactivo de vibras (/vibes/map) ────────────────────────────────
+
+
+def _seed_vibe_map(with_titles: bool = True) -> None:
+    """Dos movimientos (L2) adentro de un solo grupo (L1), con embedding."""
+    assignments = [
+        {
+            "tmdb_id": 100 + index, "kind": "movie",
+            "l1_cluster_id": 1, "l2_cluster_id": 1 if index < 3 else 2,
+            "title": f"Peli {index}" if with_titles else "",
+            "year": 1990 + index, "poster_path": f"http://img/{index}.jpg",
+        }
+        for index in range(6)
+    ]
+    db.save_vibe_clusters(
+        [
+            {"level": 1, "cluster_id": 1, "label": "Cine negro", "sample_titles": [], "size": 6},
+            {"level": 2, "cluster_id": 1, "label": "Neo-noir", "sample_titles": [], "size": 3},
+            {"level": 2, "cluster_id": 2, "label": "Cine negro francés", "sample_titles": [], "size": 3},
+        ],
+        assignments,
+    )
+    db.save_title_embeddings(
+        [(row["tmdb_id"], "movie", [float(index), float(index % 3), 1.0]) for index, row in enumerate(assignments)],
+        vibes_clustering.EMBEDDING_MODEL,
+    )
+
+
+def test_vibes_map_is_public_and_labels_every_point_with_its_movement() -> None:
+    _seed_vibe_map()
+
+    body = client.get("/vibes/map").json()
+
+    assert len(body["points"]) == 6
+    assert {group["label"]: group["size"] for group in body["groups"]} == {"Cine negro": 6}
+    assert {movement["label"] for movement in body["movements"]} == {"Neo-noir", "Cine negro francés"}
+    point = body["points"][0]
+    assert point["title"].startswith("Peli") and point["poster_path"]
+    assert -1.01 <= point["x"] <= 1.01 and -1.01 <= point["y"] <= 1.01
+    # sin sesión no hay nada que resaltar
+    assert all(not p["rated"] for p in body["points"])
+
+
+def test_vibes_map_marks_the_titles_this_user_already_rated() -> None:
+    _seed_vibe_map()
+    headers = _auth_headers("mapper")
+    client.post("/profile/rate", headers=headers, json={"title": "Peli 2", "rating": 4.5})
+
+    body = client.get("/vibes/map", headers=headers).json()
+
+    assert {point["title"] for point in body["points"] if point["rated"]} == {"Peli 2"}
+
+
+def test_vibes_map_degrades_to_empty_without_a_clustering_run() -> None:
+    """Base nueva (o deploy donde nunca corrió la Fase 4): pantalla vacía y
+    honesta, no un 500."""
+    body = client.get("/vibes/map").json()
+
+    assert body == {"points": [], "groups": [], "movements": []}
+
+
+def test_vibes_map_skips_rows_that_never_got_a_title() -> None:
+    _seed_vibe_map(with_titles=False)
+
+    assert client.get("/vibes/map").json()["points"] == []
+
+
+def test_vibes_map_projects_once_per_process_not_once_per_visit(monkeypatch) -> None:
+    """1023 vectores de 2048 dimensiones por pageview es CPU tirada: la
+    proyección solo cambia cuando corre el recompute."""
+    _seed_vibe_map()
+    calls: list[int] = []
+    real = vibes_clustering.project_2d
+    monkeypatch.setattr(
+        "backend.app.main.vibes_clustering.project_2d",
+        lambda vectors, l1, l2: (calls.append(1), real(vectors, l1, l2))[1],
+    )
+
+    client.get("/vibes/map")
+    client.get("/vibes/map")
+
+    assert len(calls) == 1
+
+
+def test_backfill_fills_the_titles_of_rows_clustered_before_the_map_existed(monkeypatch) -> None:
+    from backend.app.main import _backfill_cluster_titles
+
+    _seed_vibe_map(with_titles=False)
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.fetch_title_by_id",
+        lambda tmdb_id, kind: {
+            "tmdb_id": tmdb_id, "title": f"Resuelta {tmdb_id}", "year": 2001,
+            "kind": kind, "poster_path": None, "tags": [],
+        },
+    )
+
+    result = _backfill_cluster_titles()
+
+    assert result == {"rows_missing": 6, "rows_updated": 6}
+    assert {point["title"] for point in client.get("/vibes/map").json()["points"]} == {
+        f"Resuelta {identifier}" for identifier in range(100, 106)
+    }
+    # idempotente: una segunda corrida no tiene nada que hacer
+    assert _backfill_cluster_titles() == {"rows_missing": 0, "rows_updated": 0}

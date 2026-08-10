@@ -63,6 +63,9 @@ from .models import (
     TasteProfileResponse,
     TriviaQuestion,
     UserCredentials,
+    VibeMapCluster,
+    VibeMapPoint,
+    VibeMapResponse,
     WatchedHistoryResponse,
     WatchlistAddRequest,
     WrappedResponse,
@@ -257,6 +260,96 @@ def recommend_options() -> PickOptionsResponse:
         for row in sorted(by_label.values(), key=lambda r: r["cluster_id"])
     )
     return PickOptionsResponse(options=options)
+
+
+# La proyección solo cambia cuando corre /admin/vibes/recompute (o el backfill
+# de títulos), o sea casi nunca: se calcula una vez por proceso y se guarda.
+# Recalcular 1023 vectores de 2048 dimensiones en cada visita es tirar CPU al
+# pedo, y más en el free tier de Render.
+_VIBE_MAP_CACHE: dict | None = None
+_VIBE_MAP_CACHE_LOCK = threading.Lock()
+
+
+def _invalidate_vibe_map_cache() -> None:
+    global _VIBE_MAP_CACHE
+    with _VIBE_MAP_CACHE_LOCK:
+        _VIBE_MAP_CACHE = None
+
+
+def _build_vibe_map() -> dict:
+    # sin título no hay nada que mostrar al pasar el mouse: son filas viejas,
+    # de antes de que title_clusters guardara el nombre (ver
+    # /admin/vibes/backfill-titles). Se saltean en vez de dibujar puntos mudos.
+    rows = [row for row in db.get_vibe_map_rows(vibes_clustering.EMBEDDING_MODEL) if row["title"]]
+    if not rows:
+        return {"points": [], "groups": [], "movements": []}
+
+    coordinates = vibes_clustering.project_2d(
+        [row["vector"] for row in rows],
+        [row["l1_cluster_id"] for row in rows],
+        [row["l2_cluster_id"] for row in rows],
+    )
+    points = [
+        {
+            "tmdb_id": row["tmdb_id"],
+            "kind": row["kind"],
+            "title": row["title"],
+            "year": row["year"],
+            "poster_path": row["poster_path"],
+            "x": x,
+            "y": y,
+            "group_id": row["l1_cluster_id"],
+            "movement_id": row["l2_cluster_id"],
+        }
+        for row, (x, y) in zip(rows, coordinates)
+    ]
+
+    labels = {(row["level"], row["cluster_id"]): row["label"] for row in db.get_vibe_clusters()}
+
+    def _clusters(level: int, key: str) -> list[dict]:
+        # el tamaño sale de los puntos que de verdad se dibujan, no de
+        # cluster_labels.size: si alguna fila quedó sin título, la leyenda
+        # prometería más puntos de los que hay en pantalla.
+        sizes = Counter(point[key] for point in points)
+        return [
+            {"id": cluster_id, "label": labels.get((level, cluster_id), "?"), "size": size}
+            for cluster_id, size in sizes.most_common()
+        ]
+
+    return {
+        "points": points,
+        "groups": _clusters(1, "group_id"),
+        "movements": _clusters(2, "movement_id"),
+    }
+
+
+@app.get("/vibes/map", response_model=VibeMapResponse)
+def vibes_map(user: sqlite3.Row | None = Depends(auth.get_optional_user)) -> VibeMapResponse:
+    """El universo clusterizado de la Fase 4, proyectado a 2D para poder
+    mirarlo: cada punto es un título y cada isla un movimiento que encontró
+    Leiden. Público como /weekly — sin sesión se ve el mapa entero; con
+    sesión, además, se marcan los títulos que esa persona ya puntuó o vio.
+
+    Degrada a vacío si en este ambiente todavía no corrió el clustering (base
+    nueva): un mapa sin puntos es una pantalla honesta, un 500 no."""
+    global _VIBE_MAP_CACHE
+    with _VIBE_MAP_CACHE_LOCK:
+        if _VIBE_MAP_CACHE is None:
+            _VIBE_MAP_CACHE = _build_vibe_map()
+        cached = _VIBE_MAP_CACHE
+
+    watched: set[str] = set()
+    if user is not None:
+        watched = {item["title"].strip().lower() for item in db.get_watched_items(user["id"])}
+
+    return VibeMapResponse(
+        points=[
+            VibeMapPoint(**point, rated=point["title"].strip().lower() in watched)
+            for point in cached["points"]
+        ],
+        groups=[VibeMapCluster(**row) for row in cached["groups"]],
+        movements=[VibeMapCluster(**row) for row in cached["movements"]],
+    )
 
 
 @app.get("/catalog/stats", response_model=CatalogStatsResponse)
@@ -457,6 +550,8 @@ def _run_vibe_recompute() -> None:
     global _VIBE_RECOMPUTE_STATE
     try:
         result = vibes_clustering.recompute()
+        # los clusters cambiaron: la proyección cacheada del mapa quedó vieja
+        _invalidate_vibe_map_cache()
         _VIBE_RECOMPUTE_STATE = {"status": "done", "result": result}
     except (vibes_clustering.VibeError, tmdb_client.TmdbError) as exc:
         logger.warning("Vibe recompute failed: %s", exc)
@@ -559,6 +654,64 @@ def retag_served(x_admin_token: str | None = Header(default=None)) -> dict:
 def retag_served_status(x_admin_token: str | None = Header(default=None)) -> dict:
     _require_admin_token(x_admin_token)
     return _RETAG_STATE
+
+
+def _backfill_cluster_titles() -> dict:
+    """Migración one-off: title_clusters empezó guardando solo el id, así que
+    las filas que ya estaban no tienen título y el mapa de vibras las saltea.
+    Las resuelve una vez contra TMDb y las persiste — idempotente (solo mira
+    las que tienen title = ''), así que se puede volver a correr sin miedo.
+    El próximo recompute ya las guarda solo."""
+    keys = db.get_cluster_keys_without_title()
+
+    def _resolve(key: tuple[int, str]) -> tuple | None:
+        try:
+            item = tmdb_client.fetch_title_by_id(key[0], kind=key[1])
+        except tmdb_client.TmdbError:
+            return None
+        if not item or not item.get("title"):
+            return None
+        return (key[0], key[1], item["title"], item.get("year") or 0, item.get("poster_path"))
+
+    with ThreadPoolExecutor(max_workers=taste_profile.MATCH_WORKERS) as pool:
+        resolved = [row for row in pool.map(_resolve, keys) if row is not None]
+    db.update_cluster_titles(resolved)
+    _invalidate_vibe_map_cache()
+    return {"rows_missing": len(keys), "rows_updated": len(resolved)}
+
+
+_BACKFILL_TITLES_STATE: dict = {"status": "idle"}
+_BACKFILL_TITLES_LOCK = threading.Lock()
+
+
+def _run_backfill_titles() -> None:
+    global _BACKFILL_TITLES_STATE
+    try:
+        _BACKFILL_TITLES_STATE = {"status": "done", "result": _backfill_cluster_titles()}
+    except Exception as exc:  # noqa: BLE001 - mismo criterio que _run_retag
+        logger.warning("Backfill of cluster titles failed: %s", exc, exc_info=True)
+        _BACKFILL_TITLES_STATE = {"status": "error", "error": str(exc)}
+    finally:
+        _BACKFILL_TITLES_LOCK.release()
+
+
+@app.post("/admin/vibes/backfill-titles")
+def backfill_cluster_titles(x_admin_token: str | None = Header(default=None)) -> dict:
+    """En background por lo mismo que el retag: son ~1000 requests a TMDb y
+    Render corta el request mucho antes."""
+    _require_admin_token(x_admin_token)
+    if not _BACKFILL_TITLES_LOCK.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="El backfill ya está corriendo.")
+    global _BACKFILL_TITLES_STATE
+    _BACKFILL_TITLES_STATE = {"status": "running"}
+    threading.Thread(target=_run_backfill_titles, daemon=True).start()
+    return {"status": "started"}
+
+
+@app.get("/admin/vibes/backfill-titles/status")
+def backfill_cluster_titles_status(x_admin_token: str | None = Header(default=None)) -> dict:
+    _require_admin_token(x_admin_token)
+    return _BACKFILL_TITLES_STATE
 
 
 def _issue_email_verification(user_id: int, email: str | None) -> str:

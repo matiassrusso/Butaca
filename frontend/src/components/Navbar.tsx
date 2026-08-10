@@ -28,6 +28,7 @@ export function Navbar() {
     { label: t("nav.profile"), ariaLabel: t("nav.profileAria"), link: "/profile" },
     { label: t("nav.rate"), ariaLabel: t("nav.rateAria"), link: "/rate" },
     { label: t("nav.games"), ariaLabel: t("nav.gamesAria"), link: "/games" },
+    { label: t("map.nav"), ariaLabel: t("map.navAria"), link: "/map" },
     { label: t("nav.history"), ariaLabel: t("nav.historyAria"), link: "/history" },
     { label: t("wrapped.nav"), ariaLabel: t("wrapped.navAria"), link: "/wrapped" },
     {
