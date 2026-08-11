@@ -45,6 +45,32 @@ Solo yo (Matías), con posible coordinación multi-agente (Claude, Codex) docume
 
 <!-- SESSION_STATE:START -->
 ## Estado actual
+_Última actualización: 2026-08-10_
+
+**Qué se hizo:**
+- **5 features nuevas, construidas en paralelo por 5 agentes en worktrees separados y mergeadas a `main`:** chat con tu perfil de gusto (`/chat`, misma voz que el resto del sitio), embeddings moviendo el match_score real de `/recommend` (antes solo alimentaban el picker de movimientos), "¿qué vemos juntos?" (`/recommend/together`, mergea el diario público de Letterboxd de un amigo sin que necesite cuenta de Butaca), mapa interactivo de los ~1023 embeddings en 2D (`/map`), y "Tu año en Butaca" (`/wrapped`, resumen anual compartible). Cuatro de los cinco agentes murieron a mitad de tarea por límite de sesión — se resumieron con contexto completo (no arrancaron de nuevo) y terminaron igual.
+- **Reporte en vivo de Matías: "para poner estrellas es muy difícil... y así varias cosas mal" en el celular.** Diagnostiqué la causa antes de despachar (hit-targets de estrella de 14-22px, muy por debajo del mínimo táctil, y el tap commiteaba al toque sin confirmación) y separé en 2 agentes paralelos: uno arregló `StarRating.tsx` de raíz (targets reales de 44px + modelo "tocá para previsualizar, tocá de nuevo para confirmar" en touch), el otro auditó el resto del sitio en viewport mobile real y arregló 5 problemas (el más grave: overflow horizontal GLOBAL en toda página logueada, porque el username sin truncar en la navbar empujaba el layout fuera del viewport a 375px; también el radar de géneros cortando labels, el stepper del wizard muy bajo, y hit-targets chicos en el banner de verificación y el cierre del modal).
+- **Primera corrida en este proyecto de la skill `code-review`** (Standards + Spec, dos agentes en paralelo) sobre el diff completo de la sesión — pedido explícito de Matías tras notar que no estaba usando las skills instaladas. Cero violaciones duras, cero scope creep, invariantes grandes verificados leyendo el código real (piso de 60 en match_score, "no contaminar la cuenta del usuario" en `/together`). Único hallazgo real: el código de Wrapped decía "ver TASKS.md" para la decisión de modo público, pero esa nota nunca se había escrito ahí — corregido (`wrapped-share-2026-08-10`).
+- 487 tests en verde, `npm run build` limpio, todo pusheado a `origin/main` (`58fbaa5`). La skill `simplify` (segunda pasada de calidad, ponytail) quedó sin correr por límite de sesión.
+
+**Dónde retomar:** correr la skill `simplify` sobre el mismo diff (`92fb9e6..58fbaa5`) — el eje Standards de `code-review` ya dejó candidatos concretos: un helper compartido entre `_chat_daily_limit()`/`_recommend_daily_limit()` (mismo patrón repetido letra por letra en `main.py`), el idiom `p-2 -m-2` para hit-targets repetido suelto 4 veces sin clase compartida, y `chr(10) * 2` en `llm_client._build_prompt` en vez de `"\n\n"` directo. Hallazgo menor aparte: en `VibesMap.tsx` un stat queda hardcodeado en formato español incluso con `lang="en"` (el vecino sí usa `.toLocaleString()`).
+
+**Bloqueos / decisiones pendientes:**
+- **Wrapped, modo público:** hoy `/wrapped` solo sirve el resumen del usuario logueado, no hay link que un tercero pueda abrir — anotado en `TASKS.md` (`wrapped-share-2026-08-10`) para que Matías decida si vale la pena abrirlo (y qué se oculta) antes de que la feature pueda cumplir su rol de motor de tráfico del plan de `monetizacion-2026-08-07`.
+- **Together, criterio de merge de ratings:** cuando el usuario y el amigo puntuaron el mismo título, se usa el MÁS BAJO de los dos — interpretación del agente ("que sirva para los dos"), no especificada por Matías, a confirmar.
+- **Embeddings:** el peso del bonus en el scoring quedó conservador a propósito, con el número medido comentado al lado — subirlo si algún día se ve plano.
+- **Chat:** pide login, límite de 30 msj/día con contador EN MEMORIA (se resetea si Render reinicia el proceso).
+
+**Contexto que no es obvio del código:**
+- Todo el trabajo de esta sesión se hizo en worktrees separados (`C:\Users\matia\butaca-wt\{emb,together,map,wrapped,chat,mobile-stars,mobile-audit}`), cada uno con su `.env`/`butaca.db` copiados y `node_modules` como junction al principal. Quedan en disco, no se borraron — limpiar con `git worktree remove` cuando ya no hagan falta.
+- **La `TMDB_API_KEY` del `.env` LOCAL del worktree principal ANDA de verdad** (200 real contra TMDb) — la nota vieja que decía 401 estaba desactualizada, se corrigió en memoria (`butaca-local-env-tmdb-stale.md`).
+- Varios agentes reportaron que `TaskUpdate`/`TaskList` no estaba disponible en su entorno de subagente — el board de tareas se actualizó siempre desde el hilo principal, nunca desde los agentes mismos.
+- El eje Spec del `code-review` no pudo re-verificar de forma independiente el "sin hallazgos" que reportó el agente de auditoría mobile para las páginas nuevas de esta misma sesión (Chat/Together/Wrapped) — confió en el commit message, no hizo su propia repro.
+
+<details>
+<summary>Estado detallado anterior (2026-08-07)</summary>
+
+## Estado actual
 _Última actualización: 2026-08-07_
 
 **Qué se hizo (sesión larga, 15 commits `5157503`..`287dc0c`, 395 → 423 tests, todo pusheado y deployado):**
@@ -383,7 +409,16 @@ _Última actualización: 2026-08-07_
 
 </details>
 
+</details>
+
 ## Historial de sesiones
+
+### 2026-08-10 — 5 features en paralelo, arreglo de mobile, y la primera pasada de code-review de la sesión
+Despaché 5 agentes en paralelo, cada uno en su worktree: chat conversacional con el perfil de gusto, embeddings moviendo el match_score real de `/recommend` (hoy solo alimentaban el picker de movimientos), "¿qué vemos juntos?" (mergea el diario público de Letterboxd de un amigo sin que necesite cuenta), el mapa interactivo de los ~1023 embeddings en 2D, y "Tu año en Butaca". Los 4 agentes que no llegaron a cerrar en la primera pasada murieron por límite de sesión a mitad de tarea — se resumieron con contexto completo (no arrancaron de nuevo) y terminaron igual. Las 5 features mergeadas con conflictos menores (bloques de código nuevos e independientes cayendo cerca uno del otro en `main.py`/`App.tsx`/los índices de traducción), todos resueltos concatenando sin overlap real.
+
+Matías reportó en vivo que las estrellas eran muy difíciles de tocar en el celular — diagnostiqué la causa antes de despachar (hit-targets de 14-22px, muy por debajo del mínimo táctil, y el tap commiteaba al toque sin confirmación) y separé el trabajo en dos agentes paralelos: uno arregló `StarRating.tsx` de raíz, el otro auditó el resto del sitio en viewport mobile real y encontró 5 problemas reales (el más grave: overflow horizontal GLOBAL en toda página logueada, porque el username sin truncar en la navbar empujaba el layout fuera del viewport a 375px).
+
+Cerré corriendo por primera vez en este proyecto la skill `code-review` (dos ejes en paralelo, Standards y Spec) sobre el diff completo de la sesión — pedido explícito de Matías, que notó que no estaba usando las skills instaladas. Cero hallazgos bloqueantes; el único real fue una nota de decisión de Wrapped que el código decía haber dejado en `TASKS.md` pero nunca se había escrito ahí (corregido). Quedó pendiente la pasada de `simplify` por límite de sesión. 487 tests, todo pusheado (`58fbaa5`).
 
 ### 2026-08-07 — la página bilingüe, y cuatro bugs de fondo del motor que aparecieron usándola
 Arrancó cerrando el fix del piso de match que había quedado sin commitear, y
