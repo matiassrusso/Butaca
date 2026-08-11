@@ -245,9 +245,10 @@ def test_call_nvidia_omits_thinking_flag_for_non_nemotron_models(monkeypatch) ->
 
 def test_fallback_switches_model_when_primary_fails(monkeypatch) -> None:
     monkeypatch.setattr(llm_client.time, "sleep", lambda _s: None)
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
     calls: list[str] = []
 
-    def fake_call(prompt, api_key, model):
+    def fake_call(prompt, api_key, model, url=None):
         calls.append(model)
         if model == llm_client.MODEL:
             raise llm_client.LlmError("modelo primario caído")
@@ -264,13 +265,50 @@ def test_fallback_switches_model_when_primary_fails(monkeypatch) -> None:
 
 def test_fallback_raises_when_all_models_fail(monkeypatch) -> None:
     monkeypatch.setattr(llm_client.time, "sleep", lambda _s: None)
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
 
-    def always_fail(prompt, api_key, model):
+    def always_fail(prompt, api_key, model, url=None):
         raise llm_client.LlmError(f"{model} caído")
 
     monkeypatch.setattr(llm_client, "_call_nvidia", always_fail)
 
     with pytest.raises(llm_client.LlmError):
+        llm_client._call_nvidia_with_fallback("prompt", "fake-key")
+
+
+def test_fallback_tries_groq_when_both_nvidia_models_fail(monkeypatch) -> None:
+    monkeypatch.setattr(llm_client.time, "sleep", lambda _s: None)
+    monkeypatch.setenv("GROQ_API_KEY", "fake-groq-key")
+    calls: list[tuple] = []
+
+    def fake_call(prompt, api_key, model, url=llm_client.CHAT_COMPLETIONS_URL):
+        calls.append((model, api_key, url))
+        if model in llm_client.NVIDIA_MODELS:
+            raise llm_client.LlmError(f"{model} caído")
+        return {"picks": [{"title": "X", "why": "de groq"}]}
+
+    monkeypatch.setattr(llm_client, "_call_nvidia", fake_call)
+
+    result = llm_client._call_nvidia_with_fallback("prompt", "nvidia-key")
+
+    assert result["picks"][0]["why"] == "de groq"
+    assert calls[-1] == (
+        llm_client.GROQ_MODEL,
+        "fake-groq-key",
+        llm_client.GROQ_CHAT_COMPLETIONS_URL,
+    )
+
+
+def test_fallback_skips_groq_when_key_not_set(monkeypatch) -> None:
+    monkeypatch.setattr(llm_client.time, "sleep", lambda _s: None)
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+
+    def always_fail(prompt, api_key, model, url=None):
+        raise llm_client.LlmError(f"{model} caído")
+
+    monkeypatch.setattr(llm_client, "_call_nvidia", always_fail)
+
+    with pytest.raises(llm_client.LlmError, match=llm_client.NVIDIA_MODELS[1]):
         llm_client._call_nvidia_with_fallback("prompt", "fake-key")
 
 

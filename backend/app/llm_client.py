@@ -22,6 +22,13 @@ logger = logging.getLogger(__name__)
 
 ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
 CHAT_COMPLETIONS_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
+# Fallback fuera de NVIDIA (mismo host que los 2 modelos de arriba, así que una
+# degradación de NVIDIA los afecta a los tres por igual — ver 2026-08-11 en
+# build-log). Groq corre en hardware propio (LPU) pensado para latencia baja;
+# API compatible con OpenAI, mismo formato de request que NVIDIA NIM. Opcional:
+# si GROQ_API_KEY no está seteada, se lo salta sin error (ver docs/groq-setup.md).
+GROQ_CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completions"
+GROQ_MODEL = "llama-3.3-70b-versatile"
 # NVIDIA NIM model catalog (build.nvidia.com). Super over Nano/Ultra: more
 # reasoning capacity than Nano (12B vs 3B active params, still MoE so not as
 # slow as its 120B total suggests) without Ultra's frontier-scale latency.
@@ -432,7 +439,9 @@ def _extract_json(content: str) -> dict:
     return json.loads(text)
 
 
-def _call_nvidia(prompt: str, api_key: str, model: str = MODEL) -> dict:
+def _call_nvidia(
+    prompt: str, api_key: str, model: str = MODEL, url: str = CHAT_COMPLETIONS_URL
+) -> dict:
     payload_body = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
@@ -443,13 +452,13 @@ def _call_nvidia(prompt: str, api_key: str, model: str = MODEL) -> dict:
         # json_object garantiza sintaxis parseable (medido: 8/8 vs 4/6).
         "response_format": {"type": "json_object"},
     }
-    # enable_thinking solo aplica a la familia Nemotron; otros modelos NIM
-    # (el fallback llama) rechazan el parámetro con 400
+    # enable_thinking solo aplica a la familia Nemotron de NVIDIA; otros
+    # modelos (el fallback llama de NVIDIA, y Groq) rechazan el parámetro
     if model.startswith("nvidia/nemotron"):
         payload_body["chat_template_kwargs"] = {"enable_thinking": False}
     body = json.dumps(payload_body).encode("utf-8")
     request = urllib.request.Request(
-        CHAT_COMPLETIONS_URL,
+        url,
         data=body,
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
         method="POST",
@@ -487,6 +496,15 @@ def _call_nvidia_with_fallback(prompt: str, api_key: str) -> dict:
                 )
                 if attempt + 1 < ATTEMPTS_PER_MODEL:
                     time.sleep(RETRY_BACKOFF_SECONDS)
+
+    groq_key = os.environ.get("GROQ_API_KEY")
+    if groq_key:
+        try:
+            return _call_nvidia(prompt, groq_key, GROQ_MODEL, url=GROQ_CHAT_COMPLETIONS_URL)
+        except LlmError as exc:
+            last_error = exc
+            logger.warning("Groq %s falló: %s", GROQ_MODEL, exc)
+
     assert last_error is not None  # NVIDIA_MODELS nunca está vacío
     raise last_error
 
