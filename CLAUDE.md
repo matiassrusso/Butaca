@@ -45,6 +45,31 @@ Solo yo (Matías), con posible coordinación multi-agente (Claude, Codex) docume
 
 <!-- SESSION_STATE:START -->
 ## Estado actual
+_Última actualización: 2026-08-11_
+
+**Qué se hizo:**
+- **Cerrado el `/recommend` lento + siempre heurístico** que había quedado a medio diagnosticar en una sesión cloud anterior (nota en `D:\Descargas\butacarecommendslowheuristic20260811.md`). Con `RENDER_API_KEY` local pude leer logs reales de producción: no era rate-limit (429), eran timeouts genuinos de NVIDIA free-tier. `ATTEMPTS_PER_MODEL` 2→1 y `REQUEST_TIMEOUT` 20s→10s (`fa6bc48`), cortando el peor caso de 85s a ~20-28s.
+- **Agregado Groq como cuarto fallback** (`1dfe9b9`) — probando la key real encontré que Groq devuelve 403 desde la IP de Render (aunque anda perfecto desde otro lado); Matías revisó su dashboard y no encontró restricción de su lado, así que es casi seguro un bloqueo de infraestructura (Cloudflare filtrando IPs de hosting). Queda como fallback silencioso: falla en ~30ms, no suma nada al tiempo de espera.
+- **El hallazgo grande de la sesión:** medí los 102 modelos con endpoint de chat de todo el catálogo NIM (latencia real + el prompt real de refine, no un "decí OK") a pedido explícito de Matías tras notar que solo había probado los que ya conocía por el código/docs viejos. Los modelos "famosos" que se usaban (`nemotron-3-super-120b`, `llama-3.1-70b-instruct`) están consistentemente congestionados — son justo los más pedidos por todo el mundo. Reordenada la cadena a `nemotron-3.5-lightning-30b-a3b → nemotron-3-ultra-550b-a55b → llama-3.1-8b-instruct → Groq` (`2c82a70`), con mejor calidad Y mejor latencia medida.
+- 490 tests en verde en todo momento, todo pusheado a `origin/main`, deploy manual disparado en Render para asegurar que `GROQ_API_KEY` se cargara al boot.
+
+**Dónde retomar:** pedirle a Matías que pruebe `/recommend` de nuevo y confirme — con la cadena nueva debería responder en 1-3s con LLM real la mayoría de las veces. Si sigue lento o cae al heurístico, mirar logs de Render (`NVIDIA`/`Groq`/`LLM refine failed`): la congestión de NVIDIA free-tier varía con el tiempo, no es un estado fijo, así que puede hacer falta remedir el catálogo en vez de asumir que la elección de hoy sigue siendo la mejor.
+
+**Bloqueos / decisiones pendientes:**
+- Si NVIDIA free-tier vuelve a congestionar los modelos elegidos hoy, la solución de fondo (plata en vez de rotar modelos gratis) es una decisión de Matías, no tomada todavía.
+- Groq sigue bloqueado desde Render sin acción posible de nuestro lado — solo queda esperar a que Groq cambie esa política, si es que lo hace.
+
+**Contexto que no es obvio del código:**
+- La razón completa del orden de modelos elegido (con los números medidos) vive en el comentario arriba de `NVIDIA_MODELS` en `backend/app/llm_client.py` — no repetirla de memoria, leerla de ahí antes de tocar la cadena.
+- El script del barrido de 102 modelos (bash + `xargs -P 15`, ~1 min) no quedó guardado en el repo, solo corrió en este sandbox — si hay que remedir, rearmarlo es rápido: `GET /v1/models` de NVIDIA para la lista, un POST de chat completions trivial por modelo en paralelo.
+- La API de Render devuelve el VALOR real de un env var (`GET /v1/services/{id}/env-vars/{key}`), no solo si existe — así confirmé que la key de Groq en Render coincidía byte a byte con la local antes de sospechar de otra cosa.
+- `nemotron-3-ultra-550b-a55b` tuvo un outlier de 8.5s en frío contra 2.1-2.2s normal en las corridas siguientes — si aparece como timeout en logs, no asumir que es congestión, puede ser cold-start normal de un modelo poco pedido.
+- `llama-3.3-nemotron-super-49b-v1.5` ignora `chat_template_kwargs.enable_thinking` (no es de la familia Nemotron 3.x que sí lo soporta) y siempre razona puertas adentro, 14-20s — descartado por eso, no por tamaño.
+
+<details>
+<summary>Estado detallado anterior (2026-08-10)</summary>
+
+## Estado actual
 _Última actualización: 2026-08-10_
 
 **Qué se hizo:**
@@ -411,7 +436,16 @@ _Última actualización: 2026-08-07_
 
 </details>
 
+</details>
+
 ## Historial de sesiones
+
+### 2026-08-11 — /recommend lento y siempre heurístico, y por qué los modelos "famosos" del catálogo NVIDIA son los peores hoy
+Retomé una sesión cloud anterior que había quedado a mitad de diagnóstico (nota en `D:\Descargas\butacarecommendslowheuristic20260811.md`): Matías reportaba `/recommend` lento y siempre con el "why" heurístico, nunca el del LLM. Con `RENDER_API_KEY` local pude leer logs reales de producción en vez de hipotetizar — no era rate-limit (429), eran timeouts genuinos: los 4 intentos de la cadena vieja (2 modelos × 2 reintentos) tardaban el timeout completo, ~82s, calzando exacto con los "1:25" que había reportado. Reduje `ATTEMPTS_PER_MODEL` a 1 y `REQUEST_TIMEOUT` a 10s, cortando el peor caso a ~20-28s — verificado con logs después del deploy.
+
+Matías preguntó si convenía sumar otro proveedor. Agregué Groq como cuarto fallback, pero al probarlo en producción devolvía 403 Forbidden desde la IP de Render (con la misma key que andaba perfecto desde mi sandbox) — Matías revisó su dashboard de Groq y no encontró ninguna restricción configurada, así que es casi seguro un bloqueo de infraestructura tipo Cloudflare filtrando IPs de hosting providers, no algo que se pueda destrabar desde su lado. Queda como fallback silencioso: falla en ~30ms, no le suma nada al tiempo de espera, y si algún día Groq cambia esa política empieza a andar solo.
+
+El hallazgo grande vino de una pregunta directa de Matías ("probaste usando otros modelos con la key de nvidia?"), y después de que insistiera dos veces más ("hay 130 modelos", con captura del catálogo) cuando mi primera pasada solo había probado los nombres que ya conocía. Terminé midiendo los 102 modelos con endpoint de chat de todo el catálogo NIM, en paralelo, con el prompt real de refine (no un "decí OK"): los modelos que se venían usando (`nemotron-3-super-120b`, `llama-3.1-70b-instruct`) están consistentemente congestionados — son justo los más pedidos por todo el mundo, mientras variantes más nuevas o menos conocidas responden en menos de 2s con calidad igual o mejor. Reordené la cadena a `nemotron-3.5-lightning-30b-a3b → nemotron-3-ultra-550b-a55b → llama-3.1-8b-instruct → Groq`, con mejora medida tanto en velocidad como en calidad. 490 tests en verde durante toda la sesión, todo pusheado, deploy manual disparado en Render para asegurar que `GROQ_API_KEY` se cargara al boot.
 
 ### 2026-08-10 — 5 features en paralelo, arreglo de mobile, y la primera pasada de code-review de la sesión
 Despaché 5 agentes en paralelo, cada uno en su worktree: chat conversacional con el perfil de gusto, embeddings moviendo el match_score real de `/recommend` (hoy solo alimentaban el picker de movimientos), "¿qué vemos juntos?" (mergea el diario público de Letterboxd de un amigo sin que necesite cuenta), el mapa interactivo de los ~1023 embeddings en 2D, y "Tu año en Butaca". Los 4 agentes que no llegaron a cerrar en la primera pasada murieron por límite de sesión a mitad de tarea — se resumieron con contexto completo (no arrancaron de nuevo) y terminaron igual. Las 5 features mergeadas con conflictos menores (bloques de código nuevos e independientes cayendo cerca uno del otro en `main.py`/`App.tsx`/los índices de traducción), todos resueltos concatenando sin overlap real.
