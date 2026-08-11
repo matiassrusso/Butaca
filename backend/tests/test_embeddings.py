@@ -19,7 +19,7 @@ def _no_network(monkeypatch) -> list[list[str]]:
     """Registra los textos que se hubieran mandado a NVIDIA, sin llamarla."""
     calls: list[list[str]] = []
 
-    def fake(texts, retry=True):
+    def fake(texts, retry=True, timeout=30):
         calls.append(texts)
         # un vector distinto por texto, determinístico: sirve para chequear
         # qué se persistió sin depender del modelo real
@@ -123,22 +123,27 @@ def test_affinity_skips_candidates_without_a_tmdb_id(monkeypatch) -> None:
     assert calls == []
 
 
-def test_affinity_embeds_live_without_retrying_on_rate_limit(monkeypatch) -> None:
-    """El camino en vivo (adentro de un /recommend) tiene que pedir retry=False:
-    dormir el Retry-After de un 429 acá bloquea el request de un usuario por un
-    bonus best-effort (reportado por Matías, 2026-08-11: /recommend lento y
-    siempre heurístico después de sumar embeddings al flujo en vivo)."""
-    seen_retry: list[bool] = []
+def test_affinity_embeds_live_without_retrying_or_waiting_long_on_rate_limit(monkeypatch) -> None:
+    """El camino en vivo (adentro de un /recommend) tiene que pedir retry=False
+    y un timeout corto: dormir el Retry-After de un 429, o colgarse hasta los
+    30s default del job offline, bloquea el request de un usuario por un bonus
+    best-effort (reportado por Matías, 2026-08-11: /recommend lento y siempre
+    heurístico después de sumar embeddings al flujo en vivo)."""
+    seen_calls: list[tuple[bool, float]] = []
 
-    def fake(texts, retry=True):
-        seen_retry.append(retry)
+    def fake(texts, retry=True, timeout=30):
+        seen_calls.append((retry, timeout))
         return [[1.0, 0.0, 0.0] for _ in texts]
 
     monkeypatch.setattr(vibes_clustering, "_embed_batch", fake)
 
     embeddings.affinity_by_key([_item(1, "Amada")], [_item(10, "Nueva")])
 
-    assert seen_retry == [False, False]  # amada y candidatos, ninguno reintenta
+    # amada y candidatos, ninguno reintenta ni usa el timeout largo del job offline
+    assert seen_calls == [
+        (False, embeddings.LIVE_EMBED_TIMEOUT_SECONDS),
+        (False, embeddings.LIVE_EMBED_TIMEOUT_SECONDS),
+    ]
 
 
 def test_affinity_is_empty_without_loved_titles(monkeypatch) -> None:

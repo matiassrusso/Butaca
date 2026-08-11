@@ -29,6 +29,12 @@ MODEL = f"{vibes_clustering.EMBEDDING_MODEL}:lite"
 MAX_NEW_CANDIDATES = 120
 MAX_LOVED = 40
 
+# 1-2s medido (ver arriba): 30s (el default del job offline) solo sirve para
+# que un cuelgue de NVIDIA se coma medio minuto de un /recommend en vivo por
+# un bonus best-effort. 8s da margen de sobra ante latencia real y corta
+# rápido ante un cuelgue real.
+LIVE_EMBED_TIMEOUT_SECONDS = 8
+
 # Centrado en la media DEL POOL, escala FIJA. Medido sobre un mismo pool de 159
 # candidatos de discover con cuatro perfiles muy distintos (thriller de autor
 # con 10 amadas y con 30, comedia romántica, anime): el desvío casi no se movió
@@ -88,7 +94,9 @@ def _vectors_for(items: list[dict], max_new: int) -> dict[tuple[int, str], list[
         # (hasta EMBED_RETRY_FALLBACK_SECONDS, ver vibes_clustering._embed_batch)
         # bloqueaba el request entero por un bonus best-effort — mejor perder
         # el bonus para esta tanda que tumbar la latencia de todo /recommend.
-        generated = vibes_clustering._embed_batch([_lite_text(item) for item in batch], retry=False)
+        generated = vibes_clustering._embed_batch(
+            [_lite_text(item) for item in batch], retry=False, timeout=LIVE_EMBED_TIMEOUT_SECONDS
+        )
         db.save_title_embeddings(
             [(_key(item)[0], _key(item)[1], vector) for item, vector in zip(batch, generated)],
             MODEL,

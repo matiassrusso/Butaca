@@ -134,13 +134,18 @@ def _retry_delay_seconds(exc: HTTPError) -> float:
     return float(match.group(1)) + 1 if match else EMBED_RETRY_FALLBACK_SECONDS
 
 
-def _embed_batch(texts: list[str], retry: bool = True) -> list[list[float]]:
+def _embed_batch(texts: list[str], retry: bool = True, timeout: float = 30) -> list[list[float]]:
     """retry=False para el camino en vivo (embeddings.py, adentro de un
     /recommend): esperar el Retry-After de un 429 (hasta EMBED_RETRY_FALLBACK_SECONDS)
     tiene sentido en el job offline, que puede permitirse esperar, pero
     bloquear un request de usuario ese tiempo por un bonus best-effort no
     (reportado por Matías, 2026-08-11: /recommend lento y siempre heurístico
-    después de sumar este llamado al flujo en vivo)."""
+    después de sumar este llamado al flujo en vivo).
+
+    timeout más chico, mismo motivo: medido contra la API real (ver
+    embeddings.py y el commit que lo introdujo), una tanda tarda 1-2s. 30s es
+    el margen razonable para el job offline, no para un request de usuario que
+    se queda colgado ese tiempo si NVIDIA no responde."""
     api_key = os.environ.get("NVIDIA_API_KEY")
     if not api_key:
         raise VibeError("NVIDIA_API_KEY no configurada.")
@@ -162,7 +167,7 @@ def _embed_batch(texts: list[str], retry: bool = True) -> list[list[float]]:
     attempts = EMBED_RETRY_ATTEMPTS if retry else 1
     for attempt in range(attempts):
         try:
-            with urllib.request.urlopen(request, timeout=30) as response:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
                 data = json.loads(response.read())
             break
         # HTTPError es subclase de URLError: va primero para poder distinguir
