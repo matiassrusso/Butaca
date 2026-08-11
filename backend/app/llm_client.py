@@ -30,14 +30,22 @@ CHAT_COMPLETIONS_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 # chain-of-thought entirely — that hidden reasoning is what made Gemini's
 # "thinking" variant take ~20s per call before.
 MODEL = "nvidia/nemotron-3-super-120b-a12b"
-# Fallback chain: se intenta cada modelo en orden, con un reintento por modelo
-# ante fallas transitorias (timeout / 5xx). Ambos son NVIDIA NIM con la misma
-# key — cubre un modelo puntual rate-limiteado o que devuelva basura, NO una
-# caída total del endpoint (mismo host); para eso haría falta otro proveedor.
+# Fallback chain: se intenta cada modelo una vez, sin reintento por modelo.
+# Ambos son NVIDIA NIM con la misma key — cubre un modelo puntual caído o que
+# devuelva basura, NO una caída total del endpoint (mismo host); para eso
+# haría falta otro proveedor.
+#
+# ANTES había 2 intentos por modelo (hasta 4 llamadas seguidas). Logs reales
+# de Render (2026-08-06 a 2026-08-11) mostraron rachas donde CADA intento de
+# los 4 tardaba el timeout completo — no es un rate-limit puntual que un
+# reintento resuelve, es NVIDIA free-tier colgado durante varios minutos. Con
+# REQUEST_TIMEOUT=20 eso eran ~82s bloqueando /recommend en vivo antes de caer
+# al heurístico (reportado por el usuario: "tardó 1:25"). Reintentar el mismo
+# modelo no aportaba nada en esas rachas, solo duplicaba la espera.
 NVIDIA_MODELS = [MODEL, "meta/llama-3.1-70b-instruct"]
-ATTEMPTS_PER_MODEL = 2
+ATTEMPTS_PER_MODEL = 1
 RETRY_BACKOFF_SECONDS = 1.0
-REQUEST_TIMEOUT = 20
+REQUEST_TIMEOUT = 10
 
 # Same OrderedDict TTL+LRU idiom as tmdb_client's _DISCOVER_CACHE — avoids
 # repeating the call (and burning free-tier quota) when picks are
@@ -461,9 +469,8 @@ def _call_nvidia(prompt: str, api_key: str, model: str = MODEL) -> dict:
 
 def _call_nvidia_with_fallback(prompt: str, api_key: str) -> dict:
     """Prueba cada modelo de NVIDIA_MODELS en orden, con ATTEMPTS_PER_MODEL
-    intentos por modelo (reintento ante fallas transitorias). Recién si todos
-    fallan propaga el LlmError, que el llamador convierte en fallback al
-    heurístico."""
+    intentos por modelo. Recién si todos fallan propaga el LlmError, que el
+    llamador convierte en fallback al heurístico."""
     last_error: LlmError | None = None
     for model in NVIDIA_MODELS:
         for attempt in range(ATTEMPTS_PER_MODEL):

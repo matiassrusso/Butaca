@@ -243,27 +243,7 @@ def test_call_nvidia_omits_thinking_flag_for_non_nemotron_models(monkeypatch) ->
     assert captured["body"]["chat_template_kwargs"] == {"enable_thinking": False}
 
 
-def test_fallback_retries_same_model_before_switching(monkeypatch) -> None:
-    monkeypatch.setattr(llm_client.time, "sleep", lambda _s: None)
-    calls: list[str] = []
-
-    def fake_call(prompt, api_key, model):
-        calls.append(model)
-        # el primer intento del modelo primario falla, el segundo (reintento) anda
-        if len(calls) == 1:
-            raise llm_client.LlmError("timeout transitorio")
-        return {"picks": [{"title": "X", "why": "ok"}]}
-
-    monkeypatch.setattr(llm_client, "_call_nvidia", fake_call)
-
-    result = llm_client._call_nvidia_with_fallback("prompt", "fake-key")
-
-    assert result == {"picks": [{"title": "X", "why": "ok"}]}
-    # reintentó el primario, no saltó al fallback
-    assert calls == [llm_client.MODEL, llm_client.MODEL]
-
-
-def test_fallback_switches_model_when_primary_exhausts_retries(monkeypatch) -> None:
+def test_fallback_switches_model_when_primary_fails(monkeypatch) -> None:
     monkeypatch.setattr(llm_client.time, "sleep", lambda _s: None)
     calls: list[str] = []
 
@@ -278,8 +258,8 @@ def test_fallback_switches_model_when_primary_exhausts_retries(monkeypatch) -> N
     result = llm_client._call_nvidia_with_fallback("prompt", "fake-key")
 
     assert result["picks"][0]["why"] == "del fallback"
-    # agotó los 2 intentos del primario y recién ahí pasó al fallback
-    assert calls == [llm_client.MODEL, llm_client.MODEL, llm_client.NVIDIA_MODELS[1]]
+    # un solo intento del primario y recién ahí pasó al fallback (sin reintento por modelo)
+    assert calls == [llm_client.MODEL, llm_client.NVIDIA_MODELS[1]]
 
 
 def test_fallback_raises_when_all_models_fail(monkeypatch) -> None:
