@@ -29,27 +29,37 @@ CHAT_COMPLETIONS_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 # si GROQ_API_KEY no está seteada, se lo salta sin error (ver docs/groq-setup.md).
 GROQ_CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL = "llama-3.3-70b-versatile"
-# NVIDIA NIM model catalog (build.nvidia.com). Super over Nano/Ultra: more
-# reasoning capacity than Nano (12B vs 3B active params, still MoE so not as
-# slow as its 120B total suggests) without Ultra's frontier-scale latency.
-# chat_template_kwargs.enable_thinking=false below (a real API parameter for
-# this model family, not a system-prompt trick) skips its extended
-# chain-of-thought entirely — that hidden reasoning is what made Gemini's
-# "thinking" variant take ~20s per call before.
-MODEL = "nvidia/nemotron-3-super-120b-a12b"
-# Fallback chain: se intenta cada modelo una vez, sin reintento por modelo.
-# Ambos son NVIDIA NIM con la misma key — cubre un modelo puntual caído o que
-# devuelva basura, NO una caída total del endpoint (mismo host); para eso
-# haría falta otro proveedor.
+# NVIDIA NIM model catalog (build.nvidia.com, 130 modelos). chat_template_
+# kwargs.enable_thinking=false (real parámetro de API, no un truco de system
+# prompt) apaga el chain-of-thought de la familia Nemotron 3.x — eso fue lo
+# que hizo lento a Gemini antes (~20s/call sin poder apagarlo).
 #
-# ANTES había 2 intentos por modelo (hasta 4 llamadas seguidas). Logs reales
-# de Render (2026-08-06 a 2026-08-11) mostraron rachas donde CADA intento de
-# los 4 tardaba el timeout completo — no es un rate-limit puntual que un
-# reintento resuelve, es NVIDIA free-tier colgado durante varios minutos. Con
-# REQUEST_TIMEOUT=20 eso eran ~82s bloqueando /recommend en vivo antes de caer
-# al heurístico (reportado por el usuario: "tardó 1:25"). Reintentar el mismo
-# modelo no aportaba nada en esas rachas, solo duplicaba la espera.
-NVIDIA_MODELS = [MODEL, "meta/llama-3.1-70b-instruct"]
+# ANTES el primario era nemotron-3-super-120b-a12b, elegido en su momento por
+# más capacidad de razonamiento que Nano. Se cambió el 2026-08-11 tras medir
+# los 102 modelos con endpoint de chat del catálogo (latencia real +
+# response_format json_object + el prompt real de refine, no un "decí OK"):
+# Super-120B y el fallback de entonces (llama-3.1-70b-instruct) están
+# consistentemente congestionados — timeout en Render, y hasta 20s en este
+# mismo test. Los "famosos" del catálogo parecen ser justamente los más
+# pedidos y por eso los más lentos; variantes más nuevas o menos conocidas
+# responden rápido y con calidad pareja o mejor. Otros candidatos probados y
+# descartados: llama-3.3-nemotron-super-49b-v1.5 (ignora enable_thinking,
+# 14-20s siempre), muse-glimmer-30b (timeout a los 25s), inkling (771 tokens
+# de razonamiento interno sin forma de apagarlo, 10s), glm-5.2 (9.3s, muy
+# cerca del timeout). No revalidar esta elección sin medir de nuevo — la
+# congestión de NVIDIA free-tier varía con el tiempo.
+MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b"
+# Fallback chain: se intenta cada modelo una vez, sin reintento por modelo.
+# nemotron-3-ultra-550b-a55b es el modelo más grande del catálogo (550B) y
+# dio la mejor calidad medida, pero con un outlier de 8.5s en frío (contra
+# 2.1-2.2s normal) — por eso va segundo, no primero. Ambos NVIDIA con la
+# misma key: cubre un modelo puntual caído o que devuelva basura, NO una
+# caída total del endpoint (mismo host); para eso está Groq más abajo.
+NVIDIA_MODELS = [
+    MODEL,
+    "nvidia/nemotron-3-ultra-550b-a55b",
+    "meta/llama-3.1-8b-instruct",
+]
 ATTEMPTS_PER_MODEL = 1
 RETRY_BACKOFF_SECONDS = 1.0
 REQUEST_TIMEOUT = 10

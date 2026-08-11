@@ -11,19 +11,27 @@ agotaba rápido en testeo — de ahí la cadena de 4 modelos de fallback que
 tenía antes. Se migró a NVIDIA NIM (build.nvidia.com): un solo endpoint
 compatible con la API de OpenAI, +100 modelos gratis con una sola key.
 
-## Por qué Nemotron 3 Super y no otro modelo del catálogo
+## Qué modelos se usan y por qué (actualizado 2026-08-11)
 
-El catálogo NIM tiene tres tamaños de Nemotron 3 (arquitectura MoE híbrida
-Mamba-Transformer, propia de NVIDIA, más nueva que la familia
-Llama-Nemotron basada en Llama 3.3): Nano (30B total / 3B activos, más
-rápido), Super (120B total / 12B activos, el elegido) y Ultra (550B total /
-55B activos, frontier). Se priorizó calidad de razonamiento/coherencia sobre
-velocidad pura, así que se descartó Nano; y Ultra corre el mismo riesgo de
-latencia que tuvo Gemini para una call sincrónica dentro de un request HTTP.
-Los tres soportan apagar el razonamiento explícito vía
+El catálogo NIM tiene ~130 modelos. La elección original (Nemotron 3 Super,
+120B/12B activos) se descartó tras medir en vivo: junto con el fallback de
+entonces (`llama-3.1-70b-instruct`), estaba consistentemente congestionado —
+timeouts en producción, hasta 20s en tests directos. Se testearon los 102
+modelos con endpoint de chat del catálogo (latencia + el prompt real de
+refine, no un "decí OK") y los modelos "famosos" resultaron ser justo los
+más pedidos por todo el mundo y por eso los más lentos; variantes más
+nuevas o menos conocidas responden rápido con calidad pareja o mejor. Razón
+completa del orden elegido y de qué se descartó (con números): comentario
+arriba de `NVIDIA_MODELS` en `llm_client.py`.
+
+Los tres modelos NVIDIA del fallback (`nemotron-3.5-lightning-30b-a3b`,
+`nemotron-3-ultra-550b-a55b`, `llama-3.1-8b-instruct`) siguen usando la
+misma key. Los dos Nemotron soportan apagar el razonamiento vía
 `chat_template_kwargs.enable_thinking=false` (parámetro real de la API, no
-un truco de system prompt) — con eso apagado, ninguno debería acercarse a
-los ~20s que costó diagnosticar con Gemini.
+un truco de system prompt) — sin eso, un modelo de esta familia puede
+tardar 15-20s razonando puertas adentro antes de contestar (visto también
+en Gemini antes de migrar a NVIDIA, y en otros modelos NIM probados que no
+soportan apagarlo).
 
 ## Cómo sacar la API key
 
@@ -47,12 +55,13 @@ loader chico de `.env` que ya usaba `tmdb_client.py` (stdlib, sin sumar
 - [backend/app/llm_client.py](../backend/app/llm_client.py)
   pega contra `https://integrate.api.nvidia.com/v1/chat/completions`
   (stdlib `urllib`, sin SDK), formato de chat completions estándar de OpenAI.
-  Modelo fijo: `nvidia/nemotron-3-super-120b-a12b`, con
-  `chat_template_kwargs: {"enable_thinking": false}` en el body para que
-  responda directo sin razonar puertas adentro. No usa un modo de JSON
-  estructurado (no está garantizado para todos los modelos del catálogo
-  NIM) — en cambio, el prompt le pide explícitamente devolver *solo* JSON, y
-  `_extract_json` limpia el ```json``` fence si el modelo lo agrega igual.
+  Cadena de 3 modelos NVIDIA (`NVIDIA_MODELS`, un intento cada uno) más Groq
+  como cuarto fallback opcional (`docs/groq-setup.md`) — se prueba cada uno
+  en orden hasta que alguno responda. Con `response_format: json_object` en
+  el body (medido: sin esto, ~1 de cada 3 refines devolvía JSON casi-válido
+  y caía al heurístico) y `chat_template_kwargs: {"enable_thinking": false}`
+  para los modelos Nemotron. `_extract_json` limpia el ```json``` fence si
+  el modelo lo agrega igual.
 - Recibe el historial parseado del CSV, el mood y los candidatos que ya
   filtró el recomendador heurístico (`recommend()` en
   [recommender.py](../backend/app/recommender.py)).
@@ -77,8 +86,8 @@ heurística sin romper, igual que con TMDb, y el server loggea un
 
 El free tier de NVIDIA NIM comparte un tope de ~40 requests/min entre todos
 los modelos de la key — no debería ser un problema para el volumen de este
-proyecto, pero si empieza a pegar 429 seguido, ahí sí valdría la pena una
-cadena de fallback como la que tenía Gemini.
+proyecto. Para congestión (no 429, sino latencia/timeout de un modelo
+puntual) ya existe la cadena de fallback descrita arriba.
 
 ## Tests
 

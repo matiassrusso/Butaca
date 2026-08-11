@@ -308,7 +308,7 @@ def test_fallback_skips_groq_when_key_not_set(monkeypatch) -> None:
 
     monkeypatch.setattr(llm_client, "_call_nvidia", always_fail)
 
-    with pytest.raises(llm_client.LlmError, match=llm_client.NVIDIA_MODELS[1]):
+    with pytest.raises(llm_client.LlmError, match=llm_client.NVIDIA_MODELS[-1]):
         llm_client._call_nvidia_with_fallback("prompt", "fake-key")
 
 
