@@ -83,7 +83,12 @@ def _vectors_for(items: list[dict], max_new: int) -> dict[tuple[int, str], list[
     missing = [item for key, item in wanted.items() if key not in vectors][:max_new]
     for start in range(0, len(missing), vibes_clustering.EMBED_BATCH_SIZE):
         batch = missing[start:start + vibes_clustering.EMBED_BATCH_SIZE]
-        generated = vibes_clustering._embed_batch([_lite_text(item) for item in batch])
+        # retry=False: esto corre adentro de un /recommend en vivo, no del job
+        # offline de clustering. Reintentar un 429 durmiendo el Retry-After
+        # (hasta EMBED_RETRY_FALLBACK_SECONDS, ver vibes_clustering._embed_batch)
+        # bloqueaba el request entero por un bonus best-effort — mejor perder
+        # el bonus para esta tanda que tumbar la latencia de todo /recommend.
+        generated = vibes_clustering._embed_batch([_lite_text(item) for item in batch], retry=False)
         db.save_title_embeddings(
             [(_key(item)[0], _key(item)[1], vector) for item, vector in zip(batch, generated)],
             MODEL,

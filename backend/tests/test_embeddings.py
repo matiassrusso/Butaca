@@ -19,7 +19,7 @@ def _no_network(monkeypatch) -> list[list[str]]:
     """Registra los textos que se hubieran mandado a NVIDIA, sin llamarla."""
     calls: list[list[str]] = []
 
-    def fake(texts):
+    def fake(texts, retry=True):
         calls.append(texts)
         # un vector distinto por texto, determinístico: sirve para chequear
         # qué se persistió sin depender del modelo real
@@ -121,6 +121,24 @@ def test_affinity_skips_candidates_without_a_tmdb_id(monkeypatch) -> None:
 
     assert embeddings.affinity_by_key([_item(1, "Amada")], mock_catalog) == {}
     assert calls == []
+
+
+def test_affinity_embeds_live_without_retrying_on_rate_limit(monkeypatch) -> None:
+    """El camino en vivo (adentro de un /recommend) tiene que pedir retry=False:
+    dormir el Retry-After de un 429 acá bloquea el request de un usuario por un
+    bonus best-effort (reportado por Matías, 2026-08-11: /recommend lento y
+    siempre heurístico después de sumar embeddings al flujo en vivo)."""
+    seen_retry: list[bool] = []
+
+    def fake(texts, retry=True):
+        seen_retry.append(retry)
+        return [[1.0, 0.0, 0.0] for _ in texts]
+
+    monkeypatch.setattr(vibes_clustering, "_embed_batch", fake)
+
+    embeddings.affinity_by_key([_item(1, "Amada")], [_item(10, "Nueva")])
+
+    assert seen_retry == [False, False]  # amada y candidatos, ninguno reintenta
 
 
 def test_affinity_is_empty_without_loved_titles(monkeypatch) -> None:

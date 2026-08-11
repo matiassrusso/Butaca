@@ -139,6 +139,26 @@ def test_embed_batch_waits_out_a_rate_limit_and_retries(monkeypatch) -> None:
     assert slept == [21.0]  # el retryDelay que vino en el cuerpo, + 1s de margen
 
 
+def test_embed_batch_with_retry_false_gives_up_immediately_without_sleeping(monkeypatch) -> None:
+    """El camino en vivo (embeddings.py, adentro de un /recommend) pasa
+    retry=False: un 429 tiene que fallar YA, sin dormir el Retry-After que
+    pida el proveedor. Reportado por Matías (2026-08-11): con retry=True acá,
+    un 429 podía bloquear el request entero hasta EMBED_RETRY_FALLBACK_SECONDS
+    por cada tanda, solo por un bonus best-effort."""
+    monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        vibes_clustering.urllib.request,
+        "urlopen",
+        lambda request, timeout=None: (_ for _ in ()).throw(_quota_error("20s")),
+    )
+    monkeypatch.setattr(
+        vibes_clustering.time, "sleep", lambda seconds: pytest.fail("no debe dormir con retry=False")
+    )
+
+    with pytest.raises(vibes_clustering.QuotaExhausted):
+        vibes_clustering._embed_batch(["texto"], retry=False)
+
+
 def test_embed_batch_reorders_vectors_by_index(monkeypatch) -> None:
     """Cada vector tiene que quedar en la posición del título que lo generó:
     si la API devuelve los embeddings desordenados y se toman tal cual, las

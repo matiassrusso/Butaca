@@ -134,7 +134,13 @@ def _retry_delay_seconds(exc: HTTPError) -> float:
     return float(match.group(1)) + 1 if match else EMBED_RETRY_FALLBACK_SECONDS
 
 
-def _embed_batch(texts: list[str]) -> list[list[float]]:
+def _embed_batch(texts: list[str], retry: bool = True) -> list[list[float]]:
+    """retry=False para el camino en vivo (embeddings.py, adentro de un
+    /recommend): esperar el Retry-After de un 429 (hasta EMBED_RETRY_FALLBACK_SECONDS)
+    tiene sentido en el job offline, que puede permitirse esperar, pero
+    bloquear un request de usuario ese tiempo por un bonus best-effort no
+    (reportado por Matías, 2026-08-11: /recommend lento y siempre heurístico
+    después de sumar este llamado al flujo en vivo)."""
     api_key = os.environ.get("NVIDIA_API_KEY")
     if not api_key:
         raise VibeError("NVIDIA_API_KEY no configurada.")
@@ -153,7 +159,8 @@ def _embed_batch(texts: list[str]) -> list[list[float]]:
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
         method="POST",
     )
-    for attempt in range(EMBED_RETRY_ATTEMPTS):
+    attempts = EMBED_RETRY_ATTEMPTS if retry else 1
+    for attempt in range(attempts):
         try:
             with urllib.request.urlopen(request, timeout=30) as response:
                 data = json.loads(response.read())
@@ -167,7 +174,7 @@ def _embed_batch(texts: list[str]) -> list[list[float]]:
             # esperar la ventana que pidió el proveedor, insistir con batches
             # de 100 solo empeora las cosas — mejor cortar y clusterizar con
             # lo que haya (medido con Gemini: 9 reintentos, ninguno pasó).
-            if attempt == EMBED_RETRY_ATTEMPTS - 1:
+            if attempt == attempts - 1:
                 raise QuotaExhausted(f"Rate limit de NVIDIA sostenido: {exc}") from exc
             delay = _retry_delay_seconds(exc)
             logger.info("Embedding rate limit reached, waiting %.0fs before retrying the batch", delay)
