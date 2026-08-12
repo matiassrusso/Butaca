@@ -1543,12 +1543,16 @@ def _finish_recommend(
         logger.info("Candidate pool partially exhausted by already-recommended exclusion, filling without it")
         # solo se relaja already_recommended (soft, "no lo repitas de vuelta
         # tan rápido") — extra_seen/watched siguen siendo hard exclusions,
-        # nunca hay que recomendar algo que el usuario ya vio de verdad
-        relaxed = _score(
-            candidates,
-            frozenset(extra_seen) | frozenset(item["title"] for item in watched),
-            6,
-        )
+        # nunca hay que recomendar algo que el usuario ya vio de verdad.
+        # Primer intento: la última tanda servida queda TAMBIÉN hard-excluida,
+        # porque relajar todo el historial dejaba que "Nuevos picks"
+        # repitiera el pick de la tanda anterior (reportado por Matías,
+        # 2026-08-11: mismo título 2 veces seguidas). Si el pool es tan chico
+        # que ni así llega a 6, un segundo intento suelta esa exclusión
+        # también — mejor repetir algo viejo que mostrar menos de 6 picks.
+        hard_exclusions = frozenset(extra_seen) | frozenset(item["title"] for item in watched)
+        last_batch = frozenset(db.get_last_session_titles(user["id"]))
+        relaxed = _score(candidates, hard_exclusions | last_batch, 6)
 
         existing = {item.title.casefold() for item in response.recommendations}
         for item in relaxed.recommendations:
@@ -1558,6 +1562,16 @@ def _finish_recommend(
                 filled_with_old = True
             if len(response.recommendations) == 6:
                 break
+
+        if len(response.recommendations) < 6:
+            fully_relaxed = _score(candidates, hard_exclusions, 6)
+            for item in fully_relaxed.recommendations:
+                if item.title.casefold() not in existing:
+                    response.recommendations.append(item)
+                    existing.add(item.title.casefold())
+                    filled_with_old = True
+                if len(response.recommendations) == 6:
+                    break
 
     # el pool heurístico ANTES del LLM: todos sus picks ya pasan el piso
     # (_score corre con min_score=MIN_MATCH_SCORE) y vienen ordenados por

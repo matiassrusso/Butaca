@@ -680,6 +680,54 @@ def test_recommend_zip_prioritizes_new_titles_then_fills_to_six() -> None:
     assert second_titles - first_titles
 
 
+def test_recommend_zip_never_repeats_the_immediately_previous_batch(monkeypatch) -> None:
+    # bug reportado por Matías (2026-08-11, con capturas): "Nuevos picks"
+    # devolvió 2 títulos de la tanda anterior. filled_with_old relajaba TODO
+    # el historial de already_recommended por igual, así que un pool chico
+    # podía devolver exactamente el mismo pick recién mostrado. Con un pool
+    # de sobra (16 títulos acá, contra los 6 que entran por tanda), el batch
+    # siguiente nunca debería repetir ninguno del batch inmediatamente
+    # anterior — aunque sí puede reciclar de tandas más viejas si hace falta.
+    broad_tags = [
+        "dialogue-heavy", "romantic", "intimate", "walking",
+        "psychological", "dark", "stylized", "thriller",
+        "quiet", "architectural", "melancholic", "slow",
+        "kinetic", "action", "loud", "blockbuster",
+        "mysterious", "drama", "light", "indie",
+        "restless", "character", "existential", "sad",
+        "prestige", "mystery", "funny", "sharp", "messy",
+    ]
+    big_catalog = [
+        {
+            "title": f"Fake Movie {i}",
+            "year": 2000 + i,
+            "kind": "movie",
+            "tags": broad_tags[i % len(broad_tags): i % len(broad_tags) + 4] or broad_tags[:4],
+        }
+        for i in range(16)
+    ]
+    monkeypatch.setattr(main_module.catalog, "CATALOG", big_catalog)
+
+    broad_tags_csv = (
+        "Name,Rating,Review,Tags\n"
+        'An Old Favorite,5,,"' + ",".join(broad_tags) + '"'
+    )
+    headers = _auth_headers("noimmediaterepeat")
+
+    first = _post_zip(headers, zip_files={"reviews.csv": broad_tags_csv}).json()["recommendations"]
+    second = _post_zip(headers, zip_files={"reviews.csv": broad_tags_csv}).json()["recommendations"]
+    third = _post_zip(headers, zip_files={"reviews.csv": broad_tags_csv}).json()["recommendations"]
+
+    first_titles = {item["title"] for item in first}
+    second_titles = {item["title"] for item in second}
+    third_titles = {item["title"] for item in third}
+
+    assert len(second) == 6
+    assert len(third) == 6
+    assert not (first_titles & second_titles)
+    assert not (second_titles & third_titles)
+
+
 def test_recommend_zip_filled_with_old_still_respects_match_floor(monkeypatch) -> None:
     # bug reportado por Matías (2026-08-05): "Nuevos picks" agotaba el pool
     # nuevo y caía a filled_with_old -> predict_fit, que a diferencia de

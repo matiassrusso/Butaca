@@ -1041,6 +1041,23 @@ def get_recently_recommended_titles(user_id: int, limit: int = 100) -> list[str]
     return [row["title"] for row in rows]
 
 
+def get_last_session_titles(user_id: int) -> list[str]:
+    """Títulos de la última tanda servida a este usuario.
+
+    A diferencia de get_recently_recommended_titles, identifica la tanda por
+    session_id (autoincrement, exacto) y no por created_at: esa columna tiene
+    resolución de un segundo (datetime('now') en SQLite), así que ordenar por
+    ella para aislar "la tanda anterior" puede mezclar filas de dos tandas
+    servidas en el mismo segundo."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT title FROM recommendations_served WHERE user_id = ? AND session_id = ("
+            "SELECT MAX(session_id) FROM recommendations_served WHERE user_id = ?)",
+            (user_id, user_id),
+        ).fetchall()
+    return [row["title"] for row in rows]
+
+
 def get_recommendation_history(user_id: int) -> list[dict]:
     with get_connection() as conn:
         sessions = conn.execute(
