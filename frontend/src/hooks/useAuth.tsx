@@ -22,6 +22,9 @@ type User = {
   // sesión de invitado: cuenta real pero sin usuario ni mail, y sin forma de
   // volver a entrar si se pierde el token. La convierte claimAccount().
   isGuest: boolean;
+  // off por default: deja que tu username de Butaca se use como amigo en
+  // "¿Qué vemos juntos?" sin que tengas Letterboxd (ver /profile/allow-together)
+  allowTogether: boolean;
 };
 
 type AuthState = {
@@ -36,6 +39,7 @@ type AuthState = {
   claimAccount: (username: string, password: string, email: string) => Promise<void>;
   googleLogin: (idToken: string) => Promise<void>;
   saveLetterboxdUsername: (letterboxdUsername: string) => Promise<void>;
+  setAllowTogether: (allowed: boolean) => Promise<void>;
   logout: () => Promise<void>;
   deleteAccount: (password: string) => Promise<void>;
 };
@@ -86,6 +90,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             emailVerified: Boolean(data.email_verified),
             letterboxdUsername: data.letterboxd_username ?? null,
             isGuest: Boolean(data.is_guest),
+            allowTogether: Boolean(data.allow_together),
           });
       })
       .catch(() => {
@@ -114,6 +119,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       emailVerified: false,
       letterboxdUsername: null,
       isGuest: false,
+      allowTogether: false,
     });
     setToken(body.token);
   }, []);
@@ -257,6 +263,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [token, t],
   );
 
+  const setAllowTogether = useCallback(
+    async (allowed: boolean) => {
+      if (!token) return;
+      const response = await fetch(`${API_BASE_URL}/profile/allow-together`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ allowed }),
+      });
+      if (!response.ok) throw new Error(t("auth.errAllowTogether"));
+      const body = await response.json();
+      setUser((prev) => (prev ? { ...prev, allowTogether: Boolean(body.allow_together) } : prev));
+    },
+    [token, t],
+  );
+
   return (
     <AuthContext.Provider
       value={{
@@ -273,6 +294,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         logout,
         deleteAccount,
         saveLetterboxdUsername,
+        setAllowTogether,
       }}
     >
       {children}

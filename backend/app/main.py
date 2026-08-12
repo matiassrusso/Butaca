@@ -31,6 +31,7 @@ from . import (
     wrapped,
 )
 from .models import (
+    AllowTogetherRequest,
     AuthResponse,
     CatalogStatsResponse,
     ChatRequest,
@@ -956,6 +957,7 @@ def me(user: sqlite3.Row = Depends(auth.get_current_user)) -> dict:
         "email_verified": bool(user["email_verified"]),
         "letterboxd_username": user["letterboxd_username"],
         "is_guest": bool(user["is_guest"]),
+        "allow_together": bool(user["allow_together"]),
     }
 
 
@@ -969,6 +971,18 @@ def set_letterboxd_username(
     qué importa quién es el dueño."""
     db.set_letterboxd_username(user["id"], payload.letterboxd_username)
     return {"letterboxd_username": payload.letterboxd_username.strip() or None}
+
+
+@app.put("/profile/allow-together")
+def set_allow_together(
+    payload: AllowTogetherRequest, user: sqlite3.Row = Depends(auth.get_current_user)
+) -> dict:
+    """Off por default: a diferencia de un diario de Letterboxd (público por
+    elección del usuario en otra plataforma), tu username de Butaca no es
+    información pública — activar esto es lo que deja que alguien te use
+    como amigo en /recommend/together sin pasar por Letterboxd."""
+    db.set_allow_together(user["id"], payload.allowed)
+    return {"allow_together": payload.allowed}
 
 
 @app.post("/auth/logout", status_code=204)
@@ -1799,6 +1813,15 @@ def recommend_titles_together(
     persistida, y de paso hace que `watched` (la base de la exclusión) sea la
     lista mergeada de los dos en vez de solo el historial del usuario — que es
     justo lo que hace falta para que ningún pick sea algo que el amigo ya vio.
+
+    `friend_username` acepta DOS cosas, en este orden (pedido de Matías,
+    2026-08-12): si existe una cuenta de Butaca con ese username Y esa cuenta
+    activó `allow_together`, se usa su perfil real (sin necesitar Letterboxd
+    de ninguno de los dos lados). Si no hay cuenta de Butaca con ese nombre,
+    cae al camino de siempre: username público de Letterboxd. El toggle
+    existe porque, a diferencia de un diario de Letterboxd (público por
+    elección del usuario en OTRA plataforma), un username de Butaca no es
+    información pública por defecto.
     """
     # sin `mode`/`genres` a propósito: acá la pregunta es "¿qué vemos hoy?", y
     # los otros modos (watchlist, géneros elegidos a mano) son de una sola
@@ -1806,15 +1829,29 @@ def recommend_titles_together(
     _validate_recommend_params("profile", kind_filter, lang)
 
     friend_name = friend_username.strip()
-    try:
-        friend_ratings, friend_seen = letterboxd_scrape.fetch_letterboxd_diary(friend_name)
-    except letterboxd_scrape.ScrapeError as exc:
-        # el texto del ScrapeError está hardcodeado en español; lo que ve el
-        # usuario tiene que seguir el Accept-Language como todo el resto
-        raise HTTPException(
-            status_code=400,
-            detail=errors.msg("friend_diary_unavailable", lang, name=friend_name),
-        ) from exc
+    friend_account = db.get_user_by_username(friend_name)
+    if friend_account is not None:
+        if friend_account["id"] == user["id"]:
+            raise HTTPException(status_code=400, detail=errors.msg("friend_is_yourself", lang))
+        if not friend_account["allow_together"]:
+            raise HTTPException(
+                status_code=400,
+                detail=errors.msg("friend_not_available", lang, name=friend_name),
+            )
+        friend_ratings = _rebuild_ratings(friend_account["id"])
+        # "vista sin puntuar" del lado Butaca: el mismo feedback status="seen"
+        # que ya usa recommend() para el propio usuario (ver db.get_feedback_signals)
+        friend_seen = set(db.get_feedback_signals(friend_account["id"])["seen_titles"])
+    else:
+        try:
+            friend_ratings, friend_seen = letterboxd_scrape.fetch_letterboxd_diary(friend_name)
+        except letterboxd_scrape.ScrapeError as exc:
+            # el texto del ScrapeError está hardcodeado en español; lo que ve el
+            # usuario tiene que seguir el Accept-Language como todo el resto
+            raise HTTPException(
+                status_code=400,
+                detail=errors.msg("friend_diary_unavailable", lang, name=friend_name),
+            ) from exc
 
     if not friend_ratings:
         raise HTTPException(
@@ -2518,8 +2555,10 @@ def chat(
 
     ratings = _rebuild_ratings(user["id"])
     profile = db.get_taste_profile(user["id"])
+    watchlist = db.get_watchlist_items(user["id"])
+    feedback = db.get_feedback_signals(user["id"])
     try:
-        reply = llm_client.chat_reply(ratings, profile, messages, lang)
+        reply = llm_client.chat_reply(ratings, profile, messages, lang, watchlist, feedback)
     except llm_client.LlmError as exc:
         # el fallback de modelos ya se agotó adentro — acá degradamos con un
         # mensaje honesto en vez de un 500 que el frontend muestra como

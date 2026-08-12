@@ -927,13 +927,27 @@ _CHAT_TITLE_OVERRIDE = (
     "EXCEPCIÓN a la regla de títulos, solo acá: en esta charla SÍ podés nombrar películas "
     "y series que no están en su historial, porque parte de tu trabajo es recomendarle "
     "cosas nuevas. Lo que sigue PROHIBIDO es dar por sentado que las vio: si no está en el "
-    "perfil de arriba, no la vio y no la puntuó. Preguntale si la vio en vez de suponerlo."
+    "perfil de arriba, no la vio y no la puntuó. Preguntale si la vio en vez de suponerlo. "
+    "Si en su mensaje nombra películas como ejemplo de lo que busca ('tipo X, Y, Z'), son "
+    "referencia de gusto, no un pedido: no se las devuelvas como recomendación, buscá algo "
+    "distinto que comparta ese clima. Tampoco repitas un título que ya nombraste vos o que "
+    "el usuario ya nombró antes en esta charla, salvo que te pida hablar de ese título puntual. "
+    "Cuando recomiendes algo para ver AHORA, no elijas un título que ya está en el perfil de "
+    "arriba (ya lo vio y lo puntuó) — nombralo solo para compararlo, nunca como el plan de la "
+    "noche, salvo que el usuario pida explícitamente volver a verlo."
 )
 _CHAT_TITLE_OVERRIDE_EN = (
     "EXCEPTION to the title rule, only here: in this conversation you CAN name movies and "
     "shows that aren't in their history, because part of your job is recommending new "
     "things. What's still FORBIDDEN is assuming they watched them: if it's not in the "
-    "profile above, they haven't seen it and haven't rated it. Ask instead of assuming."
+    "profile above, they haven't seen it and haven't rated it. Ask instead of assuming. "
+    "If they name movies as examples of what they're after ('like X, Y, Z'), those are "
+    "taste references, not a request — don't hand them back as the recommendation, find "
+    "something different that shares that vibe. Also don't repeat a title you already "
+    "suggested or that they already named earlier in this chat, unless they explicitly "
+    "ask about that specific title. When you recommend something to watch NOW, don't pick "
+    "a title that's already in the profile above (they've already seen and rated it) — only "
+    "name it for comparison, never as tonight's plan, unless they explicitly ask to rewatch it."
 )
 _CHAT_TASK = (
     "Estás charlando con esta persona sobre cine. Respondé su último mensaje: contestá lo "
@@ -961,24 +975,83 @@ _CHAT_TASK_BY_LANG = {"es": _CHAT_TASK, "en": _CHAT_TASK_EN}
 _CHAT_OVERRIDE_BY_LANG = {"es": _CHAT_TITLE_OVERRIDE, "en": _CHAT_TITLE_OVERRIDE_EN}
 _CHAT_NO_HISTORY_BY_LANG = {"es": _CHAT_NO_HISTORY, "en": _CHAT_NO_HISTORY_EN}
 
+# Pedido de Matías (2026-08-12): "que en base a [lo que vio, lo que le gustó,
+# lo que no, lo que le interesa, lo que no] te recomiende". El chat ya
+# recibía ratings (visto+puntuado) y el resumen de perfil, pero nunca
+# watchlist ("me interesa ver", nunca la vio) ni feedback de picks pasados
+# ("le interesó"/"no le interesó" un pick que nunca llegó a puntuar) — la
+# misma señal que ya usa recommend() vía db.get_feedback_signals, que acá
+# nunca se leía.
+_CHAT_SIGNALS_NOTE_BY_LANG = {
+    "es": (
+        "Estas señales son distintas de lo que vio y puntuó arriba: la watchlist es lo que "
+        "quiere ver pero TODAVÍA NO VIO (no la trates como historial), y el feedback es lo "
+        "que opinó de picks que le sugirió Butaca antes SIN llegar a puntuarlos. Usalas: si "
+        "viene al caso podés recordarle algo de su watchlist en vez de inventar un título "
+        "nuevo. Nunca vuelvas a sugerir algo que ya rechazó o que ya marcó como visto."
+    ),
+    "en": (
+        "These signals are different from what they watched and rated above: the watchlist "
+        "is stuff they want to watch but HAVEN'T SEEN YET (don't treat it as history), and "
+        "the feedback is what they thought of past Butaca suggestions they never got around "
+        "to rating. Use them: when relevant you can bring up something from their watchlist "
+        "instead of inventing a new title. Never suggest something they already turned down "
+        "or already marked as watched."
+    ),
+}
+
+
+def _chat_signals_block(watchlist: list[str], feedback: dict | None, lang: str) -> str:
+    feedback = feedback or {}
+    if lang == "es":
+        labels = {
+            "watchlist": "Watchlist, quiere ver y todavía NO vio",
+            "interested": "Le interesó un pick sugerido antes (sin puntuarlo)",
+            "not_interested": "Rechazó un pick sugerido antes (no le interesó)",
+            "seen": "Marcó como ya vista (sin puntuarla)",
+        }
+    else:
+        labels = {
+            "watchlist": "Watchlist, wants to watch and HASN'T seen yet",
+            "interested": "Was interested in a past suggested pick (never rated)",
+            "not_interested": "Turned down a past suggested pick (not interested)",
+            "seen": "Marked as already seen (never rated)",
+        }
+    lines = []
+    if watchlist:
+        lines.append(f"{labels['watchlist']}: {', '.join(watchlist[:30])}.")
+    if interested := [item["title"] for item in feedback.get("interested", [])]:
+        lines.append(f"{labels['interested']}: {', '.join(interested[:20])}.")
+    if not_interested := [item["title"] for item in feedback.get("not_interested", [])]:
+        lines.append(f"{labels['not_interested']}: {', '.join(not_interested[:20])}.")
+    if seen := feedback.get("seen_titles", []):
+        lines.append(f"{labels['seen']}: {', '.join(seen[:20])}.")
+    if not lines:
+        return ""
+    return "\n".join(lines) + f"\n{_CHAT_SIGNALS_NOTE_BY_LANG[lang]}\n"
+
 
 def _build_chat_prompt(
     ratings: list[RatedItem],
     profile: dict | None,
     messages: list[tuple[str, str]],
     lang: str = "es",
+    watchlist: list[str] | None = None,
+    feedback: dict | None = None,
 ) -> str:
     """Tarea: conversar. Misma voz y mismas reglas de escritura que
     _build_prompt y _build_verdict_prompt — ver AGENT_VOICE arriba."""
     lang = normalize_lang(lang)
     language_line = "" if lang == "es" else "Write your ENTIRE reply in English.\n\n"
     facts = _profile_facts(profile)
+    signals = _chat_signals_block(watchlist or [], feedback, lang)
     no_history = "" if ratings else f"{_CHAT_NO_HISTORY_BY_LANG[lang]}\n\n"
     return (
         f"{_AGENT_VOICE_BY_LANG[lang]}\n\n"
         f"{language_line}"
         f"{_profile_block(ratings)}\n"
         f"{facts}\n\n"
+        f"{signals}\n"
         f"{no_history}"
         f"{_CHAT_TASK_BY_LANG[lang]}\n\n"
         f"{_chat_history_lines(messages, lang)}\n\n"
@@ -995,6 +1068,8 @@ def chat_reply(
     profile: dict | None,
     messages: list[tuple[str, str]],
     lang: str = "es",
+    watchlist: list[str] | None = None,
+    feedback: dict | None = None,
 ) -> str:
     """La versión conversacional del agente (/chat). Sin cache: cada turno es
     distinto del anterior por definición, así que una clave de cache nunca
@@ -1003,7 +1078,8 @@ def chat_reply(
     if not api_key:
         raise LlmError("NVIDIA_API_KEY no configurada.")
 
-    result = _call_nvidia_with_fallback(_build_chat_prompt(ratings, profile, messages, lang), api_key)
+    prompt = _build_chat_prompt(ratings, profile, messages, lang, watchlist, feedback)
+    result = _call_nvidia_with_fallback(prompt, api_key)
     reply = capitalize_sentence(str(result.get("reply", "")).strip())
     if not reply:
         raise LlmError("El modelo devolvió una respuesta vacía.")

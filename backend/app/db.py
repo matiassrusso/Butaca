@@ -467,6 +467,15 @@ def _run_migrations(conn) -> None:
         conn.execute("ALTER TABLE title_clusters ADD COLUMN title TEXT NOT NULL DEFAULT ''")
         conn.execute("ALTER TABLE title_clusters ADD COLUMN year INTEGER NOT NULL DEFAULT 0")
         conn.execute("ALTER TABLE title_clusters ADD COLUMN poster_path TEXT")
+    if not _has_column(conn, "users", "allow_together"):
+        # Toggle de privacidad para "¿qué vemos juntos?" (pedido de Matías,
+        # 2026-08-12): tu usuario de Butaca solo se puede usar como amigo en
+        # /recommend/together si vos lo activaste primero. A diferencia del
+        # diario de Letterboxd (público por elección del usuario en OTRA
+        # plataforma), un username de Butaca no es información pública por
+        # defecto -- off acá evita que cualquiera que lo sepa/adivine te lea
+        # ratings y reseñas sin que lo hayas decidido.
+        conn.execute("ALTER TABLE users ADD COLUMN allow_together INTEGER NOT NULL DEFAULT 0")
     if not _has_column(conn, "sessions", "expires_at"):
         # Las filas preexistentes quedan con expires_at=0 → expiradas. A la vez
         # se pasó a guardar el token hasheado, así que esas filas viejas (token
@@ -659,6 +668,13 @@ def set_letterboxd_username(user_id: int, letterboxd_username: str) -> None:
         conn.execute(
             "UPDATE users SET letterboxd_username = ? WHERE id = ?",
             (letterboxd_username.strip() or None, user_id),
+        )
+
+
+def set_allow_together(user_id: int, allowed: bool) -> None:
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE users SET allow_together = ? WHERE id = ?", (1 if allowed else 0, user_id)
         )
 
 

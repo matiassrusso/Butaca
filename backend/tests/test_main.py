@@ -3133,8 +3133,8 @@ def _mock_chat(monkeypatch, reply: str = "mirate Heat") -> list[tuple]:
     monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
     calls: list[tuple] = []
 
-    def fake_chat_reply(ratings, profile, messages, lang="es"):
-        calls.append((ratings, profile, messages, lang))
+    def fake_chat_reply(ratings, profile, messages, lang="es", watchlist=None, feedback=None):
+        calls.append((ratings, profile, messages, lang, watchlist, feedback))
         return reply
 
     monkeypatch.setattr("backend.app.main.llm_client.chat_reply", fake_chat_reply)
@@ -3184,6 +3184,28 @@ def test_chat_works_without_any_rated_history(monkeypatch) -> None:
     assert calls[0][0] == []  # sin ratings
 
 
+def test_chat_reaches_watchlist_and_feedback_signals(monkeypatch) -> None:
+    # pedido de Matías (2026-08-12): que el chat sepa qué le interesa ver, qué
+    # rechazó y qué ya vio sin puntuar, no solo lo puntuado con estrellas.
+    _reset_chat_usage()
+    headers = _auth_headers("chatsignals")
+    user_id = db.get_user_by_username("chatsignals")["id"]
+    db.add_watchlist_item(user_id, "Dune: Part Two")
+    picks = _post_zip(headers).json()["recommendations"]
+    client.post(
+        "/feedback",
+        headers=headers,
+        json={"recommendation_id": picks[0]["id"], "status": "not_interested"},
+    )
+    calls = _mock_chat(monkeypatch)
+
+    client.post("/chat", headers=headers, json={"messages": [{"role": "user", "content": "hola"}]})
+
+    watchlist, feedback = calls[0][4], calls[0][5]
+    assert watchlist == ["Dune: Part Two"]
+    assert {item["title"] for item in feedback["not_interested"]} == {picks[0]["title"]}
+
+
 def test_chat_rejects_an_empty_conversation(monkeypatch) -> None:
     _reset_chat_usage()
     _mock_chat(monkeypatch)
@@ -3218,7 +3240,7 @@ def test_chat_degrades_with_an_honest_message_when_the_llm_fails(monkeypatch) ->
     _reset_chat_usage()
     monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
 
-    def boom(ratings, profile, messages, lang="es"):
+    def boom(ratings, profile, messages, lang="es", watchlist=None, feedback=None):
         raise LlmError("NVIDIA caída")
 
     monkeypatch.setattr("backend.app.main.llm_client.chat_reply", boom)
@@ -3627,3 +3649,74 @@ def test_together_surfaces_scrape_errors_in_the_requested_language(monkeypatch) 
     detail = response.json()["detail"]
     assert "nosuchuser" in detail
     assert "español" not in detail, "el mensaje al usuario sale de errors.msg, no del ScrapeError"
+
+
+# ─── "¿Qué vemos juntos?" con usuario de Butaca (sin Letterboxd) ────────────
+
+
+def test_allow_together_defaults_off_and_toggles(monkeypatch) -> None:
+    headers = _auth_headers("toggleowner")
+
+    me = client.get("/auth/me", headers=headers).json()
+    assert me["allow_together"] is False
+
+    response = client.put("/profile/allow-together", headers=headers, json={"allowed": True})
+    assert response.status_code == 200
+    assert response.json() == {"allow_together": True}
+    assert client.get("/auth/me", headers=headers).json()["allow_together"] is True
+
+
+def test_together_uses_a_butaca_friend_when_they_opted_in() -> None:
+    # el amigo nunca usó Letterboxd: puntuó todo a mano en Butaca y activó el
+    # toggle -- no debería hacer falta ningún scrape para que esto funcione
+    friend_headers = _auth_headers("butacafriendok")
+    client.post("/profile/rate", headers=friend_headers, json={"title": "Perfect Blue", "rating": 5})
+    client.put("/profile/allow-together", headers=friend_headers, json={"allowed": True})
+
+    headers = _auth_headers("butacauserok")
+    _post_zip(headers)
+
+    response = _post_together(headers, friend_username="butacafriendok")
+
+    assert response.status_code == 200
+    titles = {item["title"] for item in response.json()["recommendations"]}
+    assert "Perfect Blue" not in titles  # ya lo vio el amigo, no puede volver como pick
+
+
+def test_together_rejects_a_butaca_friend_who_did_not_opt_in() -> None:
+    friend_headers = _auth_headers("butacafriendoff")
+    client.post("/profile/rate", headers=friend_headers, json={"title": "Perfect Blue", "rating": 5})
+    # sin activar el toggle
+
+    headers = _auth_headers("butacauseroff")
+    _post_zip(headers)
+
+    response = _post_together(headers, friend_username="butacafriendoff")
+
+    assert response.status_code == 400
+    assert "butacafriendoff" in response.json()["detail"]
+
+
+def test_together_rejects_your_own_butaca_username() -> None:
+    headers = _auth_headers("togetherself")
+    _post_zip(headers)
+
+    response = _post_together(headers, friend_username="togetherself")
+
+    assert response.status_code == 400
+
+
+def test_together_falls_back_to_letterboxd_when_no_butaca_account_matches(monkeypatch) -> None:
+    # username que no existe como cuenta de Butaca: tiene que seguir cayendo
+    # al camino de siempre (scrape de Letterboxd), sin romper nada
+    headers = _auth_headers("togetherfallback")
+    _post_zip(headers)
+    monkeypatch.setattr(
+        letterboxd_scrape,
+        "fetch_letterboxd_diary",
+        _friend_diary([RatedItem(title="Perfect Blue", rating=5, review="")]),
+    )
+
+    response = _post_together(headers, friend_username="no_es_cuenta_de_butaca")
+
+    assert response.status_code == 200

@@ -207,6 +207,57 @@ function LetterboxdAccount() {
   );
 }
 
+// Toggle de "¿qué vemos juntos?" sin Letterboxd (pedido de Matías,
+// 2026-08-12): off por default porque, a diferencia de un diario de
+// Letterboxd (público por elección en OTRA plataforma), tu username de
+// Butaca no es información pública.
+function AllowTogetherToggle() {
+  const { user, setAllowTogether } = useAuth();
+  const { t } = useLang();
+  const [saving, setSaving] = useState(false);
+  const allowed = user?.allowTogether ?? false;
+
+  async function toggle() {
+    setSaving(true);
+    try {
+      await setAllowTogether(!allowed);
+      toast.success(t(allowed ? "profile.allowTogetherOff" : "profile.allowTogetherOn"));
+    } catch {
+      toast.error(t("auth.errAllowTogether"));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="mt-6 border-2 border-foreground p-5">
+      <button
+        onClick={toggle}
+        disabled={saving}
+        className="w-full flex items-center justify-between gap-4 text-left disabled:opacity-60"
+      >
+        <span className="font-mono text-[10px] uppercase tracking-widest">
+          {t("profile.allowTogetherLabel")}
+        </span>
+        <span
+          className={`shrink-0 w-11 h-6 border-2 border-foreground relative transition-colors ${
+            allowed ? "bg-accent" : "bg-transparent"
+          }`}
+        >
+          <span
+            className={`absolute top-0.5 size-4 bg-foreground transition-transform ${
+              allowed ? "translate-x-5" : "translate-x-0.5"
+            }`}
+          />
+        </span>
+      </button>
+      <p className="font-mono text-[10px] uppercase leading-relaxed text-muted-foreground/60 mt-3">
+        {t("profile.allowTogetherNote")}
+      </p>
+    </div>
+  );
+}
+
 export default function Profile() {
   const { isAuthenticated, loading: authLoading, token, user, deleteAccount } = useAuth();
   const { t, lang } = useLang();
@@ -356,6 +407,7 @@ export default function Profile() {
           </div>
 
           <LetterboxdAccount />
+          <AllowTogetherToggle />
 
           {summary && (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-0 mt-10 border-2 border-foreground">

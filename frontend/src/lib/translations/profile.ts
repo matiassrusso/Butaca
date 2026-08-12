@@ -31,6 +31,18 @@ export const PROFILE: Record<string, Entry> = {
     en: "Only imports from this account get saved to your profile. If someone else tries Butaca with their own username from your session, they see their picks but never touch your data.",
   },
 
+  // ─── "¿Qué vemos juntos?" sin Letterboxd ──────────────────────────────
+  "profile.allowTogetherLabel": {
+    es: "Dejar que me usen en «¿Qué vemos juntos?»",
+    en: "Let others use me in “What do we watch together?”",
+  },
+  "profile.allowTogetherNote": {
+    es: "Off por default. Si lo activás, cualquiera que sepa tu usuario de Butaca puede cruzar tu gusto con el suyo sin que necesites Letterboxd — nada se guarda en tu perfil ni se te avisa cuando pasa.",
+    en: "Off by default. If you turn it on, anyone who knows your Butaca username can cross your taste with theirs without needing Letterboxd — nothing gets saved to your profile and you won't be notified when it happens.",
+  },
+  "profile.allowTogetherOn": { es: "Activado.", en: "Turned on." },
+  "profile.allowTogetherOff": { es: "Desactivado.", en: "Turned off." },
+
   // ─── Stats ────────────────────────────────────────────────────────────
   "profile.statWatched": { es: "Vistas", en: "Watched" },
   "profile.statSessions": { es: "Sesiones de picks", en: "Pick sessions" },

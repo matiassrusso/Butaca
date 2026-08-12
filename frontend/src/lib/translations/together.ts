@@ -6,24 +6,24 @@ export const TOGETHER: Record<string, Entry> = {
   "together.titleAccent": { es: "juntos", en: "together" },
   "together.titleSuffix": { es: "?", en: "?" },
   "together.intro": {
-    es: "Poné el usuario de Letterboxd de con quien vas a ver algo. Cruzamos tu historial con el de esa persona y te muestro solo cosas que ninguno de los dos vio.",
-    en: "Drop the Letterboxd username of whoever you're watching with. We cross your history with theirs and only show things neither of you has seen.",
+    es: "Poné el usuario de con quien vas a ver algo: de Letterboxd, o de Butaca si activó «dejar que me usen» en su perfil. Cruzamos tu historial con el de esa persona y te muestro solo cosas que ninguno de los dos vio.",
+    en: "Drop the username of whoever you're watching with: their Letterboxd, or their Butaca username if they turned on \"let others use me\" in their profile. We cross your history with theirs and only show things neither of you has seen.",
   },
   "together.noAccountNeeded": {
-    es: "No necesita cuenta de Butaca: alcanza con que su perfil de Letterboxd sea público.",
-    en: "They don't need a Butaca account: their Letterboxd profile just has to be public.",
+    es: "Si usa Letterboxd no necesita cuenta de Butaca: alcanza con que su perfil sea público. Si no tiene Letterboxd, puede activar el toggle de su perfil de Butaca en vez de crear uno.",
+    en: "If they use Letterboxd they don't need a Butaca account: their profile just has to be public. If they don't have Letterboxd, they can turn on the toggle in their Butaca profile instead.",
   },
   "together.warning": {
-    es: "Ojo: de su perfil solo podemos leer la actividad reciente (~50 entradas), no el historial completo.",
-    en: "Heads up: we can only read their recent activity (~50 entries), not their full history.",
+    es: "Ojo: de un perfil de Letterboxd solo podemos leer la actividad reciente (~50 entradas), no el historial completo.",
+    en: "Heads up: from a Letterboxd profile we can only read recent activity (~50 entries), not their full history.",
   },
-  "together.label": { es: "Usuario de Letterboxd", en: "Letterboxd username" },
+  "together.label": { es: "Usuario de Letterboxd o de Butaca", en: "Letterboxd or Butaca username" },
   "together.placeholder": { es: "ej: scorsese", en: "e.g. scorsese" },
   "together.kindLabel": { es: "¿Peli o serie?", en: "Movie or show?" },
   "together.submit": { es: "Buscar algo para los dos", en: "Find something for both" },
   "together.hint": {
-    es: "Escribí su usuario de Letterboxd para continuar.",
-    en: "Type their Letterboxd username to continue.",
+    es: "Escribí su usuario para continuar.",
+    en: "Type their username to continue.",
   },
   "together.loadingTitle": { es: "Cruzando los dos gustos…", en: "Crossing both tastes…" },
   "together.loadingBody": {

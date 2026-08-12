@@ -84,6 +84,10 @@ export const AUTH: Record<string, Entry> = {
     es: "No pude guardar tu usuario de Letterboxd.",
     en: "Couldn't save your Letterboxd username.",
   },
+  "auth.errAllowTogether": {
+    es: "No pude guardar ese cambio.",
+    en: "Couldn't save that change.",
+  },
   "auth.errSession": { es: "Sesión inválida.", en: "Invalid session." },
 
   // ─── Recuperación: mail enviado ───────────────────────────────────────

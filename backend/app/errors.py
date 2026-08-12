@@ -140,6 +140,15 @@ MESSAGES: dict[str, dict[str, str]] = {
         "es": "«{name}» tiene actividad pública pero sin puntajes ni likes, así que no puedo saber qué le gusta.",
         "en": "“{name}” has public activity but no ratings or likes, so I can't tell what they like.",
     },
+    # {name} — existe como usuario de Butaca pero no activó el toggle de su perfil
+    "friend_not_available": {
+        "es": "«{name}» tiene cuenta en Butaca pero no habilitó que lo usen en «¿Qué vemos juntos?». Pedile que lo active en su perfil, o probá con su usuario de Letterboxd.",
+        "en": "“{name}” has a Butaca account but hasn't enabled being used in “What do we watch together?”. Ask them to turn it on in their profile, or try their Letterboxd username instead.",
+    },
+    "friend_is_yourself": {
+        "es": "Ese es tu propio usuario. Poné el de la persona con la que vas a ver algo.",
+        "en": "That's your own username. Enter the username of the person you're watching with.",
+    },
     "session_not_found": {"es": "Sesión no encontrada.", "en": "Session not found."},
     "recommendation_not_found": {
         "es": "Recomendación no encontrada.",

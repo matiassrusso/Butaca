@@ -276,6 +276,10 @@ class LetterboxdUsernameRequest(BaseModel):
     letterboxd_username: str = Field(default="", max_length=100)
 
 
+class AllowTogetherRequest(BaseModel):
+    allowed: bool
+
+
 class CastMember(BaseModel):
     name: str
     character: str = ""

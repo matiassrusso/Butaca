@@ -908,6 +908,29 @@ def test_chat_prompt_lifts_the_title_ban_without_lifting_the_seen_ban() -> None:
     assert "no la vio y no la puntuó" in prompt
 
 
+def test_chat_prompt_bans_echoing_referenced_or_already_named_titles() -> None:
+    # bug real reportado por Matías: pidió "algo tipo Zodiac, Se7en, Fight
+    # Club" y el agente le devolvió Zodiac como recomendación, y tras "ya la
+    # vi" le devolvió Fight Club -- ambos títulos que EL MISMO había nombrado
+    # como referencia de gusto, no como pedido. Sin esta regla el modelo no
+    # tiene forma de distinguir "ejemplo de vibra" de "pedido concreto".
+    prompt = llm_client._build_chat_prompt(
+        CHAT_RATINGS, None, [("user", "algo tipo Zodiac, Se7en o Fight Club")]
+    )
+
+    assert "referencia de gusto, no un pedido" in prompt
+    assert "Tampoco repitas un título que ya nombraste vos o que" in prompt
+
+
+def test_chat_prompt_bans_recommending_an_already_rated_title_as_new() -> None:
+    # bug real encontrado probando en vivo tras el fix de arriba: pedido
+    # "Prisoners" (rating 4/5 en el perfil) volvía como "recomendación para
+    # esta noche" con un why inventado que ignoraba que ya la había visto.
+    prompt = llm_client._build_chat_prompt(CHAT_RATINGS, None, [("user", "recomendame algo")])
+
+    assert "no elijas un título que ya está en el perfil de arriba" in prompt
+
+
 def test_chat_prompt_warns_the_agent_when_there_is_no_history() -> None:
     # usuario logueado sin nada puntuado: el agente tiene que decir que no lo
     # conoce en vez de improvisar un perfil
@@ -928,6 +951,35 @@ def test_chat_prompt_caps_the_conversation_history() -> None:
     assert "mensaje 29" in prompt
     assert f"mensaje {30 - llm_client.CHAT_HISTORY_TURNS}" in prompt
     assert f"mensaje {30 - llm_client.CHAT_HISTORY_TURNS - 1}" not in prompt
+
+
+def test_chat_prompt_includes_watchlist_and_feedback_signals() -> None:
+    # pedido de Matías (2026-08-12): el chat solo conocía ratings+resumen de
+    # perfil, nunca watchlist ni feedback de picks pasados (interesó/no
+    # interesó/ya vista) -- la misma señal que ya usa recommend().
+    feedback = {
+        "seen_titles": ["Marked Seen Movie"],
+        "not_interested": [{"title": "Rejected Movie", "tags": ["dark"]}],
+        "interested": [{"title": "Liked Pick", "tags": ["mystery"]}],
+    }
+    prompt = llm_client._build_chat_prompt(
+        CHAT_RATINGS,
+        None,
+        [("user", "hola")],
+        watchlist=["Watchlist Movie"],
+        feedback=feedback,
+    )
+
+    assert "Watchlist Movie" in prompt
+    assert "Liked Pick" in prompt
+    assert "Rejected Movie" in prompt
+    assert "Marked Seen Movie" in prompt
+
+
+def test_chat_prompt_omits_signals_block_when_theres_nothing_to_show() -> None:
+    prompt = llm_client._build_chat_prompt(CHAT_RATINGS, None, [("user", "hola")])
+
+    assert "Watchlist" not in prompt
 
 
 def test_chat_prompt_includes_persisted_taste_profile_facts() -> None:
