@@ -117,7 +117,7 @@ export function PosterCard({
           </span>
         )}
 
-        {!rec.refined && (
+        {showScore && !rec.refined && (
           <span
             className="absolute bottom-3 right-3 font-mono text-[9px] uppercase px-1.5 py-1 bg-background border border-foreground/20 text-muted-foreground"
             title={t("modal.heuristicHint")}
