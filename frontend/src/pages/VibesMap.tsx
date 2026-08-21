@@ -56,7 +56,29 @@ export default function VibesMap() {
   const [hovered, setHovered] = useState<MapPoint | null>(null);
   const [selectedRec, setSelectedRec] = useState<Recommendation | null>(null);
   const [loadingVerdict, setLoadingVerdict] = useState<number | null>(null);
+  const [kindFilter, setKindFilter] = useState<"all" | "movie" | "series">("all");
+  const [query, setQuery] = useState("");
+  // zoom/pan libre sobre el encuadre base (el focus de región calcula el base;
+  // esto lo multiplica encima). Se resetea al cambiar de región.
+  const [userZoom, setUserZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const dragRef = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
+  const draggedRef = useRef(false);
+  const svgRef = useRef<SVGSVGElement | null>(null);
   const seenWhysRef = useRef<Map<number, string>>(new Map());
+
+  const q = query.trim().toLowerCase();
+  const matchCount =
+    q === ""
+      ? 0
+      : (data?.points.filter(
+          (p) => p.title.toLowerCase().includes(q) && (kindFilter === "all" || p.kind === kindFilter),
+        ).length ?? 0);
+  useEffect(() => {
+    // cambiar de región reencuadra: el zoom/pan manual previo ya no aplica
+    setUserZoom(1);
+    setPan({ x: 0, y: 0 });
+  }, [focus]);
 
   useEffect(() => {
     let cancelled = false;
@@ -96,23 +118,64 @@ export default function VibesMap() {
   // movimientos quedan apretados en un rincón y las etiquetas se pisan entre
   // sí. `zoom` reescala radios y tipografía para que se vean igual de grandes.
   const { viewBox, zoom } = useMemo(() => {
+    // encuadre base: el lienzo completo, o recortado a la región enfocada
+    let bx = 0;
+    let by = 0;
+    let bw = VIEW_WIDTH;
+    let bh = VIEW_HEIGHT;
     const inFocus = focus == null ? [] : placed.filter(({ point }) => point.group_id === focus);
-    if (inFocus.length === 0) {
-      return { viewBox: `0 0 ${VIEW_WIDTH} ${VIEW_HEIGHT}`, zoom: 1 };
+    if (inFocus.length > 0) {
+      const margin = 60;
+      const minX = Math.min(...inFocus.map((p) => p.cx)) - margin;
+      const minY = Math.min(...inFocus.map((p) => p.cy)) - margin;
+      const width = Math.max(Math.max(...inFocus.map((p) => p.cx)) + margin - minX, 120);
+      // se mantiene la proporción del lienzo: si no, el SVG estira el contenido
+      bh = Math.max(
+        Math.max(...inFocus.map((p) => p.cy)) + margin - minY,
+        (width * VIEW_HEIGHT) / VIEW_WIDTH,
+      );
+      bw = (bh * VIEW_WIDTH) / VIEW_HEIGHT;
+      bx = minX;
+      by = minY;
     }
-    const margin = 60;
-    const minX = Math.min(...inFocus.map((p) => p.cx)) - margin;
-    const minY = Math.min(...inFocus.map((p) => p.cy)) - margin;
-    const width = Math.max(Math.max(...inFocus.map((p) => p.cx)) + margin - minX, 120);
-    // se mantiene la proporción del lienzo: si no, el SVG estira el contenido
-    const height = Math.max(
-      Math.max(...inFocus.map((p) => p.cy)) + margin - minY,
-      (width * VIEW_HEIGHT) / VIEW_WIDTH,
-    );
-    return {
-      viewBox: `${minX} ${minY} ${(height * VIEW_WIDTH) / VIEW_HEIGHT} ${height}`,
-      zoom: VIEW_HEIGHT / height,
-    };
+    // zoom/pan manual encima del base (centrado); pan en unidades de viewBox
+    const w = bw / userZoom;
+    const h = bh / userZoom;
+    const x = bx + (bw - w) / 2 + pan.x;
+    const y = by + (bh - h) / 2 + pan.y;
+    return { viewBox: `${x} ${y} ${w} ${h}`, zoom: VIEW_HEIGHT / h };
+  }, [placed, focus, userZoom, pan]);
+
+  // territorios: una mancha translúcida por región (o por movimiento al enfocar)
+  // dibujada detrás de los puntos, para que el mapa lea como áreas y no como
+  // puntos sueltos en el vacío. Radio = alcance real de los miembros del grupo.
+  const territories = useMemo(() => {
+    if (placed.length === 0) return [];
+    const level: "group_id" | "movement_id" = focus == null ? "group_id" : "movement_id";
+    const acc = new Map<number, { x: number; y: number; n: number; group: number; pts: [number, number][] }>();
+    for (const { point, cx, cy } of placed) {
+      if (focus != null && point.group_id !== focus) continue;
+      const id = point[level];
+      const cur = acc.get(id) ?? { x: 0, y: 0, n: 0, group: point.group_id, pts: [] };
+      cur.x += cx;
+      cur.y += cy;
+      cur.n += 1;
+      cur.pts.push([cx, cy]);
+      acc.set(id, cur);
+    }
+    return [...acc.entries()].map(([id, v]) => {
+      const cx = v.x / v.n;
+      const cy = v.y / v.n;
+      const spread =
+        v.pts.reduce((s, [px, py]) => s + Math.hypot(px - cx, py - cy), 0) / v.n;
+      return {
+        id,
+        cx,
+        cy,
+        r: Math.max(spread * 1.9 + 14, 26),
+        color: GROUP_COLORS[(v.group - 1) % GROUP_COLORS.length],
+      };
+    });
   }, [placed, focus]);
 
   // etiquetas dibujadas encima del mapa: las regiones (L1) siempre, y los
@@ -128,20 +191,69 @@ export default function VibesMap() {
       const current = centers.get(id) ?? { x: 0, y: 0, n: 0 };
       centers.set(id, { x: current.x + cx, y: current.y + cy, n: current.n + 1 });
     }
-    return (
-      [...centers.entries()]
-        // los movimientos chicos de una región son muchos y quedan encimados:
-        // se rotulan los más grandes, el resto se lee pasando el mouse
-        .sort((a, b) => b[1].n - a[1].n)
-        .slice(0, focus == null ? centers.size : 8)
-        .map(([id, { x, y, n }]) => ({
-          id,
-          x: x / n,
-          y: y / n,
-          label: source?.find((cluster) => cluster.id === id)?.label ?? "",
-        }))
-    );
-  }, [placed, focus, data]);
+    const laid = [...centers.entries()]
+      // los movimientos chicos de una región son muchos y quedan encimados:
+      // se rotulan los más grandes, el resto se lee pasando el mouse
+      .sort((a, b) => b[1].n - a[1].n)
+      .slice(0, focus == null ? centers.size : 8)
+      .map(([id, { x, y, n }]) => ({
+        id,
+        x: x / n,
+        y: y / n,
+        label: source?.find((cluster) => cluster.id === id)?.label ?? "",
+      }))
+      .filter((c) => c.label);
+
+    // anti-colisión: las etiquetas nacen en el centroide del cluster y se
+    // pisaban (Matías, 2026-08-20). Se separan empujándolas por el eje de menor
+    // penetración — el texto es ancho y horizontal, así que casi siempre las
+    // apila en vertical, que es lo legible. Tamaños en unidades de viewBox
+    // (constantes en pantalla porque el render divide la tipografía por zoom).
+    const lh = 17 / zoom; // alto de línea aprox
+    const cw = 4.9 / zoom; // ancho por carácter aprox (mono, 15px)
+    for (let iter = 0; iter < 80; iter++) {
+      let moved = false;
+      for (let i = 0; i < laid.length; i++) {
+        for (let j = i + 1; j < laid.length; j++) {
+          const a = laid[i];
+          const b = laid[j];
+          const minDx = (a.label.length * cw + b.label.length * cw) / 2 + 6 / zoom;
+          const minDy = lh;
+          const dx = b.x - a.x;
+          const dy = b.y - a.y;
+          const penX = minDx - Math.abs(dx);
+          const penY = minDy - Math.abs(dy);
+          if (penX <= 0 || penY <= 0) continue; // no se tocan
+          moved = true;
+          if (penY <= penX) {
+            const push = (penY / 2 + 0.5) * (dy >= 0 ? 1 : -1);
+            a.y -= push;
+            b.y += push;
+          } else {
+            const push = (penX / 2 + 0.5) * (dx >= 0 ? 1 : -1);
+            a.x -= push;
+            b.x += push;
+          }
+        }
+      }
+      if (!moved) break;
+    }
+    return laid;
+  }, [placed, focus, data, zoom]);
+
+  // zoom con rueda: listener nativo non-passive para poder frenar el scroll de
+  // la página mientras se hace zoom sobre el mapa (React lo pone passive).
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+      setUserZoom((z) => Math.min(8, Math.max(1, z * factor)));
+    };
+    svg.addEventListener("wheel", onWheel, { passive: false });
+    return () => svg.removeEventListener("wheel", onWheel);
+  }, [data]);
 
   async function openPoint(point: MapPoint) {
     // sin sesión el veredicto no existe (necesita el perfil de gusto): se abre
@@ -233,32 +345,99 @@ export default function VibesMap() {
 
         {data && data.points.length > 0 && (
           <div className="grid lg:grid-cols-[1fr_260px] gap-8 items-start">
-            <div className="relative border-2 border-foreground bg-secondary/30">
+            <div className="relative border-2 border-foreground bg-secondary/30 overflow-hidden">
               <svg
+                ref={svgRef}
                 viewBox={viewBox}
-                className="w-full h-auto block touch-pan-y transition-[view-box] duration-300"
+                className="w-full h-auto block touch-pan-y transition-[view-box] duration-300 select-none"
+                style={{ cursor: dragRef.current ? "grabbing" : "grab" }}
                 role="img"
                 aria-label={t("map.titleAccent")}
+                onPointerDown={(e) => {
+                  dragRef.current = { x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y };
+                  draggedRef.current = false;
+                }}
+                onPointerMove={(e) => {
+                  if (!dragRef.current || !svgRef.current) return;
+                  const rect = svgRef.current.getBoundingClientRect();
+                  const unitPerPx = VIEW_WIDTH / zoom / rect.width;
+                  if (Math.abs(e.clientX - dragRef.current.x) + Math.abs(e.clientY - dragRef.current.y) > 3) {
+                    draggedRef.current = true;
+                  }
+                  setPan({
+                    x: dragRef.current.panX - (e.clientX - dragRef.current.x) * unitPerPx,
+                    y: dragRef.current.panY - (e.clientY - dragRef.current.y) * unitPerPx,
+                  });
+                }}
+                onPointerUp={() => {
+                  dragRef.current = null;
+                }}
+                onPointerLeave={() => {
+                  dragRef.current = null;
+                  setHovered(null);
+                }}
               >
-                {placed.map(({ point, cx, cy }) => {
-                  const dimmed = focus != null && point.group_id !== focus;
-                  const color = GROUP_COLORS[(point.group_id - 1) % GROUP_COLORS.length];
-                  return (
+                <defs>
+                  <filter id="vibeBlur" x="-40%" y="-40%" width="180%" height="180%">
+                    <feGaussianBlur stdDeviation={9 / zoom} />
+                  </filter>
+                  <pattern id="vibeGrid" width="26" height="26" patternUnits="userSpaceOnUse">
+                    <circle cx="1.2" cy="1.2" r="1.1" fill="var(--foreground)" opacity="0.07" />
+                  </pattern>
+                </defs>
+
+                {/* grilla sutil de fondo, para que no sea un vacío plano */}
+                <rect x="-6000" y="-6000" width="12000" height="12000" fill="url(#vibeGrid)" />
+
+                {/* territorios: manchas translúcidas por región (o por movimiento al
+                    enfocar), difuminadas, detrás de los puntos */}
+                <g filter="url(#vibeBlur)" className="pointer-events-none">
+                  {territories.map((terr) => (
                     <circle
+                      key={`terr-${terr.id}`}
+                      cx={terr.cx}
+                      cy={terr.cy}
+                      r={terr.r}
+                      fill={terr.color}
+                      opacity={focus == null ? 0.17 : 0.09}
+                    />
+                  ))}
+                </g>
+
+                {placed.map(({ point, cx, cy }) => {
+                  const matchKind = kindFilter === "all" || point.kind === kindFilter;
+                  const matchQuery = q === "" || point.title.toLowerCase().includes(q);
+                  const off = (focus != null && point.group_id !== focus) || !matchKind || !matchQuery;
+                  const hit = q !== "" && matchQuery && matchKind;
+                  const color = GROUP_COLORS[(point.group_id - 1) % GROUP_COLORS.length];
+                  const r = (point.rated ? 7 : hit ? 6 : 4.5) / zoom;
+                  const shared = {
+                    fill: point.rated ? "none" : hit ? "var(--accent)" : color,
+                    stroke: point.rated ? color : hit ? "var(--accent)" : "none",
+                    strokeWidth: (point.rated ? 2.5 : hit ? 2 : 0) / zoom,
+                    opacity: off ? 0.06 : point.rated || hit ? 1 : 0.75,
+                    className: "cursor-pointer transition-[opacity] duration-200",
+                    onMouseEnter: () => setHovered(point),
+                    onMouseLeave: () => setHovered(null),
+                    onClick: () => {
+                      if (!draggedRef.current) openPoint(point);
+                    },
+                  } as const;
+                  // series = cuadrado, pelis = círculo (Matías, 2026-08-20: había
+                  // que poder distinguirlas de un vistazo)
+                  return point.kind === "series" ? (
+                    <rect
                       key={`${point.kind}-${point.tmdb_id}`}
-                      cx={cx}
-                      cy={cy}
-                      r={(point.rated ? 7 : 4.5) / zoom}
-                      fill={point.rated ? "none" : color}
-                      stroke={point.rated ? color : "none"}
-                      strokeWidth={point.rated ? 2.5 / zoom : 0}
-                      opacity={dimmed ? 0.1 : point.rated ? 1 : 0.72}
-                      className="cursor-pointer transition-opacity"
-                      onMouseEnter={() => setHovered(point)}
-                      onMouseLeave={() => setHovered(null)}
-                      onClick={() => openPoint(point)}
+                      x={cx - r}
+                      y={cy - r}
+                      width={r * 2}
+                      height={r * 2}
+                      {...shared}
                     >
-                      {/* nativo, para que en touch (sin hover) igual haya algo */}
+                      <title>{`${point.title} (${point.year})`}</title>
+                    </rect>
+                  ) : (
+                    <circle key={`${point.kind}-${point.tmdb_id}`} cx={cx} cy={cy} r={r} {...shared}>
                       <title>{`${point.title} (${point.year})`}</title>
                     </circle>
                   );
@@ -286,6 +465,22 @@ export default function VibesMap() {
                   </text>
                 ))}
               </svg>
+
+              {(userZoom !== 1 || pan.x !== 0 || pan.y !== 0) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUserZoom(1);
+                    setPan({ x: 0, y: 0 });
+                  }}
+                  className="absolute top-3 right-3 px-2 py-1 font-mono text-[9px] uppercase tracking-widest border-2 border-foreground bg-background hover:text-accent hover:border-accent transition-colors"
+                >
+                  {t("map.resetView")}
+                </button>
+              )}
+              <div className="absolute top-3 left-3 pointer-events-none font-mono text-[9px] uppercase tracking-widest text-muted-foreground/70">
+                {t("map.zoomHint")}
+              </div>
 
               {hovered && (
                 <div className="pointer-events-none absolute left-3 bottom-3 max-w-[90%] flex items-center gap-3 border-2 border-foreground bg-background px-3 py-2">
@@ -315,6 +510,57 @@ export default function VibesMap() {
             </div>
 
             <aside className="space-y-6">
+              <div>
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder={t("map.search")}
+                  className="w-full px-3 py-2 bg-background border-2 border-foreground/30 focus:border-accent outline-none font-mono text-xs"
+                />
+                {q !== "" && (
+                  <p className="mt-1.5 font-mono text-[9px] uppercase tracking-widest text-muted-foreground">
+                    {matchCount > 0 ? t("map.searchCount", { n: matchCount }) : t("map.searchNone")}
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-2">
+                  {t("map.shapeLegend")}
+                </div>
+                <div className="flex gap-1">
+                  {(["all", "movie", "series"] as const).map((k) => (
+                    <button
+                      key={k}
+                      type="button"
+                      onClick={() => setKindFilter(k)}
+                      aria-pressed={kindFilter === k}
+                      className={`flex-1 py-1.5 font-mono text-[9px] uppercase tracking-widest border-2 transition-colors ${
+                        kindFilter === k
+                          ? "border-foreground bg-foreground/5"
+                          : "border-foreground/20 hover:border-foreground/40"
+                      }`}
+                    >
+                      {t(k === "all" ? "map.filterAll" : k === "movie" ? "map.filterMovies" : "map.filterSeries")}
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-3 flex items-center gap-4 font-mono text-[9px] uppercase tracking-widest text-muted-foreground">
+                  <span className="flex items-center gap-1.5">
+                    <svg width="12" height="12" aria-hidden="true">
+                      <circle cx="6" cy="6" r="4" fill="var(--foreground)" />
+                    </svg>
+                    {t("map.shapeMovie")}
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <svg width="12" height="12" aria-hidden="true">
+                      <rect x="2" y="2" width="8" height="8" fill="var(--foreground)" />
+                    </svg>
+                    {t("map.shapeSeries")}
+                  </span>
+                </div>
+              </div>
+
               <div>
                 <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-3">
                   {t("map.legendTitle")}
