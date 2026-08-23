@@ -67,6 +67,22 @@ def test_seed_titles_interleaves_discover_biases(monkeypatch) -> None:
     assert [item["tmdb_id"] for item in vibes_clustering._seed_titles(cap=5)] == [0, 1, 2, 3, 4]
 
 
+def test_seed_titles_interleaves_movie_and_series_pools_per_mood(monkeypatch) -> None:
+    def fake_fetch(mood, pages=2):
+        identifier = list(vibes_clustering._SEED_MOODS).index(mood)
+        return [
+            {"tmdb_id": identifier, "kind": "movie", "title": mood, "year": 2000, "tags": []},
+            {"tmdb_id": 100 + identifier, "kind": "series", "title": mood, "year": 2000, "tags": []},
+        ]
+
+    monkeypatch.setattr(vibes_clustering.tmdb_client, "fetch_candidates", fake_fetch)
+    monkeypatch.setattr(vibes_clustering.tmdb_client, "fetch_top_rated_by_decade", lambda kind, decade, pages=1: [])
+
+    seed = vibes_clustering._seed_titles(cap=10)
+
+    assert [item["kind"] for item in seed] == ["movie", "series"] * len(vibes_clustering._SEED_MOODS)
+
+
 def test_seed_titles_folds_in_top_rated_by_decade_pools(monkeypatch) -> None:
     """El sesgo a anime/K-drama sale de que fetch_candidates ordena por
     popularidad (medido en TASKS.md); estas pools ordenan por vote_average
@@ -94,6 +110,35 @@ def test_seed_titles_folds_in_top_rated_by_decade_pools(monkeypatch) -> None:
     assert 100 in [item["tmdb_id"] for item in seed]
 
 
+def test_seed_titles_gives_series_more_top_rated_depth(monkeypatch) -> None:
+    """Las series necesitan pools propios: discover no las debe dejar como
+    un apéndice de las películas ni agotarse en una sola página por década."""
+    calls: list[tuple[str, int, int]] = []
+    discover_pages: list[int] = []
+
+    def fake_fetch(mood, pages=2):
+        discover_pages.append(pages)
+        return []
+
+    monkeypatch.setattr(vibes_clustering.tmdb_client, "fetch_candidates", fake_fetch)
+
+    def fake_decade(kind, decade, pages=1):
+        calls.append((kind, decade, pages))
+        return []
+
+    monkeypatch.setattr(vibes_clustering.tmdb_client, "fetch_top_rated_by_decade", fake_decade)
+
+    assert vibes_clustering._seed_titles() == []
+    assert {pages for pages in discover_pages} == {vibes_clustering._SEED_DISCOVER_PAGES}
+    assert {pages for kind, _, pages in calls if kind == "movie"} == {
+        vibes_clustering._SEED_MOVIE_DECADE_PAGES
+    }
+    assert {pages for kind, _, pages in calls if kind == "series"} == {
+        vibes_clustering._SEED_SERIES_DECADE_PAGES
+    }
+    assert vibes_clustering._SEED_SERIES_DECADE_PAGES > vibes_clustering._SEED_MOVIE_DECADE_PAGES
+
+
 def test_leiden_cluster_ids_are_deterministic_and_empty_groups_are_dropped() -> None:
     vectors = [[1, 0], [0.99, 0.01], [0, 1], [0.01, 0.99]]
 
@@ -117,6 +162,39 @@ def test_label_cluster_falls_back_to_top_keyword_when_llm_fails(monkeypatch) -> 
         {"title": "A", "year": 2000, "keywords": ["heist"], "tags": []},
         {"title": "B", "year": 2001, "keywords": ["heist", "caper"], "tags": []},
     ]) == "Heist"
+
+
+def test_label_cluster_prompt_prioritizes_the_dominant_signal(monkeypatch) -> None:
+    captured: list[str] = []
+    monkeypatch.setattr(vibes_clustering.llm_client, "is_configured", lambda: True)
+    monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
+
+    def fake_llm(prompt, api_key):
+        captured.append(prompt)
+        return {"label": "Cine de mafia"}
+
+    monkeypatch.setattr(vibes_clustering.llm_client, "_call_nvidia_with_fallback", fake_llm)
+
+    assert vibes_clustering._label_cluster([
+        {"title": "A", "year": 1990, "keywords": ["mafia"], "tags": []},
+        {"title": "B", "year": 1995, "keywords": ["mafia", "crime"], "tags": []},
+        {"title": "C", "year": 2000, "keywords": ["mafia"], "tags": []},
+        {"title": "D", "year": 2005, "keywords": ["space"], "tags": []},
+    ]) == "Cine de mafia"
+    assert "MAYORÍA" in captured[0]
+    assert "outliers" in captured[0]
+    assert "uno o dos ejemplos" in captured[0]
+
+
+def test_sample_cluster_uses_cosine_representativeness_not_vector_magnitude() -> None:
+    records = [{"title": title} for title in ("Huge x", "Small x", "Y one", "Y two", "Y three")]
+    vectors = [[100.0, 0.0], [1.0, 0.0], [0.0, 1.0], [0.0, 1.0], [0.0, 1.0]]
+
+    samples = vibes_clustering._sample_cluster([0, 1, 2, 3, 4], records, vectors)
+
+    # En la geometría coseno del grafo, Y es la dirección dominante (3/5) y
+    # los dos primeros representantes no pueden cambiar solo por la magnitud.
+    assert [item["title"] for item in samples[:3]] == ["Y one", "Y three", "Y two"]
 
 
 def test_embed_batch_waits_out_a_rate_limit_and_retries(monkeypatch) -> None:

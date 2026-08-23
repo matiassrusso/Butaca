@@ -47,6 +47,13 @@ _SEED_MOODS = ("", "action", "funny", "romance", "psychological")
 # movimientos eran anime o cine coreano porque /discover/tv por popularidad
 # está dominado por eso hoy) en vez de compensarlo con más sesiones de mood.
 _SEED_DECADES = (1950, 1960, 1970, 1980, 1990, 2000, 2010, 2020)
+# Con el mínimo de votos del catálogo, las primeras ocho páginas de discover
+# se solapan mucho entre moods y apenas dejaban ~764 títulos tras deduplicar.
+# Las décadas aportan calidad y variedad temporal; dar más páginas a series
+# crea una muestra propia suficiente para que formen movimientos coherentes.
+_SEED_DISCOVER_PAGES = 15
+_SEED_MOVIE_DECADE_PAGES = 2
+_SEED_SERIES_DECADE_PAGES = 4
 
 
 class VibeError(Exception):
@@ -64,16 +71,24 @@ def _seed_titles(cap: int = 1500) -> list[dict]:
     """Reuse discover across several genre biases; this is an offline seed, not the catalog."""
     if cap < 1:
         return []
-    pages = max(1, math.ceil(cap / (len(_SEED_MOODS) * 40)))
+    pages = max(_SEED_DISCOVER_PAGES, math.ceil(cap / (len(_SEED_MOODS) * 40)))
     pools: list[list[dict]] = []
     for mood in _SEED_MOODS:
-        pools.append([item for item in tmdb_client.fetch_candidates(mood, pages=pages) if item.get("tmdb_id") is not None])
+        items = [
+            item for item in tmdb_client.fetch_candidates(mood, pages=pages)
+            if item.get("tmdb_id") is not None
+        ]
+        # fetch_candidates devuelve movies antes que series. Separarlas evita
+        # que las series de cada sesgo lleguen recién después de agotar todas
+        # sus películas, conservando el balance round-robin entre fuentes.
+        pools.extend([[item for item in items if item.get("kind") == kind] for kind in ("movie", "series")])
     for decade in _SEED_DECADES:
         for kind in ("movie", "series"):
+            decade_pages = _SEED_MOVIE_DECADE_PAGES if kind == "movie" else _SEED_SERIES_DECADE_PAGES
             pools.append(
                 [
                     item
-                    for item in tmdb_client.fetch_top_rated_by_decade(kind, decade, pages=1)
+                    for item in tmdb_client.fetch_top_rated_by_decade(kind, decade, pages=decade_pages)
                     if item.get("tmdb_id") is not None
                 ]
             )
@@ -293,7 +308,10 @@ def _label_cluster(sample_titles_metadata: list[dict]) -> str:
     )
     prompt = (
         "Dale un nombre corto en español (2 a 5 palabras) al movimiento cinematográfico "
-        "que comparten estos títulos. No uses nombres de películas ni expliques nada. "
+        "que domina en estos títulos. Elegí el género, subgénero, tradición, autor, época o "
+        "movimiento que comparta la MAYORÍA: ignorá outliers y nunca nombres un rasgo que aparezca "
+        "solo en uno o dos ejemplos. Si hay varias señales, preferí el denominador común más específico "
+        "(por ejemplo, mafia antes que drama). No uses nombres de películas ni expliques nada. "
         'Devolvé solo JSON: {"label": "..."}.\n\n' + context
     )
     try:
@@ -309,8 +327,16 @@ def _label_cluster(sample_titles_metadata: list[dict]) -> str:
 
 def _sample_cluster(members: list[int], records: list[dict], vectors: list[list[float]]) -> list[dict]:
     matrix = np.asarray([vectors[index] for index in members], dtype=np.float32)
-    centroid = matrix.mean(axis=0)
-    distances = np.linalg.norm(matrix - centroid, axis=1)
+    # Leiden arma el grafo con similitud coseno; elegir los representantes con
+    # esa misma geometría evita que la magnitud de un embedding vuelva central
+    # a un outlier y termine sesgando el label del LLM.
+    norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+    normalized = np.divide(matrix, norms, out=np.zeros_like(matrix), where=norms != 0)
+    centroid = normalized.mean(axis=0)
+    centroid_norm = np.linalg.norm(centroid)
+    if centroid_norm:
+        centroid /= centroid_norm
+    distances = 1 - normalized @ centroid
     ordered = sorted(range(len(members)), key=lambda index: (float(distances[index]), records[members[index]]["title"]))
     return [records[members[index]] for index in ordered[:6]]
 
