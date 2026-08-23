@@ -407,22 +407,10 @@ export default function Home() {
         </section>
       )}
 
-      {/* El mapa es público: entra acá para que también lo descubra quien no
-          tiene cuenta (en la navbar solo aparece con sesión). */}
-      <section className="max-w-7xl mx-auto px-6 py-16 border-b-2 border-foreground">
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
-          <div className="max-w-2xl">
-            <span className="font-mono text-xs px-2 py-1 border border-foreground/20">{t("map.tag")}</span>
-            <p className="mt-4 font-serif italic text-2xl md:text-3xl leading-snug">{t("map.homeLead")}</p>
-          </div>
-          <Link
-            href="/map"
-            className="shrink-0 px-6 py-3 font-mono text-[10px] uppercase tracking-widest bg-accent text-accent-foreground hover:bg-foreground hover:text-background transition-colors"
-          >
-            {t("map.homeCta")}
-          </Link>
-        </div>
-      </section>
+      {/* Sección del mapa OCULTA para el launch (2026-08-23, decisión de Matías):
+          se rehace con géneros principales arriba + zoom que revela sub-categorías
+          (ej. entre sci-fi y acción aparece "superhéroes") antes de reactivarla.
+          Ver "03 Iteration Logs/(C) 2026-08-23 launch-pulido-backlog.md". */}
 
       <div id="how-it-works" className="max-w-7xl mx-auto px-6">
         {/* Methodology */}

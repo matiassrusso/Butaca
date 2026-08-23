@@ -29,7 +29,9 @@ export function Navbar() {
     { label: t("nav.profile"), ariaLabel: t("nav.profileAria"), link: "/profile" },
     { label: t("nav.rate"), ariaLabel: t("nav.rateAria"), link: "/rate" },
     { label: t("nav.games"), ariaLabel: t("nav.gamesAria"), link: "/games" },
-    { label: t("map.nav"), ariaLabel: t("map.navAria"), link: "/map" },
+    // Mapa OCULTO para el launch (2026-08-23): se rehace con géneros arriba +
+    // zoom a sub-categorías antes de reactivarlo. Ver el backlog en 03 Iteration Logs.
+    // { label: t("map.nav"), ariaLabel: t("map.navAria"), link: "/map" },
     { label: t("nav.history"), ariaLabel: t("nav.historyAria"), link: "/history" },
     { label: t("wrapped.nav"), ariaLabel: t("wrapped.navAria"), link: "/wrapped" },
     {
