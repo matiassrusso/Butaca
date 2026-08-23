@@ -26,6 +26,9 @@ type WatchedItem = {
   source: "import" | "manual" | "like" | "star" | "game";
 };
 
+type WatchedSort = "rating" | "title" | "watched" | "source";
+type SortDirection = "asc" | "desc";
+
 function locale(lang: Lang): string {
   return lang === "en" ? "en-US" : "es-AR";
 }
@@ -74,6 +77,8 @@ export default function History() {
   const [tab, setTab] = useState<"recommended" | "watched">("watched");
   const [sessions, setSessions] = useState<RecommendationSession[]>([]);
   const [watchedItems, setWatchedItems] = useState<WatchedItem[]>([]);
+  const [watchedSort, setWatchedSort] = useState<WatchedSort>("watched");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [openSession, setOpenSession] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -190,6 +195,20 @@ export default function History() {
       active ? "border-foreground text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"
     }`;
 
+  const sortedWatchedItems = [...watchedItems].sort((a, b) => {
+    let comparison: number;
+    if (watchedSort === "rating") {
+      comparison = a.rating - b.rating;
+    } else if (watchedSort === "title") {
+      comparison = a.title.localeCompare(b.title, locale(lang));
+    } else if (watchedSort === "source") {
+      comparison = sourceLabel(a.source).localeCompare(sourceLabel(b.source), locale(lang));
+    } else {
+      comparison = (a.watched_date || a.created_at).localeCompare(b.watched_date || b.created_at);
+    }
+    return sortDirection === "asc" ? comparison : -comparison;
+  });
+
   return (
     <PageTransition>
       <main className="max-w-7xl mx-auto px-6 pt-16 pb-24">
@@ -237,7 +256,31 @@ export default function History() {
         )}
 
         {!loading && !error && tab === "watched" && watchedItems.length > 0 && (
-          <table className="w-full">
+          <>
+            <div className="mb-5 flex flex-wrap items-center gap-0 font-mono text-[10px] uppercase tracking-widest">
+              <label htmlFor="history-sort" className="border-2 border-foreground border-r-0 px-3 py-2 text-muted-foreground">
+                {t("history.sortBy")}
+              </label>
+              <select
+                id="history-sort"
+                value={watchedSort}
+                onChange={(event) => setWatchedSort(event.target.value as WatchedSort)}
+                className="border-2 border-foreground bg-background px-3 py-2 text-foreground outline-none"
+              >
+                <option value="rating">{t("history.sortRating")}</option>
+                <option value="title">{t("history.sortTitle")}</option>
+                <option value="watched">{t("history.sortWhen")}</option>
+                <option value="source">{t("history.sortWhere")}</option>
+              </select>
+              <button
+                type="button"
+                onClick={() => setSortDirection((direction) => (direction === "asc" ? "desc" : "asc"))}
+                className="border-2 border-foreground border-l-0 px-3 py-2 text-accent transition-colors hover:bg-foreground hover:text-background"
+              >
+                {sortDirection === "asc" ? `↑ ${t("history.sortAscending")}` : `↓ ${t("history.sortDescending")}`}
+              </button>
+            </div>
+            <table className="w-full">
             <thead>
               <tr className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground border-b border-foreground/20">
                 <th className="text-left py-3 w-12">#</th>
@@ -248,7 +291,7 @@ export default function History() {
               </tr>
             </thead>
             <tbody>
-              {watchedItems.map((item, i) => {
+              {sortedWatchedItems.map((item, i) => {
                 const rowKey = `${item.title}-${item.created_at}`;
                 const reviewOpen = openReview === rowKey;
                 return (
@@ -287,7 +330,8 @@ export default function History() {
                 );
               })}
             </tbody>
-          </table>
+            </table>
+          </>
         )}
 
         {!loading && !error && tab === "recommended" && sessions.length === 0 && (

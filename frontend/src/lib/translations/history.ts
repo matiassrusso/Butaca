@@ -40,6 +40,13 @@ export const HISTORY: Record<string, Entry> = {
   "history.colWatched": { es: "Vista", en: "Watched" },
   "history.colSource": { es: "Dónde", en: "Where" },
   "history.colRating": { es: "Rating", en: "Rating" },
+  "history.sortBy": { es: "Ordenar por", en: "Sort by" },
+  "history.sortRating": { es: "Rating", en: "Rating" },
+  "history.sortTitle": { es: "Título", en: "Title" },
+  "history.sortWhen": { es: "Cuándo", en: "When watched" },
+  "history.sortWhere": { es: "Dónde", en: "Where watched" },
+  "history.sortAscending": { es: "Ascendente", en: "Ascending" },
+  "history.sortDescending": { es: "Descendente", en: "Descending" },
   "history.showReview": { es: "Tu reseña", en: "Your review" },
   "history.hideReview": { es: "Ocultar reseña", en: "Hide review" },
 
