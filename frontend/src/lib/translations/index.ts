@@ -4,6 +4,7 @@
 
 import { AUTH } from "./auth";
 import { CHAT } from "./chat";
+import { FEEDBACK } from "./feedback";
 import { GAMES } from "./games";
 import { HISTORY } from "./history";
 import { HOME } from "./home";
@@ -28,6 +29,7 @@ export const DICTIONARY: Record<string, Entry> = {
   ...RATE,
   ...GAMES,
   ...CHAT,
+  ...FEEDBACK,
   ...MAP,
   ...MODAL,
   ...TOGETHER,

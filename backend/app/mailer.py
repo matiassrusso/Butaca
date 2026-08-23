@@ -1,6 +1,7 @@
 import json
 import os
 import urllib.request
+from html import escape
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 
@@ -162,6 +163,34 @@ def send_verification_email(to_email: str, verification_token: str) -> None:
                 button_label="Confirmar email",
                 button_url=verify_link,
                 expiry_note="El link expira en 24 horas",
+            ),
+        }
+    ).encode("utf-8")
+
+    _send_request(body, api_key)
+
+
+def send_site_feedback_email(to_email: str, message: str, email: str) -> None:
+    api_key = os.environ.get("RESEND_API_KEY")
+    if not api_key:
+        raise MailError("RESEND_API_KEY no está configurada.")
+
+    from_address = os.environ.get("RESEND_FROM_EMAIL", DEFAULT_FROM)
+    contact = escape(email) if email else "Sin email de contacto"
+    safe_message = escape(message).replace("\n", "<br>")
+    body = json.dumps(
+        {
+            "from": from_address,
+            "to": [to_email],
+            "subject": "Nueva sugerencia para Butaca",
+            "html": _render_email(
+                preheader="Llegó una nueva sugerencia desde Butaca.",
+                kicker="[Feedback de producto]",
+                heading="Nueva sugerencia",
+                body=f"<strong>Contacto:</strong> {contact}<br><br>{safe_message}",
+                button_label="Abrir Butaca",
+                button_url="https://butaca.xyz",
+                expiry_note="Feedback guardado en el panel de administración",
             ),
         }
     ).encode("utf-8")

@@ -1,5 +1,6 @@
 import { Github, Linkedin } from "lucide-react";
 import { useEffect, useState } from "react";
+import { Link } from "wouter";
 
 import { API_BASE_URL } from "@/hooks/useAuth";
 import { useLang } from "@/lib/i18n";
@@ -61,6 +62,12 @@ export function Footer() {
                   {label}
                 </a>
               ))}
+              <Link
+                href="/feedback"
+                className="flex items-center gap-2 border border-background/30 px-3 py-2 font-mono text-[10px] uppercase tracking-widest opacity-70 hover:opacity-100 hover:border-background transition-all"
+              >
+                {t("feedback.footerLink")}
+              </Link>
             </div>
           </div>
 

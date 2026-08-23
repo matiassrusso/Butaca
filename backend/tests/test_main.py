@@ -400,6 +400,49 @@ def test_feedback_accepts_own_recommendation() -> None:
     assert response.status_code == 201
 
 
+def test_site_feedback_accepts_logged_in_user() -> None:
+    headers = _auth_headers("sitefeedbackuser")
+
+    response = client.post(
+        "/site-feedback",
+        headers=headers,
+        json={"message": "Me gustaría poder guardar listas.", "email": "contact@example.com"},
+    )
+
+    assert response.status_code == 201
+    entries = db.get_site_feedback()
+    assert entries[0]["user_id"] == db.get_user_by_username("sitefeedbackuser")["id"]
+    assert entries[0]["message"] == "Me gustaría poder guardar listas."
+    assert entries[0]["email"] == "contact@example.com"
+
+
+def test_site_feedback_accepts_anonymous_user() -> None:
+    response = client.post(
+        "/site-feedback",
+        json={"message": "Excelente idea.", "email": ""},
+    )
+
+    assert response.status_code == 201
+    entry = db.get_site_feedback()[0]
+    assert entry["user_id"] is None
+    assert entry["email"] == ""
+
+
+def test_admin_site_feedback_is_gated(monkeypatch) -> None:
+    assert client.get("/admin/site-feedback").status_code == 404
+
+    monkeypatch.setenv("BUTACA_ADMIN_TOKEN", "site-feedback-secret")
+    assert client.get("/admin/site-feedback").status_code == 403
+
+    db.save_site_feedback(None, "Para el administrador", "")
+    response = client.get(
+        "/admin/site-feedback", headers={"X-Admin-Token": "site-feedback-secret"}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["entries"][0]["message"] == "Para el administrador"
+
+
 def test_interested_feedback_reaches_the_scoring_engine() -> None:
     """El botón "Me interesa" se guardaba pero recommend() nunca lo leía
     (preguntado por Matías, 2026-08-07: "¿tiene impacto?"). Recorre el camino

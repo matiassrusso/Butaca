@@ -236,6 +236,11 @@ class FeedbackRequest(BaseModel):
     status: Literal["interested", "not_interested", "seen"]
 
 
+class SiteFeedbackRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=4000)
+    email: str = Field(default="", max_length=320)
+
+
 class RateTitleRequest(BaseModel):
     # puntuar un título suelto directo desde el modal ("Ya la vi" → elegí
     # cuánto te gustó, o el botón de "no estoy de acuerdo con el match" al

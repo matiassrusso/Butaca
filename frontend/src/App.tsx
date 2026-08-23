@@ -10,6 +10,7 @@ import { Navbar } from "./components/Navbar";
 import { AuthProvider } from "./hooks/useAuth";
 import { LanguageProvider } from "./lib/i18n";
 import Chat from "./pages/Chat";
+import Feedback from "./pages/Feedback";
 import Games from "./pages/Games";
 import History from "./pages/History";
 import Home from "./pages/Home";
@@ -35,6 +36,7 @@ function Router() {
       <Route path="/verify-email" component={VerifyEmail} />
       <Route path="/recommend" component={Recommend} />
       <Route path="/chat" component={Chat} />
+      <Route path="/feedback" component={Feedback} />
       <Route path="/together" component={Together} />
       <Route path="/rate" component={Rate} />
       <Route path="/map" component={VibesMap} />

@@ -61,6 +61,7 @@ from .models import (
     RecommendRequest,
     RecommendResponse,
     RegisterRequest,
+    SiteFeedbackRequest,
     TasteProfileResponse,
     TriviaQuestion,
     UserCredentials,
@@ -88,6 +89,7 @@ DEFAULT_RECOMMEND_DAILY_LIMIT = 20  # per user; protects TMDb/NIM quotas. 0 = of
 # labeling de clusters), y un mensaje cuesta bastante menos que una tanda de
 # picks, así que el número no puede ser el mismo. Conservador a propósito.
 DEFAULT_CHAT_DAILY_LIMIT = 30  # per user; 0 = off.
+DEFAULT_SITE_FEEDBACK_DAILY_LIMIT = 5  # per user or IP; 0 = off.
 WATCHLIST_MATCH_CAP = 60  # how many watchlist titles to resolve against TMDb per request
 MOVEMENT_MEMBER_CAP = 40  # títulos por movimiento elegido que se resuelven contra TMDb
 MIN_MOVEMENT_SIZE = 6  # un movimiento con menos títulos que una tanda de picks no se ofrece
@@ -165,6 +167,8 @@ def _chat_daily_limit() -> int:
 # solo). Si algún día hay más de un worker, esto pasa a una tabla o a Redis.
 _CHAT_USAGE: dict[int, tuple[str, int]] = {}
 _CHAT_USAGE_LOCK = threading.Lock()
+_SITE_FEEDBACK_USAGE: dict[str, tuple[str, int]] = {}
+_SITE_FEEDBACK_USAGE_LOCK = threading.Lock()
 
 
 def _enforce_chat_rate_limit(user_id: int, lang: str = "es") -> None:
@@ -179,6 +183,31 @@ def _enforce_chat_rate_limit(user_id: int, lang: str = "es") -> None:
         if count >= limit:
             raise HTTPException(status_code=429, detail=errors.msg("chat_rate_limited", lang))
         _CHAT_USAGE[user_id] = (today, count + 1)
+
+
+def _site_feedback_daily_limit() -> int:
+    raw = os.environ.get("BUTACA_SITE_FEEDBACK_DAILY_LIMIT", "").strip()
+    if not raw:
+        return DEFAULT_SITE_FEEDBACK_DAILY_LIMIT
+    try:
+        return int(raw)
+    except ValueError:
+        return DEFAULT_SITE_FEEDBACK_DAILY_LIMIT
+
+
+def _enforce_site_feedback_rate_limit(request: Request, user_id: int | None) -> None:
+    limit = _site_feedback_daily_limit()
+    if limit <= 0:
+        return
+    key = f"user:{user_id}" if user_id is not None else f"ip:{request.client.host if request.client else 'unknown'}"
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    with _SITE_FEEDBACK_USAGE_LOCK:
+        day, count = _SITE_FEEDBACK_USAGE.get(key, (today, 0))
+        if day != today:
+            count = 0
+        if count >= limit:
+            raise HTTPException(status_code=429, detail="Límite de sugerencias alcanzado. Probá de nuevo mañana.")
+        _SITE_FEEDBACK_USAGE[key] = (today, count + 1)
 
 
 def _enforce_recommend_rate_limit(user_id: int, lang: str = "es") -> None:
@@ -536,6 +565,12 @@ def _require_admin_token(x_admin_token: str | None) -> None:
 def admin_stats(x_admin_token: str | None = Header(default=None)) -> dict:
     _require_admin_token(x_admin_token)
     return db.get_admin_stats()
+
+
+@app.get("/admin/site-feedback")
+def admin_site_feedback(x_admin_token: str | None = Header(default=None)) -> dict:
+    _require_admin_token(x_admin_token)
+    return {"entries": db.get_site_feedback()}
 
 
 # corrido en un thread aparte (ver recompute_vibes): una corrida pesada de
@@ -2496,6 +2531,31 @@ def submit_feedback(
         raise HTTPException(status_code=404, detail=errors.msg("recommendation_not_found", lang))
 
     db.save_feedback(user["id"], payload.recommendation_id, payload.status)
+    return {"status": "ok"}
+
+
+@app.post("/site-feedback", status_code=201)
+def submit_site_feedback(
+    payload: SiteFeedbackRequest,
+    request: Request,
+    user: sqlite3.Row | None = Depends(auth.get_optional_user),
+) -> dict[str, str]:
+    message = payload.message.strip()
+    if not message:
+        raise HTTPException(status_code=422, detail="El mensaje no puede estar vacío.")
+
+    email = payload.email.strip()
+    user_id = user["id"] if user else None
+    _enforce_site_feedback_rate_limit(request, user_id)
+    db.save_site_feedback(user_id, message, email)
+
+    recipient = os.environ.get("BUTACA_FEEDBACK_EMAIL", "").strip()
+    if recipient and mailer.is_configured():
+        try:
+            mailer.send_site_feedback_email(recipient, message, email)
+        except mailer.MailError as exc:
+            logger.warning("Site feedback notification failed to send: %s", exc)
+
     return {"status": "ok"}
 
 

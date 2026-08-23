@@ -1119,6 +1119,10 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
 
 ## Done
 
+- [x] **[site-feedback-2026-08-23] Product feedback** | owner: codex |
+      separate public endpoint, protected admin read endpoint, optional Resend
+      notification, and ES/EN footer form route.
+
 - [x] **[weekly-async-2026-08-03] `/weekly` sacado del camino crítico del LLM**
       | owner: claude | La home se veía vacía unos segundos y "de la nada
       aparecía". **Medido, no estimado:** `/weekly` en frío tardaba **7,3s**

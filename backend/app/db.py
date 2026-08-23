@@ -158,6 +158,14 @@ CREATE TABLE IF NOT EXISTS feedback (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS site_feedback (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER REFERENCES users(id),
+    message TEXT NOT NULL,
+    email TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS taste_profiles (
     user_id INTEGER PRIMARY KEY REFERENCES users(id),
     profile_json TEXT NOT NULL,
@@ -318,6 +326,14 @@ CREATE TABLE IF NOT EXISTS feedback (
     user_id INTEGER NOT NULL REFERENCES users(id),
     recommendation_id INTEGER NOT NULL REFERENCES recommendations_served(id),
     status TEXT NOT NULL CHECK (status IN ('interested', 'not_interested', 'seen')),
+    created_at TEXT NOT NULL DEFAULT ({_PG_NOW})
+);
+
+CREATE TABLE IF NOT EXISTS site_feedback (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id),
+    message TEXT NOT NULL,
+    email TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT ({_PG_NOW})
 );
 
@@ -1199,6 +1215,22 @@ def save_feedback(user_id: int, recommendation_id: int, status: str) -> None:
             "INSERT INTO feedback (user_id, recommendation_id, status) VALUES (?, ?, ?)",
             (user_id, recommendation_id, status),
         )
+
+
+def save_site_feedback(user_id: int | None, message: str, email: str) -> None:
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO site_feedback (user_id, message, email) VALUES (?, ?, ?)",
+            (user_id, message, email),
+        )
+
+
+def get_site_feedback() -> list[dict]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT id, user_id, message, email, created_at FROM site_feedback ORDER BY created_at DESC, id DESC"
+        ).fetchall()
+    return [dict(row) for row in rows]
 
 
 def get_feedback_signals(user_id: int) -> dict:
