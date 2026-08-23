@@ -199,7 +199,7 @@ export function SearchBox() {
           // no hay recommendation_id contra el que registrar feedback — pero
           // puntuar sí anda, /profile/rate no lo necesita
           onFeedback={() => undefined}
-          onRate={async (rating, title, tmdbId) => {
+          onRate={async (rating, title, tmdbId, review) => {
             const finalTitle = title ?? selectedRec.title;
             try {
               const response = await fetch(`${API_BASE_URL}/profile/rate`, {
@@ -209,6 +209,7 @@ export function SearchBox() {
                 title: finalTitle,
                 rating,
                 tmdb_id: title ? tmdbId ?? null : selectedRec.tmdb_id,
+                review,
               }),
               });
               if (!response.ok) throw new Error();

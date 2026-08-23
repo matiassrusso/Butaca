@@ -632,7 +632,7 @@ export default function VibesMap() {
           // sí anda, /profile/rate no lo necesita
           onFeedback={() => undefined}
           readOnly={!token}
-          onRate={async (rating, title, tmdbId) => {
+          onRate={async (rating, title, tmdbId, review) => {
             const finalTitle = title ?? selectedRec.title;
             try {
               const response = await fetch(`${API_BASE_URL}/profile/rate`, {
@@ -642,6 +642,7 @@ export default function VibesMap() {
                   title: finalTitle,
                   rating,
                   tmdb_id: title ? tmdbId ?? null : selectedRec.tmdb_id,
+                  review,
                 }),
               });
               if (!response.ok) throw new Error();
