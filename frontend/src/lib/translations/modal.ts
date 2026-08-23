@@ -62,6 +62,8 @@ export const MODAL: Record<string, Entry> = {
   },
   "modal.rateSaved": { es: "Guardado en tu perfil: {title}", en: "Saved to your profile: {title}" },
   "modal.rateError": { es: "No se pudo guardar el puntaje.", en: "Couldn't save that rating." },
+  "modal.reviewLabel": { es: "Tu reseña (opcional)", en: "Your review (optional)" },
+  "modal.reviewPlaceholder": { es: "¿Qué te pareció?", en: "What did you think?" },
 
   // ─── Póster ───────────────────────────────────────────────────────────
   "modal.viewDetail": { es: "Ver detalle de {title}", en: "See details for {title}" },

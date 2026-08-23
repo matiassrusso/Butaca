@@ -245,6 +245,7 @@ class RateTitleRequest(BaseModel):
     title: str = Field(min_length=1, max_length=300)
     rating: float = Field(ge=0.5, le=5, multiple_of=0.5)
     tmdb_id: int | None = None
+    review: str = ""
 
 
 class WatchlistAddRequest(BaseModel):
@@ -294,6 +295,7 @@ class MovieDetails(BaseModel):
     providers: dict | None = None
     user_rating: float | None = None
     rating_source: Literal["import", "manual", "like", "star", "game"] | None = None
+    user_review: str = ""
 
 
 class GenreWeight(BaseModel):

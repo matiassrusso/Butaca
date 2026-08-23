@@ -42,6 +42,7 @@ export type MovieDetails = {
   } | null;
   user_rating: number | null;
   rating_source: "import" | "manual" | "like" | "star" | "game" | null;
+  user_review: string;
 };
 
 // pedido de Matías: revelar el "why" con efecto máquina de escribir, pero
@@ -288,13 +289,14 @@ export function MovieModal({
   // en el perfil para futuras recomendaciones. title/tmdbId opcionales: el
   // botón "no estoy de acuerdo" reusa este mismo callback para votar
   // similares, que no son rec — sin ellos, puntúa rec.title.
-  onRate: (rating: number, title?: string, tmdbId?: number | null) => Promise<boolean>;
+  onRate: (rating: number, title?: string, tmdbId?: number | null, review?: string) => Promise<boolean>;
   readOnly?: boolean;
 }) {
   const { t, lang } = useLang();
   const [details, setDetails] = useState<MovieDetails | null>(null);
   const [showRateMenu, setShowRateMenu] = useState(false);
   const [ratingDraft, setRatingDraft] = useState<number | null>(null);
+  const [reviewDraft, setReviewDraft] = useState("");
   const [ratingSaving, setRatingSaving] = useState(false);
   const [loadingDetails, setLoadingDetails] = useState(false);
 
@@ -327,7 +329,7 @@ export function MovieModal({
   async function saveRating(rating: number) {
     setRatingDraft(rating);
     setRatingSaving(true);
-    const saved = await onRate(rating);
+    const saved = await onRate(rating, undefined, undefined, reviewDraft);
     setRatingSaving(false);
     if (saved) {
       onFeedback("seen");
@@ -371,6 +373,7 @@ export function MovieModal({
           if (body.rating_source === "import" || body.rating_source === "star") {
             setRatingDraft(body.user_rating);
           }
+          setReviewDraft(body.user_review ?? "");
         }
       })
       .catch(() => undefined)
@@ -590,6 +593,19 @@ export function MovieModal({
                     onChange={saveRating}
                     disabled={ratingSaving || details?.rating_source === "import"}
                   />
+                  <label className="block mt-4">
+                    <span className="block font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-2">
+                      {t("modal.reviewLabel")}
+                    </span>
+                    <textarea
+                      value={reviewDraft}
+                      onChange={(event) => setReviewDraft(event.target.value)}
+                      disabled={ratingSaving || details?.rating_source === "import"}
+                      rows={3}
+                      className="w-full resize-y border-2 border-foreground bg-background p-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-accent disabled:opacity-50"
+                      placeholder={t("modal.reviewPlaceholder")}
+                    />
+                  </label>
                   {details?.rating_source === "import" && (
                     <p className="mt-2 border border-accent/40 bg-accent/10 p-2 font-mono text-[9px] uppercase leading-relaxed text-accent">
                       {t("modal.letterboxdPriority")}

@@ -48,6 +48,7 @@ export const PROFILE: Record<string, Entry> = {
   "profile.statSessions": { es: "Sesiones de picks", en: "Pick sessions" },
   "profile.statWatchlist": { es: "En watchlist", en: "On watchlist" },
   "profile.statFeedback": { es: "Feedback dado", en: "Feedback given" },
+  "profile.ratings": { es: "[Tus ratings y reseñas]", en: "[Your ratings and reviews]" },
 
   // ─── Mapa de afinidad ─────────────────────────────────────────────────
   "profile.affinityMap": { es: "[Mapa de afinidad]", en: "[Affinity map]" },

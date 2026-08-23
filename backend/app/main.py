@@ -1049,6 +1049,7 @@ def taste_profile_endpoint(
 @app.get("/profile/summary")
 def profile_summary(user: sqlite3.Row = Depends(auth.get_current_user)) -> dict:
     summary = db.get_profile_summary(user["id"])
+    summary["items"] = db.get_watched_items(user["id"])
 
     # avatar (feedback #16): un still de la peli mejor puntuada del usuario —
     # personal y determinístico en vez de random. Best-effort: sin TMDb (o si
@@ -2448,6 +2449,7 @@ def movie_details(
         providers=providers,
         user_rating=rated["rating"] if rated else None,
         rating_source=rated["source"] if rated else None,
+        user_review=rated["review"] if rated else "",
     )
 
 
@@ -2512,10 +2514,10 @@ def rate_title(
             "source": "import",
         }
     db.save_rated_items(
-        user["id"], [(payload.title, payload.rating, "", "", "star", payload.tmdb_id)]
+        user["id"], [(payload.title, payload.rating, payload.review, "", "star", payload.tmdb_id)]
     )
     db.invalidate_taste_profile(user["id"])
-    return {"status": "saved", "rating": payload.rating, "source": "star"}
+    return {"status": "saved", "rating": payload.rating, "review": payload.review, "source": "star"}
 
 
 @app.post("/chat", response_model=ChatResponse)

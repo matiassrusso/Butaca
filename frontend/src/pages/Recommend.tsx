@@ -640,7 +640,7 @@ export default function Recommend() {
   // en el perfil real (rated_items), no solo como feedback de esta sesión.
   // title/tmdbId opcionales: el botón "no estoy de acuerdo" del modal reusa
   // esto para votar películas similares, no rec en sí.
-  async function rateTitle(rec: Recommendation, rating: number, title?: string, tmdbId?: number | null) {
+  async function rateTitle(rec: Recommendation, rating: number, title?: string, tmdbId?: number | null, review?: string) {
     if (!token) return false;
     const finalTitle = title ?? rec.title;
     try {
@@ -651,6 +651,7 @@ export default function Recommend() {
           title: finalTitle,
           rating,
           tmdb_id: title ? tmdbId ?? null : rec.tmdb_id,
+          review,
         }),
       });
       if (!response.ok) throw new Error();
@@ -1175,7 +1176,7 @@ export default function Recommend() {
             seenWhys={seenWhysRef}
             onClose={() => setSelectedRec(null)}
             onFeedback={(status) => submitFeedback(selectedRec.id, status)}
-            onRate={(rating, title, tmdbId) => rateTitle(selectedRec, rating, title, tmdbId)}
+            onRate={(rating, title, tmdbId, review) => rateTitle(selectedRec, rating, title, tmdbId, review)}
             readOnly={result?.ephemeral}
           />
         )}

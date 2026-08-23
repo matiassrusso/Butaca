@@ -106,7 +106,7 @@ export default function History() {
     }
   }
 
-  async function rateTitle(rec: Recommendation, rating: number, title?: string, tmdbId?: number | null) {
+  async function rateTitle(rec: Recommendation, rating: number, title?: string, tmdbId?: number | null, review?: string) {
     if (!token) return false;
     const finalTitle = title ?? rec.title;
     try {
@@ -117,6 +117,7 @@ export default function History() {
           title: finalTitle,
           rating,
           tmdb_id: title ? tmdbId ?? null : rec.tmdb_id,
+          review,
         }),
       });
       if (!response.ok) throw new Error();
@@ -419,7 +420,7 @@ export default function History() {
           seenWhys={seenWhysRef}
           onClose={() => setSelectedRec(null)}
           onFeedback={(status) => submitFeedback(selectedRec.id, status)}
-          onRate={(rating, title, tmdbId) => rateTitle(selectedRec, rating, title, tmdbId)}
+          onRate={(rating, title, tmdbId, review) => rateTitle(selectedRec, rating, title, tmdbId, review)}
         />
       )}
     </PageTransition>

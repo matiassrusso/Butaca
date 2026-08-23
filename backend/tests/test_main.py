@@ -517,7 +517,7 @@ def test_movie_details_returns_saved_butaca_rating(monkeypatch) -> None:
     client.post(
         "/profile/rate",
         headers=headers,
-        json={"title": "Rocky", "rating": 4.0, "tmdb_id": 1366},
+        json={"title": "Rocky", "rating": 4.0, "tmdb_id": 1366, "review": "Gripping."},
     )
 
     response = client.get("/movies/1366/details?title=Rocky", headers=headers)
@@ -525,6 +525,7 @@ def test_movie_details_returns_saved_butaca_rating(monkeypatch) -> None:
     assert response.status_code == 200
     assert response.json()["user_rating"] == 4.0
     assert response.json()["rating_source"] == "star"
+    assert response.json()["user_review"] == "Gripping."
 
     client.post(
         "/profile/rate",
@@ -1277,6 +1278,35 @@ def test_watched_history_distinguishes_precise_sources() -> None:
     by_title = {item["title"]: item["source"] for item in items}
     assert by_title["Whiplash"] == "import"
     assert by_title["Manual Movie"] == "star"
+
+
+def test_profile_rate_saves_review_without_overwriting_letterboxd_review() -> None:
+    headers = _auth_headers("reviewrate")
+
+    saved = client.post(
+        "/profile/rate",
+        headers=headers,
+        json={"title": "Butaca Movie", "rating": 4.5, "review": "Me quedó dando vueltas."},
+    )
+
+    assert saved.status_code == 201
+    assert saved.json()["review"] == "Me quedó dando vueltas."
+    watched = client.get("/history/watched", headers=headers).json()["items"]
+    assert next(item for item in watched if item["title"] == "Butaca Movie")["review"] == "Me quedó dando vueltas."
+
+    _post_zip(headers, ratings_csv="Name,Rating,Review\nImported Movie,5,Original Letterboxd review")
+    preserved = client.post(
+        "/profile/rate",
+        headers=headers,
+        json={"title": "Imported Movie", "rating": 1, "review": "Attempted overwrite"},
+    )
+
+    assert preserved.status_code == 201
+    assert preserved.json()["status"] == "preserved"
+    watched = client.get("/history/watched", headers=headers).json()["items"]
+    imported = next(item for item in watched if item["title"] == "Imported Movie")
+    assert imported["source"] == "import"
+    assert imported["review"] == "Original Letterboxd review"
 
 
 def test_watched_history_returns_date_from_diary() -> None:
@@ -2461,6 +2491,7 @@ def test_profile_summary_counts_activity() -> None:
     # top_title = la mejor puntuada, no la última importada
     assert body["top_title"] == "Whiplash"
     assert body["top_rating"] == 4.5
+    assert next(item for item in body["items"] if item["title"] == "Whiplash")["review"] == "psychological and intense"
 
 
 # ─── Recomendaciones de la semana (pedido de Matías, 2026-07-30) ────────────
