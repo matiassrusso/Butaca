@@ -1623,34 +1623,32 @@ def _finish_recommend(
         except llm_client.LlmError as exc:
             logger.warning("LLM refine failed, falling back to heuristic why: %s", exc)
 
-    # el piso de MIN_MATCH_SCORE es un invariante de /recommend (a diferencia
-    # de /weekly): el heurístico ya lo garantiza, pero refine_recommendations
-    # solo descarta <=50 (dejaba pasar 51-59) y predict_fit -- el camino de
-    # filled_with_old -- no tiene piso, así que el LLM podía devolver 35-40%
-    # sin que nada lo frenara (reportado por Matías, 2026-08-05: picks
-    # mezclados con 82%/78% junto a 35%/40%).
-    strong = [rec for rec in response.recommendations if rec.match_score >= MIN_MATCH_SCORE]
-
-    # El VETO del LLM se aplica arriba (con SU score decide qué se cae); el
-    # NÚMERO que se muestra vuelve a ser el del motor.
+    # El match_score que se MUESTRA es el del MOTOR, no el del LLM, y se restaura
+    # ACÁ, ANTES del piso, a propósito.
     #
-    # Por qué (Matías, 2026-08-07, comparando dos tandas seguidas): el LLM
-    # puntúa de nuevo en cada llamada, así que el mismo título podía dar 71%
+    # Por qué el del motor (Matías, 2026-08-07, comparando dos tandas seguidas):
+    # el LLM puntúa de nuevo en cada llamada, así que el mismo título daba 71%
     # en una tanda y 78% en la siguiente sin que cambiara nada. Dos tandas son
-    # dos opiniones independientes: sus números no están en la misma escala y
-    # compararlos no significa nada. El del motor sí es estable y comparable.
+    # dos opiniones independientes: sus números no están en la misma escala. El
+    # del motor es estable y comparable. Acotado a /recommend: /weekly y el
+    # buscador siguen mostrando el número del LLM (set fijo y cacheado, no hay
+    # dos llamadas que comparar; ahí el LLM estima donde el motor no tiene
+    # evidencia, match_score=50 = "Match desconocido").
     #
-    # Acotado a /recommend a propósito. /weekly y el veredicto del buscador
-    # siguen mostrando el número del LLM: ahí el set es fijo y la respuesta se
-    # cachea, así que no hay dos llamadas que comparar, y encima el LLM aporta
-    # una estimación donde el motor no tiene evidencia (match_score=50, que el
-    # frontend muestra como "Match desconocido").
-    strong = [
+    # Por qué ANTES del piso (Matías, 2026-08-23: 4/6 con badge heurístico):
+    # el piso de MIN_MATCH_SCORE es un invariante de /recommend, pero filtrar
+    # por el score TRANSITORIO del LLM tiraba picks que el LLM SÍ había explicado
+    # y puntuó 51-59, que volvían como relleno heurístico perdiendo el "why" —
+    # y encima ese número nunca se muestra. El motor ya garantiza >=60 para todo
+    # lo que eligió, así que aplicar el piso sobre el score real mantiene el
+    # invariante (nada se muestra <60) sin descartar explicaciones válidas.
+    restored = [
         rec.model_copy(update={"match_score": engine_scores[key]})
         if (key := rec.title.casefold()) in engine_scores
         else rec
-        for rec in strong
+        for rec in response.recommendations
     ]
+    strong = [rec for rec in restored if rec.match_score >= MIN_MATCH_SCORE]
 
     # ...y REPONER lo que se descartó. Filtrar sin reponer era la mitad del
     # trabajo: el LLM le pone su propio match_score a cada pick que elige, así

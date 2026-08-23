@@ -758,15 +758,8 @@ def test_recommend_zip_filled_with_old_still_respects_match_floor(monkeypatch) -
     assert all(item["match_score"] >= 60 for item in second)
 
 
-def test_recommend_refills_when_the_match_floor_drops_llm_picks(monkeypatch) -> None:
-    # bug reportado por Matías con captura (2026-08-07): la tanda salió con 4
-    # picks (65/70/75/85) en vez de 6. El LLM le pone su propio match_score a
-    # cada pick que elige, así que títulos que el heurístico había puntuado
-    # >=60 volvían en 55 y el filtro del piso los borraba SIN reponer nada.
-    # Los candidatos del pool heurístico que el LLM no eligió siguen estando
-    # por encima del piso, así que la tanda tiene que volver a 6.
-    monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
-    broad_tags_csv = (
+def _broad_tags_csv() -> str:
+    return (
         "Name,Rating,Review,Tags\n"
         'An Old Favorite,5,,"dialogue-heavy,romantic,intimate,walking,'
         "psychological,dark,stylized,thriller,quiet,architectural,"
@@ -774,11 +767,20 @@ def test_recommend_refills_when_the_match_floor_drops_llm_picks(monkeypatch) -> 
         'light,indie,restless,character,existential,sad,prestige,mystery,'
         'funny,sharp,messy"'
     )
-    headers = _auth_headers("floorrefill")
+
+
+def test_recommend_keeps_llm_why_when_it_scores_a_pick_below_the_floor(monkeypatch) -> None:
+    # bug reportado por Matías (2026-08-23): 4/6 con badge heurístico. El LLM SÍ
+    # explica el pick pero le pone su propio match_score 51-59; el piso de 60 se
+    # aplicaba sobre ESE score transitorio y descartaba el pick, que volvía como
+    # relleno heurístico PERDIENDO el "why" — y encima ese número nunca se
+    # muestra (el que se ve es el del motor, >=60). Ahora el piso se aplica sobre
+    # el score del motor, así que el why del LLM se conserva.
+    monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
+    headers = _auth_headers("floorwhy")
 
     def fake_refine(ratings, mood, heuristic, lang="es"):
-        # el LLM elige 6 y le baja el puntaje a 2 al hueco 51-59 (el que el
-        # filtro descarta), igual que en el caso real
+        # el LLM explica los 6 pero le pone 55 (hueco 51-59) a 2 de ellos
         picks = [
             rec.model_copy(update={"match_score": 55 if i < 2 else 80, "refined": True})
             for i, rec in enumerate(heuristic.recommendations[:6])
@@ -786,14 +788,35 @@ def test_recommend_refills_when_the_match_floor_drops_llm_picks(monkeypatch) -> 
         return heuristic.model_copy(update={"recommendations": picks})
 
     monkeypatch.setattr("backend.app.main.llm_client.refine_recommendations", fake_refine)
-    body = _post_zip(headers, zip_files={"reviews.csv": broad_tags_csv}).json()
-    picks = body["recommendations"]
+    picks = _post_zip(headers, zip_files={"reviews.csv": _broad_tags_csv()}).json()["recommendations"]
 
-    # sin el refill esto daba 4
     assert len(picks) == 6
-    # y sin bajar la vara: el piso se sigue respetando
+    # el número que se muestra es el del motor, siempre por encima del piso
     assert all(item["match_score"] >= 60 for item in picks)
-    # los repuestos vienen del heurístico, así que se distinguen en pantalla
+    # y NINGUNO cae al heurístico: el why del LLM se conserva en los 6
+    assert all(item["refined"] for item in picks)
+
+
+def test_recommend_refills_with_heuristic_when_the_llm_returns_fewer_than_six(monkeypatch) -> None:
+    # cuando el LLM genuinamente devuelve menos de 6 picks, la tanda se repone
+    # con candidatos heurísticos (por encima del piso) para no mostrar menos de
+    # 6. Esos repuestos no tienen why del LLM, así que salen refined=False.
+    monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
+    headers = _auth_headers("floorrefill")
+
+    def fake_refine(ratings, mood, heuristic, lang="es"):
+        picks = [
+            rec.model_copy(update={"match_score": 80, "refined": True})
+            for rec in heuristic.recommendations[:3]
+        ]
+        return heuristic.model_copy(update={"recommendations": picks})
+
+    monkeypatch.setattr("backend.app.main.llm_client.refine_recommendations", fake_refine)
+    picks = _post_zip(headers, zip_files={"reviews.csv": _broad_tags_csv()}).json()["recommendations"]
+
+    assert len(picks) == 6
+    assert all(item["match_score"] >= 60 for item in picks)
+    # 3 con voz del LLM + 3 repuestos heurísticos
     assert any(not item["refined"] for item in picks)
 
 
