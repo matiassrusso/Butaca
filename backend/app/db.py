@@ -199,6 +199,8 @@ CREATE TABLE IF NOT EXISTS title_clusters (
     title TEXT NOT NULL DEFAULT '',
     year INTEGER NOT NULL DEFAULT 0,
     poster_path TEXT,
+    x REAL NOT NULL DEFAULT 0.0,
+    y REAL NOT NULL DEFAULT 0.0,
     computed_at TEXT NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (tmdb_id, kind)
 );
@@ -366,6 +368,8 @@ CREATE TABLE IF NOT EXISTS title_clusters (
     title TEXT NOT NULL DEFAULT '',
     year INTEGER NOT NULL DEFAULT 0,
     poster_path TEXT,
+    x REAL NOT NULL DEFAULT 0.0,
+    y REAL NOT NULL DEFAULT 0.0,
     computed_at TEXT NOT NULL DEFAULT ({_PG_NOW}),
     PRIMARY KEY (tmdb_id, kind)
 );
@@ -483,6 +487,10 @@ def _run_migrations(conn) -> None:
         conn.execute("ALTER TABLE title_clusters ADD COLUMN title TEXT NOT NULL DEFAULT ''")
         conn.execute("ALTER TABLE title_clusters ADD COLUMN year INTEGER NOT NULL DEFAULT 0")
         conn.execute("ALTER TABLE title_clusters ADD COLUMN poster_path TEXT")
+    if not _has_column(conn, "title_clusters", "x"):
+        conn.execute("ALTER TABLE title_clusters ADD COLUMN x REAL NOT NULL DEFAULT 0.0")
+    if not _has_column(conn, "title_clusters", "y"):
+        conn.execute("ALTER TABLE title_clusters ADD COLUMN y REAL NOT NULL DEFAULT 0.0")
     if not _has_column(conn, "users", "allow_together"):
         # Toggle de privacidad para "¿qué vemos juntos?" (pedido de Matías,
         # 2026-08-12): tu usuario de Butaca solo se puede usar como amigo en
@@ -1399,13 +1407,14 @@ def save_vibe_clusters(labels: list[dict], assignments: list[dict]) -> None:
             conn.executemany(
                 """
                 INSERT INTO title_clusters
-                    (tmdb_id, kind, l1_cluster_id, l2_cluster_id, title, year, poster_path)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                    (tmdb_id, kind, l1_cluster_id, l2_cluster_id, title, year, poster_path, x, y)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
                         row["tmdb_id"], row["kind"], row["l1_cluster_id"], row["l2_cluster_id"],
                         row.get("title") or "", row.get("year") or 0, row.get("poster_path"),
+                        row.get("x", 0.0), row.get("y", 0.0),
                     )
                     for row in assignments
                 ],
@@ -1474,15 +1483,12 @@ def get_vibe_map_rows(model: str) -> list[dict]:
         rows = conn.execute(
             """
             SELECT c.tmdb_id, c.kind, c.title, c.year, c.poster_path,
-                   c.l1_cluster_id, c.l2_cluster_id, e.vector_json
+                   c.l1_cluster_id, c.l2_cluster_id, c.x, c.y
             FROM title_clusters c
-            JOIN title_embeddings e
-              ON e.tmdb_id = c.tmdb_id AND e.kind = c.kind AND e.model = ?
             ORDER BY c.l1_cluster_id, c.l2_cluster_id, c.tmdb_id
-            """,
-            (model,),
+            """
         ).fetchall()
-    return [{**dict(row), "vector": json.loads(row["vector_json"])} for row in rows]
+    return [dict(row) for row in rows]
 
 
 def get_cluster_keys_without_title() -> list[tuple[int, str]]:

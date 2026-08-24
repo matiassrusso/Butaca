@@ -3509,6 +3509,7 @@ def _seed_vibe_map(with_titles: bool = True) -> None:
             "l1_cluster_id": 1, "l2_cluster_id": 1 if index < 3 else 2,
             "title": f"Peli {index}" if with_titles else "",
             "year": 1990 + index, "poster_path": f"http://img/{index}.jpg",
+            "x": index / 10, "y": -index / 10,
         }
         for index in range(6)
     ]
@@ -3536,7 +3537,7 @@ def test_vibes_map_is_public_and_labels_every_point_with_its_movement() -> None:
     assert {movement["label"] for movement in body["movements"]} == {"Neo-noir", "Cine negro francés"}
     point = body["points"][0]
     assert point["title"].startswith("Peli") and point["poster_path"]
-    assert -1.01 <= point["x"] <= 1.01 and -1.01 <= point["y"] <= 1.01
+    assert (point["x"], point["y"]) == (0.0, 0.0)
     # sin sesión no hay nada que resaltar
     assert all(not p["rated"] for p in body["points"])
 
@@ -3565,21 +3566,14 @@ def test_vibes_map_skips_rows_that_never_got_a_title() -> None:
     assert client.get("/vibes/map").json()["points"] == []
 
 
-def test_vibes_map_projects_once_per_process_not_once_per_visit(monkeypatch) -> None:
-    """1023 vectores de 2048 dimensiones por pageview es CPU tirada: la
-    proyección solo cambia cuando corre el recompute."""
+def test_vibes_map_uses_precomputed_coordinates() -> None:
     _seed_vibe_map()
-    calls: list[int] = []
-    real = vibes_clustering.project_2d
-    monkeypatch.setattr(
-        "backend.app.main.vibes_clustering.project_2d",
-        lambda vectors, l1, l2: (calls.append(1), real(vectors, l1, l2))[1],
-    )
 
-    client.get("/vibes/map")
-    client.get("/vibes/map")
+    points = client.get("/vibes/map").json()["points"]
 
-    assert len(calls) == 1
+    assert {(point["x"], point["y"]) for point in points} == {
+        (index / 10, -index / 10) for index in range(6)
+    }
 
 
 def test_backfill_fills_the_titles_of_rows_clustered_before_the_map_existed(monkeypatch) -> None:

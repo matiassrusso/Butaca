@@ -8,11 +8,12 @@ export const MAP: Record<string, Entry> = {
   "map.nav": { es: "Mapa", en: "Map" },
   "map.navAria": { es: "Ver el mapa de movimientos", en: "See the map of movements" },
   "map.intro": {
-    es: "Cada título del catálogo se convierte en un vector de 2.048 dimensiones a partir de su sinopsis, sus keywords, su reparto y su dirección. Después un algoritmo de comunidades (Leiden) los agrupa en movimientos que nadie escribió a mano: salen de los datos. Esto es ese espacio, aplastado a dos dimensiones para poder mirarlo.",
-    en: "Every title in the catalog becomes a 2,048-dimension vector built from its synopsis, keywords, cast and director. Then a community algorithm (Leiden) groups them into movements nobody wrote by hand: they come out of the data. This is that space, flattened to two dimensions so you can look at it.",
+    es: "El mapa empieza con los géneros reales de TMDb. Cerca, los embeddings separan movimientos más finos que emergen del catálogo: un título puede vivir justo entre sus géneros, como los superhéroes entre acción y ciencia ficción.",
+    en: "The map starts with TMDb's real genres. Up close, embeddings separate finer movements that emerge from the catalog: a title can live between its genres, like superheroes between action and science fiction.",
   },
   "map.statTitles": { es: "títulos", en: "titles" },
   "map.statMovements": { es: "movimientos", en: "movements" },
+  "map.statGenres": { es: "géneros", en: "genres" },
   "map.statDimensions": { es: "dimensiones por título", en: "dimensions per title" },
   "map.loading": { es: "Proyectando el universo...", en: "Projecting the universe..." },
   "map.empty": {
@@ -20,10 +21,10 @@ export const MAP: Record<string, Entry> = {
     en: "Movements haven't been computed in this environment yet. The map shows up once the clustering runs.",
   },
   "map.error": { es: "No pude cargar el mapa.", en: "Couldn't load the map." },
-  "map.legendTitle": { es: "Regiones", en: "Regions" },
+  "map.legendTitle": { es: "Géneros", en: "Genres" },
   "map.legendHint": {
-    es: "Tocá una región para aislarla y ver los movimientos que tiene adentro.",
-    en: "Tap a region to isolate it and see the movements inside.",
+    es: "Tocá un género para aislarlo; acercate para revelar sus movimientos y títulos.",
+    en: "Tap a genre to isolate it; zoom in to reveal its movements and titles.",
   },
   "map.legendClear": { es: "Ver todo", en: "Show everything" },
   "map.yours": { es: "Las que ya viste", en: "Ones you've seen" },

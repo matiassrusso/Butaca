@@ -53,7 +53,7 @@ def test_leiden_recovers_three_separated_synthetic_groups() -> None:
 
     graph = vibes_clustering._build_knn_graph(vectors, k=1)
 
-    assert vibes_clustering._cluster_l1(graph) == [[0, 1], [2, 3], [4, 5]]
+    assert vibes_clustering._partition(graph, resolution=0.8) == [[0, 1], [2, 3], [4, 5]]
 
 
 def test_seed_titles_interleaves_discover_biases(monkeypatch) -> None:
@@ -142,8 +142,8 @@ def test_seed_titles_gives_series_more_top_rated_depth(monkeypatch) -> None:
 def test_leiden_cluster_ids_are_deterministic_and_empty_groups_are_dropped() -> None:
     vectors = [[1, 0], [0.99, 0.01], [0, 1], [0.01, 0.99]]
 
-    first = vibes_clustering._cluster_l1(vibes_clustering._build_knn_graph(vectors, k=1))
-    second = vibes_clustering._cluster_l1(vibes_clustering._build_knn_graph(vectors, k=1))
+    first = vibes_clustering._partition(vibes_clustering._build_knn_graph(vectors, k=1), resolution=0.8)
+    second = vibes_clustering._partition(vibes_clustering._build_knn_graph(vectors, k=1), resolution=0.8)
 
     assert first == second
     assert vibes_clustering._compact_clusters([[], [3, 2], [], [1]]) == [[1], [2, 3]]
@@ -370,47 +370,21 @@ def test_recompute_keeps_completed_embedding_batches_when_a_later_one_fails(monk
     assert saved == [[(0, "movie", [1.0]), (1, "movie", [1.0])]]
 
 
-def _grid_cluster(center: tuple[float, float, float], count: int) -> list[list[float]]:
-    """Vectores apiñados alrededor de un centro, en 3 dimensiones."""
-    return [[center[0] + i * 0.001, center[1] - i * 0.001, center[2]] for i in range(count)]
+def test_genre_anchor_layout_places_multi_genre_titles_between_anchors() -> None:
+    vectors = [[10, 0], [9.9, 0], [-10, 0], [-9.9, 0], [0, 0]]
+    positions = vibes_clustering.layout_by_genre_anchors(
+        vectors, [[28], [28], [878], [878], [28, 878]]
+    )
+    action = tuple(sum(positions[index][axis] for index in (0, 1)) / 2 for axis in (0, 1))
+    science_fiction = tuple(sum(positions[index][axis] for index in (2, 3)) / 2 for axis in (0, 1))
+    between = positions[4]
 
-
-def test_project_2d_keeps_each_title_next_to_its_own_movement() -> None:
-    """El invariante del mapa: un título tiene que caer más cerca del
-    centroide de SU cluster L2 que del de cualquier otro. PCA directo sobre
-    los embeddings reales lo cumple solo para el 22,9% de los puntos (medido
-    sobre los 1023 de la base) -- por eso el layout se ancla a los clusters."""
-    vectors = _grid_cluster((10, 0, 0), 5) + _grid_cluster((-10, 0, 0), 5) + _grid_cluster((0, 10, 5), 5)
-    l1 = [1] * 5 + [1] * 5 + [2] * 5
-    l2 = [1] * 5 + [2] * 5 + [3] * 5
-
-    points = vibes_clustering.project_2d(vectors, l1, l2)
-
-    assert len(points) == len(vectors)
-    centroids = {
-        movement: (
-            sum(p[0] for p, m in zip(points, l2) if m == movement) / 5,
-            sum(p[1] for p, m in zip(points, l2) if m == movement) / 5,
-        )
-        for movement in (1, 2, 3)
-    }
-    for point, movement in zip(points, l2):
-        distances = {
-            other: (point[0] - c[0]) ** 2 + (point[1] - c[1]) ** 2 for other, c in centroids.items()
-        }
-        assert min(distances, key=distances.get) == movement
-
-
-def test_project_2d_survives_degenerate_clusters() -> None:
-    """Un cluster de 1 o 2 títulos deja la SVD sin dos componentes: tiene que
-    devolver coordenadas igual, no reventar armando el layout."""
-    assert vibes_clustering.project_2d([], [], []) == []
-    assert vibes_clustering.project_2d([[1.0, 2.0]], [1], [1]) == [(0.0, 0.0)]
-
-    points = vibes_clustering.project_2d([[1.0, 0.0], [0.0, 1.0], [0.5, 0.5]], [1, 1, 2], [1, 2, 3])
-
-    assert len(points) == 3
-    assert all(isinstance(x, float) and isinstance(y, float) for x, y in points)
+    assert action != science_fiction
+    midpoint = tuple((action[axis] + science_fiction[axis]) / 2 for axis in (0, 1))
+    assert sum((between[axis] - midpoint[axis]) ** 2 for axis in (0, 1)) < min(
+        sum((between[axis] - anchor[axis]) ** 2 for axis in (0, 1))
+        for anchor in (action, science_fiction)
+    )
 
 
 def test_recompute_persists_the_title_of_every_clustered_id(monkeypatch) -> None:
