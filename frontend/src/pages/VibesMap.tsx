@@ -46,6 +46,12 @@ const GROUP_COLORS = [
 const VIEW_WIDTH = 1000;
 const VIEW_HEIGHT = 680;
 const PADDING = 44;
+const ZOOM_MOVEMENTS = 1.35;
+const ZOOM_TITLES = 2.4;
+
+function fade(value: number, start: number, end: number) {
+  return Math.max(0, Math.min(1, (value - start) / (end - start)));
+}
 
 export default function VibesMap() {
   const { token, isAuthenticated } = useAuth();
@@ -178,12 +184,12 @@ export default function VibesMap() {
     });
   }, [placed, focus]);
 
-  // etiquetas dibujadas encima del mapa: las regiones (L1) siempre, y los
-  // movimientos (L2) solo de la región enfocada — los 69 juntos son ilegibles.
-  const captions = useMemo(() => {
+  // Las etiquetas de género se separan entre sí: son pocas y definen la vista
+  // alejada. Los movimientos se revelan al hacer zoom, sin saltos bruscos.
+  const genreCaptions = useMemo(() => {
     if (placed.length === 0) return [];
-    const level = focus == null ? "group_id" : "movement_id";
-    const source = focus == null ? data?.groups : data?.movements;
+    const level = "group_id";
+    const source = data?.groups;
     const centers = new Map<number, { x: number; y: number; n: number }>();
     for (const { point, cx, cy } of placed) {
       if (focus != null && point.group_id !== focus) continue;
@@ -192,10 +198,8 @@ export default function VibesMap() {
       centers.set(id, { x: current.x + cx, y: current.y + cy, n: current.n + 1 });
     }
     const laid = [...centers.entries()]
-      // los movimientos chicos de una región son muchos y quedan encimados:
-      // se rotulan los más grandes, el resto se lee pasando el mouse
       .sort((a, b) => b[1].n - a[1].n)
-      .slice(0, focus == null ? centers.size : 8)
+      .slice(0, centers.size)
       .map(([id, { x, y, n }]) => ({
         id,
         x: x / n,
@@ -240,6 +244,29 @@ export default function VibesMap() {
     }
     return laid;
   }, [placed, focus, data, zoom]);
+
+  const movementCaptions = useMemo(() => {
+    if (!data) return [];
+    const centers = new Map<number, { x: number; y: number; n: number }>();
+    for (const { point, cx, cy } of placed) {
+      if (focus != null && point.group_id !== focus) continue;
+      const current = centers.get(point.movement_id) ?? { x: 0, y: 0, n: 0 };
+      centers.set(point.movement_id, { x: current.x + cx, y: current.y + cy, n: current.n + 1 });
+    }
+    return [...centers.entries()]
+      .sort((a, b) => b[1].n - a[1].n)
+      .map(([id, center]) => ({
+        id,
+        x: center.x / center.n,
+        y: center.y / center.n,
+        label: data.movements.find((movement) => movement.id === id)?.label ?? "",
+      }))
+      .filter((caption) => caption.label);
+  }, [data, placed, focus]);
+
+  const movementOpacity = fade(zoom, ZOOM_MOVEMENTS, ZOOM_TITLES);
+  const titleOpacity = fade(zoom, ZOOM_TITLES, ZOOM_TITLES + 1);
+  const genreOpacity = 1 - fade(zoom, ZOOM_MOVEMENTS, ZOOM_TITLES);
 
   // zoom con rueda: listener nativo non-passive para poder frenar el scroll de
   // la página mientras se hace zoom sobre el mapa (React lo pone passive).
@@ -315,7 +342,7 @@ export default function VibesMap() {
               {[
                 [data.points.length.toLocaleString(), t("map.statTitles")],
                 [String(data.movements.length), t("map.statMovements")],
-                ["2.048", t("map.statDimensions")],
+                [String(data.groups.length), t("map.statGenres")],
               ].map(([value, label]) => (
                 <div key={label}>
                   <div className="text-3xl font-black">{value}</div>
@@ -411,12 +438,14 @@ export default function VibesMap() {
                   const hit = q !== "" && matchQuery && matchKind;
                   const color = GROUP_COLORS[(point.group_id - 1) % GROUP_COLORS.length];
                   const r = (point.rated ? 7 : hit ? 6 : 4.5) / zoom;
+                  const visibility = Math.max(titleOpacity, hit ? 0.55 : 0);
                   const shared = {
                     fill: point.rated ? "none" : hit ? "var(--accent)" : color,
                     stroke: point.rated ? color : hit ? "var(--accent)" : "none",
                     strokeWidth: (point.rated ? 2.5 : hit ? 2 : 0) / zoom,
-                    opacity: off ? 0.06 : point.rated || hit ? 1 : 0.75,
+                    opacity: visibility * (off ? 0.06 : point.rated || hit ? 1 : 0.75),
                     className: "cursor-pointer transition-[opacity] duration-200",
+                    style: { pointerEvents: visibility > 0.05 ? "auto" : "none" },
                     onMouseEnter: () => setHovered(point),
                     onMouseLeave: () => setHovered(null),
                     onClick: () => {
@@ -443,7 +472,7 @@ export default function VibesMap() {
                   );
                 })}
 
-                {captions.map((caption) => (
+                {genreCaptions.map((caption) => (
                   <text
                     key={caption.id}
                     x={caption.x}
@@ -452,12 +481,35 @@ export default function VibesMap() {
                     className="pointer-events-none uppercase"
                     style={{
                       fontFamily: "var(--font-mono)",
-                      fontSize: 15 / zoom,
+                      fontSize: (18 - 6 * (1 - genreOpacity)) / zoom,
                       letterSpacing: "0.12em",
                       fill: "var(--foreground)",
+                      opacity: genreOpacity,
                       paintOrder: "stroke",
                       stroke: "var(--background)",
                       strokeWidth: 4 / zoom,
+                      strokeLinejoin: "round",
+                    }}
+                  >
+                    {caption.label}
+                  </text>
+                ))}
+                {movementCaptions.map((caption) => (
+                  <text
+                    key={`movement-${caption.id}`}
+                    x={caption.x}
+                    y={caption.y}
+                    textAnchor="middle"
+                    className="pointer-events-none uppercase"
+                    style={{
+                      fontFamily: "var(--font-mono)",
+                      fontSize: 11 / zoom,
+                      letterSpacing: "0.08em",
+                      fill: "var(--foreground)",
+                      opacity: movementOpacity,
+                      paintOrder: "stroke",
+                      stroke: "var(--background)",
+                      strokeWidth: 3 / zoom,
                       strokeLinejoin: "round",
                     }}
                   >

@@ -1119,6 +1119,14 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
 
 ## Done
 
+- [x] **[map-v2] Rediseño del mapa de vibras** | owner: codex | branch:
+      `feat/map-v2` | géneros TMDb como L1, Leiden global como L2, coordenadas
+      persistidas por anclas semánticas y zoom progresivo (géneros → movimientos
+      → títulos) | archivos: `backend/app/{tmdb_client,db,vibes_clustering,main,models}.py`,
+      `backend/tests/{test_tmdb_client,test_vibes_clustering,test_main}.py`,
+      `frontend/src/{pages/VibesMap.tsx,lib/translations/map.ts}` |
+      verificación: 509 tests backend + `npm run build`.
+
 - [x] **[site-feedback-2026-08-23] Product feedback** | owner: codex |
       separate public endpoint, protected admin read endpoint, optional Resend
       notification, and ES/EN footer form route.

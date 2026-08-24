@@ -54,6 +54,12 @@ _SEED_DECADES = (1950, 1960, 1970, 1980, 1990, 2000, 2010, 2020)
 _SEED_DISCOVER_PAGES = 15
 _SEED_MOVIE_DECADE_PAGES = 2
 _SEED_SERIES_DECADE_PAGES = 4
+OTHER_GENRE_ID = 0
+OTHER_GENRE_LABEL = "Otros"
+# ponytail: estos pesos son el único ajuste visual del layout; subir el offset
+# separa más los movimientos, bajarlo hace todavía más explícita la taxonomía.
+GENRE_ANCHOR_WEIGHT = 0.82
+EMBEDDING_OFFSET_WEIGHT = 0.18
 
 
 class VibeError(Exception):
@@ -258,10 +264,6 @@ def _partition(graph: igraph.Graph, resolution: float) -> list[list[int]]:
     return _compact_clusters([list(group) for group in partition])
 
 
-def _cluster_l1(graph: igraph.Graph) -> list[list[int]]:
-    return _partition(graph, resolution=0.8)
-
-
 def _cluster_l2(graph: igraph.Graph) -> list[list[int]]:
     return _partition(graph, resolution=1.6)
 
@@ -361,57 +363,43 @@ def _svd_2d(matrix: np.ndarray) -> np.ndarray:
     return (projected / scale if scale else projected).astype(np.float32)
 
 
-# radios del layout jerárquico: cada nivel entra adentro del anterior. Están
-# elegidos para que un movimiento se lea como una isla y no se pise con la de
-# al lado; si se agrandan, los clusters empiezan a solaparse.
-_L2_RADIUS = 0.28
-_MEMBER_RADIUS = 0.05
+def _genre_ids(item: dict) -> list[int]:
+    name_map = (
+        tmdb_client.GENRE_NAME_ID_MAP
+        if item.get("kind") == "movie"
+        else tmdb_client.TV_GENRE_NAME_ID_MAP
+    )
+    ids = [name_map[name] for name in item.get("genres", []) if name in name_map]
+    return list(dict.fromkeys(ids)) or [OTHER_GENRE_ID]
 
 
-def project_2d(vectors: list[list[float]], l1_ids: list[int], l2_ids: list[int]) -> list[tuple[float, float]]:
-    """Layout 2D anclado a los clusters que ya encontró Leiden, en vez de PCA
-    directo sobre los vectores.
-
-    Medido sobre los 1023 embeddings reales (2048 dimensiones): PCA explica
-    5,90% + 3,19% = 9,09% de la varianza en dos componentes, y en ese plano
-    solo el 22,9% de los puntos cae más cerca del centroide de SU cluster L2
-    (17,3% tiene un vecino inmediato del mismo cluster) — o sea, una mancha
-    donde los movimientos no se distinguen. Este layout proyecta primero los
-    7 centroides L1 (que sí capturan 67,1% de su varianza en 2D), adentro de
-    cada uno los centroides L2, y adentro de cada L2 sus miembros: 88,1% de
-    los puntos queda junto a su L1 y 77,0% junto a su L2 (95,9% / 74,6% mirando
-    el vecino más cercano). Usa la estructura que Leiden ya encontró en vez de
-    pedirle a dos dimensiones que la redescubran.
-    """
+def layout_by_genre_anchors(
+    vectors: list[list[float]], genre_ids_by_title: list[list[int]]
+) -> list[tuple[float, float]]:
+    """Place each title around the mean of its real TMDb genre anchors."""
     if not vectors:
         return []
     matrix = np.asarray(vectors, dtype=np.float32)
-    matrix = matrix - matrix.mean(axis=0)
-    l1 = np.asarray(l1_ids)
-    l2 = np.asarray(l2_ids)
-
-    groups = np.unique(l1)
-    l1_layout = _svd_2d(np.stack([matrix[l1 == group].mean(axis=0) for group in groups]))
-
-    points = np.zeros((len(matrix), 2), dtype=np.float32)
-    for group_index, group in enumerate(groups):
-        movements = np.unique(l2[l1 == group])
-        l2_layout = _svd_2d(np.stack([matrix[l2 == movement].mean(axis=0) for movement in movements]))
-        for movement_index, movement in enumerate(movements):
-            members = l2 == movement
-            offsets = _svd_2d(matrix[members])
-            points[members] = (
-                l1_layout[group_index]
-                + l2_layout[movement_index] * _L2_RADIUS
-                + offsets * _MEMBER_RADIUS
-            )
-    return [(round(float(x), 4), round(float(y), 4)) for x, y in points]
+    members: dict[int, list[int]] = {}
+    for index, genre_ids in enumerate(genre_ids_by_title):
+        for genre_id in genre_ids:
+            members.setdefault(genre_id, []).append(index)
+    genre_ids = sorted(members)
+    anchor_layout = _svd_2d(np.stack([matrix[members[genre_id]].mean(axis=0) for genre_id in genre_ids]))
+    anchors = {genre_id: anchor_layout[index] for index, genre_id in enumerate(genre_ids)}
+    embedding_layout = _svd_2d(matrix)
+    positions = []
+    for index, title_genres in enumerate(genre_ids_by_title):
+        base = np.mean([anchors[genre_id] for genre_id in title_genres if genre_id in anchors], axis=0)
+        point = base * GENRE_ANCHOR_WEIGHT + embedding_layout[index] * EMBEDDING_OFFSET_WEIGHT
+        positions.append((round(float(point[0]), 4), round(float(point[1]), 4)))
+    return positions
 
 
 def recompute(seed_cap: int = 1500, k: int = 15) -> dict:
     seed = _seed_titles(seed_cap)
     if not seed:
-        return {"seeded": 0, "embedded": 0, "l1_clusters": 0, "l2_clusters": 0}
+        return {"seeded": 0, "embedded": 0, "l1_clusters": 0, "l2_clusters": 0, "genres": 0}
 
     with ThreadPoolExecutor(max_workers=METADATA_WORKERS) as pool:
         records = list(pool.map(_metadata_for_item, seed))
@@ -450,34 +438,35 @@ def recompute(seed_cap: int = 1500, k: int = 15) -> dict:
     records = [item for item, _ in embedded]
     vectors = [vector for _, vector in embedded]
 
+    genre_ids_by_title = [_genre_ids(record) for record in records]
+    l1_ids = [genre_ids[0] for genre_ids in genre_ids_by_title]
+    positions = layout_by_genre_anchors(vectors, genre_ids_by_title)
+    genre_names_by_id = {OTHER_GENRE_ID: OTHER_GENRE_LABEL}
+    for record, genre_ids in zip(records, genre_ids_by_title):
+        name_map = tmdb_client.GENRE_ID_NAME_MAP if record["kind"] == "movie" else tmdb_client.TV_GENRE_ID_NAME_MAP
+        genre_names_by_id.update({genre_id: name_map[genre_id] for genre_id in genre_ids if genre_id in name_map})
     graph = _build_knn_graph(vectors, k=k)
-    l1_groups = _cluster_l1(graph)
-    assignments: list[dict] = []
-    clusters: list[tuple[int, int, list[int]]] = []
-    next_l2_id = 1
-    for l1_id, members in enumerate(l1_groups, start=1):
-        clusters.append((1, l1_id, members))
-        subgraph = graph.induced_subgraph(members)
-        for local_members in _cluster_l2(subgraph):
-            l2_members = [members[index] for index in local_members]
-            clusters.append((2, next_l2_id, l2_members))
-            for index in l2_members:
-                assignments.append(
-                    {
-                        "tmdb_id": records[index]["tmdb_id"],
-                        "kind": records[index]["kind"],
-                        "l1_cluster_id": l1_id,
-                        "l2_cluster_id": next_l2_id,
-                        # se guardan acá porque el mapa de vibras los necesita
-                        # para ~1000 puntos y title_embeddings solo tiene el id
-                        "title": records[index]["title"],
-                        "year": records[index]["year"],
-                        "poster_path": records[index].get("poster_path"),
-                    }
-                )
-            next_l2_id += 1
-
-    labels: list[dict] = []
+    l2_groups = _cluster_l2(graph)
+    l2_ids = [0] * len(records)
+    for cluster_id, members in enumerate(l2_groups, start=1):
+        for index in members:
+            l2_ids[index] = cluster_id
+    assignments = [
+        {
+            "tmdb_id": record["tmdb_id"], "kind": record["kind"],
+            "l1_cluster_id": l1_ids[index], "l2_cluster_id": l2_ids[index],
+            "title": record["title"], "year": record["year"],
+            "poster_path": record.get("poster_path"), "x": positions[index][0], "y": positions[index][1],
+        }
+        for index, record in enumerate(records)
+    ]
+    clusters = [(2, cluster_id, members) for cluster_id, members in enumerate(l2_groups, start=1)]
+    genre_counts = Counter(genre_id for genre_ids in genre_ids_by_title for genre_id in genre_ids)
+    labels = [
+        {"level": 1, "cluster_id": genre_id, "label": label, "sample_titles": [], "size": genre_counts[genre_id]}
+        for genre_id, label in sorted(genre_names_by_id.items())
+        if genre_counts[genre_id]
+    ]
     seen_labels: set[tuple[int, int]] = set()
     for level, cluster_id, members in clusters:
         identity = (level, cluster_id)
@@ -504,6 +493,7 @@ def recompute(seed_cap: int = 1500, k: int = 15) -> dict:
         # sin esto, una corrida a medias se lee igual que una completa.
         "pending_embeddings": len(seed) - len(records),
         "quota_exhausted": exhausted,
-        "l1_clusters": len(l1_groups),
-        "l2_clusters": next_l2_id - 1,
+        "l1_clusters": len(labels) - len(l2_groups),
+        "l2_clusters": len(l2_groups),
+        "genres": len(labels) - len(l2_groups),
     }

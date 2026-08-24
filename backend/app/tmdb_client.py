@@ -318,6 +318,8 @@ def _map_result(
         return None
 
     overview = raw.get("overview") or ""
+    genre_name_map = GENRE_ID_NAME_MAP if kind == "movie" else TV_GENRE_ID_NAME_MAP
+    genres = [genre_name_map[genre_id] for genre_id in raw.get("genre_ids", []) if genre_id in genre_name_map]
     tags: set[str] = set()
     for genre_id in raw.get("genre_ids", []):
         tags.update(genre_tag_map.get(genre_id, []))
@@ -331,6 +333,7 @@ def _map_result(
         "title": title,
         "year": year,
         "kind": kind,
+        "genres": genres,
         "tags": sorted(tags),
         "poster_path": _image_url(raw.get("poster_path"), "w500"),
         "backdrop_path": _image_url(raw.get("backdrop_path"), "w780"),

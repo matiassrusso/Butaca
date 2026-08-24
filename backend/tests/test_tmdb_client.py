@@ -67,6 +67,7 @@ def test_fetch_candidates_maps_genres_and_overview_to_tags(monkeypatch) -> None:
     assert item["title"] == "Fake Thriller"
     assert item["year"] == 2020
     assert item["kind"] == "movie"
+    assert item["genres"] == ["Thriller"]
     assert {"psychological", "dark", "slow", "quiet", "melancholic", "intimate"} <= set(
         item["tags"]
     )
@@ -326,6 +327,7 @@ def test_map_result_reads_tv_fields_when_kind_is_series() -> None:
     assert mapped is not None
     assert mapped["kind"] == "series"
     assert mapped["year"] == 2019
+    assert mapped["genres"] == ["Ciencia ficción y fantasía"]
     assert {"stylized", "mysterious"} <= set(mapped["tags"])
 
 

@@ -391,8 +391,7 @@ class WrappedResponse(BaseModel):
 
 
 class VibeMapPoint(BaseModel):
-    # un título del mapa de vibras. x/y salen del layout jerárquico anclado a
-    # clusters (vibes_clustering.project_2d), en [-1, 1] aprox.
+    # x/y salen del snapshot anclado a géneros TMDb, en [-1, 1] aprox.
     tmdb_id: int
     kind: str
     title: str
@@ -400,7 +399,7 @@ class VibeMapPoint(BaseModel):
     poster_path: str | None = None
     x: float
     y: float
-    group_id: int  # cluster L1: el color y la leyenda
+    group_id: int  # género TMDb dominante: el color y la leyenda
     movement_id: int  # cluster L2: el movimiento con nombre propio
     # lo puntuó/vio ESTE usuario (siempre False sin sesión)
     rated: bool = False

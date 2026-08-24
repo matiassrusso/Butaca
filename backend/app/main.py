@@ -314,11 +314,6 @@ def _build_vibe_map() -> dict:
     if not rows:
         return {"points": [], "groups": [], "movements": []}
 
-    coordinates = vibes_clustering.project_2d(
-        [row["vector"] for row in rows],
-        [row["l1_cluster_id"] for row in rows],
-        [row["l2_cluster_id"] for row in rows],
-    )
     points = [
         {
             "tmdb_id": row["tmdb_id"],
@@ -326,12 +321,12 @@ def _build_vibe_map() -> dict:
             "title": row["title"],
             "year": row["year"],
             "poster_path": row["poster_path"],
-            "x": x,
-            "y": y,
+            "x": row["x"],
+            "y": row["y"],
             "group_id": row["l1_cluster_id"],
             "movement_id": row["l2_cluster_id"],
         }
-        for row, (x, y) in zip(rows, coordinates)
+        for row in rows
     ]
 
     labels = {(row["level"], row["cluster_id"]): row["label"] for row in db.get_vibe_clusters()}
