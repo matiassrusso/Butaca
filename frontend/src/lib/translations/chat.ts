@@ -9,12 +9,12 @@ export const CHAT: Record<string, Entry> = {
   "chat.titlePrefix": { es: "Hablá con ", en: "Talk to " },
   "chat.titleAccent": { es: "Butaca", en: "Butaca" },
   "chat.intro": {
-    es: "El mismo agente que escribe tus picks, pero de ida y vuelta. Ya conoce lo que viste y lo que puntuaste.",
-    en: "The same agent that writes your picks, only back and forth. It already knows what you've watched and rated.",
+    es: "Tu experto de cine: preguntale qué ver, detalles, contenido, datos curiosos o discutí una película. También conoce tu gusto.",
+    en: "Your film expert: ask what to watch, details, content, trivia, or debate a movie. It also knows your taste.",
   },
   "chat.navLabel": { es: "Charlar", en: "Chat" },
   "chat.navAria": { es: "Charlar con el agente", en: "Chat with the agent" },
-  "chat.placeholder": { es: "Escribile algo…", en: "Write something…" },
+  "chat.placeholder": { es: "Preguntá por cualquier película o serie…", en: "Ask about any movie or show…" },
   "chat.send": { es: "Enviar", en: "Send" },
   "chat.you": { es: "Vos", en: "You" },
   "chat.agent": { es: "Butaca", en: "Butaca" },
@@ -26,15 +26,15 @@ export const CHAT: Record<string, Entry> = {
   "chat.reset": { es: "Empezar de nuevo", en: "Start over" },
   "chat.starterHint": { es: "Probá con:", en: "Try:" },
   "chat.starter1": {
-    es: "Tengo dos horas esta noche, tirame algo",
-    en: "I've got two hours tonight, hit me with something",
+    es: "¿Tiene escenas de sexo o violencia Oppenheimer?",
+    en: "Does Oppenheimer have sex or violent scenes?",
   },
   "chat.starter2": {
-    es: "¿Qué decís de mi gusto? Sé honesto",
-    en: "What do you make of my taste? Be honest",
+    es: "Contame algo curioso de Parasite sin spoilear",
+    en: "Tell me something interesting about Parasite without spoilers",
   },
   "chat.starter3": {
-    es: "Quiero algo distinto a lo que veo siempre",
-    en: "I want something different from my usual",
+    es: "Tengo dos horas esta noche, tirame algo",
+    en: "I've got two hours tonight, hit me with something",
   },
 };

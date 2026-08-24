@@ -12,6 +12,7 @@ def clear_tmdb_cache() -> None:
     tmdb_client._PERSONALIZED_CACHE.clear()
     tmdb_client._WATCH_PROVIDERS_CACHE.clear()
     tmdb_client._KEYWORDS_CACHE.clear()
+    tmdb_client._CERTIFICATION_CACHE.clear()
     tmdb_client._TITLE_BY_ID_CACHE.clear()
     tmdb_client._KEYWORD_ID_CACHE.clear()
     tmdb_client._OPTION_CACHE.clear()
@@ -560,6 +561,7 @@ def test_fetch_title_by_id_resolves_by_id_no_search(monkeypatch) -> None:
         "backdrop_path": None,
         "overview": "",
         "vote_average": None,
+        "runtime": None,
     }
 
 
@@ -1216,6 +1218,45 @@ def test_fetch_keywords_caches_result_and_returns_a_copy(monkeypatch) -> None:
     # mutar lo devuelto no puede contaminar el cache
     first.append("bogus")
     assert tmdb_client.fetch_keywords(42) == ["heist"]
+
+
+def test_fetch_certification_reads_us_movie_rating_and_caches(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    calls: list[str] = []
+
+    def fake_get_json(url: str) -> dict:
+        calls.append(url)
+        assert "/movie/42/release_dates" in url
+        return {
+            "results": [
+                {"iso_3166_1": "AR", "release_dates": [{"certification": "16"}]},
+                {"iso_3166_1": "US", "release_dates": [{"certification": ""}, {"certification": "R"}]},
+            ]
+        }
+
+    monkeypatch.setattr(tmdb_client, "_get_json", fake_get_json)
+
+    assert tmdb_client.fetch_certification(42) == {"certification": "R"}
+    assert tmdb_client.fetch_certification(42) == {"certification": "R"}
+    assert len(calls) == 1
+
+
+def test_fetch_certification_reads_us_series_rating_and_degrades(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        tmdb_client,
+        "_get_json",
+        lambda url: {"results": [{"iso_3166_1": "US", "rating": "TV-MA"}]},
+    )
+    assert tmdb_client.fetch_certification(42, kind="series") == {"certification": "TV-MA"}
+
+    tmdb_client._CERTIFICATION_CACHE.clear()
+    monkeypatch.setattr(
+        tmdb_client,
+        "_get_json",
+        lambda url: (_ for _ in ()).throw(tmdb_client.TmdbError("down")),
+    )
+    assert tmdb_client.fetch_certification(42) == {"certification": ""}
 
 
 def test_tags_from_keywords_maps_only_curated_keywords() -> None:

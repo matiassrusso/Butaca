@@ -2580,6 +2580,42 @@ def rate_title(
     return {"status": "saved", "rating": payload.rating, "review": payload.review, "source": "star"}
 
 
+def _chat_grounding(messages: list[tuple[str, str]]) -> dict | None:
+    """Resolve one chat title to real TMDb data without making chat depend on it."""
+    try:
+        extracted = llm_client.extract_chat_title(messages)
+        if not extracted:
+            return None
+        matches = tmdb_client.search_any_titles(extracted["title"])
+        if not matches:
+            return None
+        match = matches[0]
+        details = tmdb_client.fetch_title_by_id(match["tmdb_id"], kind=match["kind"])
+        if not details:
+            return None
+        try:
+            credits = tmdb_client.fetch_taste_credits(match["tmdb_id"], kind=match["kind"])
+        except tmdb_client.TmdbError:
+            credits = {"director": None, "actors": []}
+        try:
+            keywords = tmdb_client.fetch_keywords(match["tmdb_id"], kind=match["kind"])
+        except tmdb_client.TmdbError:
+            keywords = []
+        certification = tmdb_client.fetch_certification(match["tmdb_id"], kind=match["kind"])
+        return {
+            **details,
+            "director": credits.get("director"),
+            "actors": credits.get("actors", []),
+            "keywords": keywords,
+            "certification": certification.get("certification", ""),
+        }
+    except Exception as exc:
+        # Grounding enriches an otherwise useful chat. A provider failure must
+        # never turn a general film question into a 500.
+        logger.warning("Chat grounding unavailable: %s", exc)
+        return None
+
+
 @app.post("/chat", response_model=ChatResponse)
 def chat(
     payload: ChatRequest,
@@ -2617,8 +2653,14 @@ def chat(
     profile = db.get_taste_profile(user["id"])
     watchlist = db.get_watchlist_items(user["id"])
     feedback = db.get_feedback_signals(user["id"])
+    grounding = _chat_grounding(messages)
     try:
-        reply = llm_client.chat_reply(ratings, profile, messages, lang, watchlist, feedback)
+        if grounding:
+            reply = llm_client.chat_reply(
+                ratings, profile, messages, lang, watchlist, feedback, grounding=grounding
+            )
+        else:
+            reply = llm_client.chat_reply(ratings, profile, messages, lang, watchlist, feedback)
     except llm_client.LlmError as exc:
         # el fallback de modelos ya se agotó adentro — acá degradamos con un
         # mensaje honesto en vez de un 500 que el frontend muestra como
