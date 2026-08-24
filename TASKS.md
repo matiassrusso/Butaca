@@ -1127,6 +1127,12 @@ pará y arreglalo antes de seguir, no lo dejes pasar.
       `frontend/src/{pages/VibesMap.tsx,lib/translations/map.ts}` |
       verificación: 509 tests backend + `npm run build`.
 
+- [x] **[chat-guru-2026-08-24] Chat guru: LLM experto + grounding de TMDb + guia de contenido** | owner: codex |
+      extracción breve de título, datos reales/cacheados de TMDb (incluye certificación US y keywords de contenido),
+      prompt experto ES/EN y copy del chat actualizado | archivos: `backend/app/{llm_client,main,tmdb_client}.py`,
+      `backend/tests/{test_main,test_tmdb_client}.py`, `frontend/src/lib/translations/chat.ts` |
+      verificación: 515 tests + build.
+
 - [x] **[site-feedback-2026-08-23] Product feedback** | owner: codex |
       separate public endpoint, protected admin read endpoint, optional Resend
       notification, and ES/EN footer form route.

@@ -3230,11 +3230,12 @@ def _mock_chat(monkeypatch, reply: str = "mirate Heat") -> list[tuple]:
     monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
     calls: list[tuple] = []
 
-    def fake_chat_reply(ratings, profile, messages, lang="es", watchlist=None, feedback=None):
+    def fake_chat_reply(ratings, profile, messages, lang="es", watchlist=None, feedback=None, grounding=None):
         calls.append((ratings, profile, messages, lang, watchlist, feedback))
         return reply
 
     monkeypatch.setattr("backend.app.main.llm_client.chat_reply", fake_chat_reply)
+    monkeypatch.setattr("backend.app.main._chat_grounding", lambda messages: None)
     return calls
 
 
@@ -3264,6 +3265,107 @@ def test_chat_returns_the_agents_reply(monkeypatch) -> None:
     assert response.status_code == 200
     assert response.json() == {"reply": "Mirate Heat, te va a cerrar."}
     assert calls[0][2] == [("user", "algo de acción")]
+
+
+def test_chat_injects_real_tmdb_grounding_into_the_reply_prompt(monkeypatch) -> None:
+    _reset_chat_usage()
+    monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
+    prompts: list[str] = []
+    monkeypatch.setattr(
+        "backend.app.main.llm_client.extract_chat_title",
+        lambda messages: {"title": "Oppenheimer", "year": 2023},
+    )
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.search_any_titles",
+        lambda title: [{"tmdb_id": 872585, "title": "Oppenheimer", "year": 2023, "kind": "movie"}],
+    )
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.fetch_title_by_id",
+        lambda tmdb_id, kind: {
+            "tmdb_id": tmdb_id, "title": "Oppenheimer", "year": 2023, "kind": kind,
+            "genres": ["Drama", "Historia"], "overview": "La historia de J. Robert Oppenheimer.",
+            "runtime": 181, "vote_average": 8.1,
+        },
+    )
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.fetch_taste_credits",
+        lambda tmdb_id, kind: {"director": "Christopher Nolan", "actors": ["Cillian Murphy", "Emily Blunt"]},
+    )
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.fetch_keywords",
+        lambda tmdb_id, kind: ["sex scene", "nudity", "biography"],
+    )
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.fetch_certification",
+        lambda tmdb_id, kind: {"certification": "R"},
+    )
+
+    def fake_llm(prompt: str, api_key: str) -> dict:
+        prompts.append(prompt)
+        return {"reply": "Sí, con el contexto disponible."}
+
+    monkeypatch.setattr("backend.app.llm_client._call_nvidia_with_fallback", fake_llm)
+    response = client.post(
+        "/chat",
+        headers=_auth_headers("chatgrounded"),
+        json={"messages": [{"role": "user", "content": "¿Tiene sexo Oppenheimer?"}]},
+    )
+
+    assert response.status_code == 200
+    prompt = prompts[-1]
+    assert "DATOS REALES DE TMDB SOBRE Oppenheimer" in prompt
+    assert "Clasificación US: R" in prompt
+    assert "sex scene, nudity" in prompt
+    assert "Christopher Nolan" in prompt
+
+
+def test_chat_without_a_title_still_replies_without_grounding(monkeypatch) -> None:
+    _reset_chat_usage()
+    monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
+    prompts: list[str] = []
+    monkeypatch.setattr("backend.app.main.llm_client.extract_chat_title", lambda messages: None)
+
+    def fake_llm(prompt: str, api_key: str) -> dict:
+        prompts.append(prompt)
+        return {"reply": "Contame qué querés ver."}
+
+    monkeypatch.setattr("backend.app.llm_client._call_nvidia_with_fallback", fake_llm)
+    response = client.post(
+        "/chat",
+        headers=_auth_headers("chatnotitle"),
+        json={"messages": [{"role": "user", "content": "Quiero ver algo esta noche"}]},
+    )
+
+    assert response.status_code == 200
+    assert "DATOS REALES DE TMDB" not in prompts[-1]
+
+
+def test_chat_still_replies_when_tmdb_grounding_is_unavailable(monkeypatch) -> None:
+    _reset_chat_usage()
+    monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
+    prompts: list[str] = []
+    monkeypatch.setattr(
+        "backend.app.main.llm_client.extract_chat_title",
+        lambda messages: {"title": "Oppenheimer", "year": 2023},
+    )
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.search_any_titles",
+        lambda title: (_ for _ in ()).throw(TmdbError("not configured")),
+    )
+
+    def fake_llm(prompt: str, api_key: str) -> dict:
+        prompts.append(prompt)
+        return {"reply": "No tengo datos verificados ahora, pero puedo hablar de la película."}
+
+    monkeypatch.setattr("backend.app.llm_client._call_nvidia_with_fallback", fake_llm)
+    response = client.post(
+        "/chat",
+        headers=_auth_headers("chattmdbdown"),
+        json={"messages": [{"role": "user", "content": "¿Qué tal Oppenheimer?"}]},
+    )
+
+    assert response.status_code == 200
+    assert "DATOS REALES DE TMDB" not in prompts[-1]
 
 
 def test_chat_works_without_any_rated_history(monkeypatch) -> None:
@@ -3341,6 +3443,7 @@ def test_chat_degrades_with_an_honest_message_when_the_llm_fails(monkeypatch) ->
         raise LlmError("NVIDIA caída")
 
     monkeypatch.setattr("backend.app.main.llm_client.chat_reply", boom)
+    monkeypatch.setattr("backend.app.main._chat_grounding", lambda messages: None)
     headers = _auth_headers("chatllmdown")
 
     response = client.post(

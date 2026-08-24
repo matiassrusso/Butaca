@@ -211,6 +211,7 @@ _PERSON_CACHE: OrderedDict[str, tuple[float, int | None]] = OrderedDict()
 _PERSONALIZED_CACHE: OrderedDict[tuple, tuple[float, list[dict]]] = OrderedDict()
 _WATCH_PROVIDERS_CACHE: OrderedDict[tuple[str, int, str], tuple[float, dict]] = OrderedDict()
 _KEYWORDS_CACHE: OrderedDict[tuple[str, int], tuple[float, list[str]]] = OrderedDict()
+_CERTIFICATION_CACHE: OrderedDict[tuple[str, int], tuple[float, dict]] = OrderedDict()
 _TITLE_BY_ID_CACHE: OrderedDict[tuple[str, int], tuple[float, dict | None]] = OrderedDict()
 # picker "a tu elección" (recommender.PICK_OPTIONS) — id de una keyword de
 # búsqueda no cambia, mismo TTL que _PERSON_CACHE; páginas de /discover por
@@ -1154,6 +1155,7 @@ def fetch_title_by_id(tmdb_id: int, kind: str = "movie") -> dict | None:
                 "backdrop_path": _image_url(raw.get("backdrop_path"), "w780"),
                 "overview": raw.get("overview") or "",
                 "vote_average": raw.get("vote_average"),
+                "runtime": raw.get("runtime") or next(iter(raw.get("episode_run_time") or []), None),
             }
 
     _TITLE_BY_ID_CACHE[cache_key] = (_now_monotonic() + TITLE_CACHE_TTL_SECONDS, result)
@@ -1289,6 +1291,68 @@ def fetch_keywords(tmdb_id: int, kind: str = "movie") -> list[str]:
     while len(_KEYWORDS_CACHE) > TITLE_CACHE_MAX_ENTRIES:
         _KEYWORDS_CACHE.popitem(last=False)
     return list(names)
+
+
+def fetch_certification(tmdb_id: int, kind: str = "movie") -> dict:
+    """US content rating for a title, cached alongside its other stable metadata.
+
+    A certification is useful context but not reliable enough to make the chat
+    fail: missing keys, unavailable ratings, and TMDb errors all become an
+    empty value the prompt can describe honestly.
+    """
+    cache_key = (kind, tmdb_id)
+    cached = _CERTIFICATION_CACHE.get(cache_key)
+    if cached is not None:
+        expires_at, result = cached
+        if expires_at > _now_monotonic():
+            _CERTIFICATION_CACHE.move_to_end(cache_key)
+            return result.copy()
+        _CERTIFICATION_CACHE.pop(cache_key, None)
+
+    certification = ""
+    api_key = os.environ.get("TMDB_API_KEY")
+    if api_key:
+        try:
+            endpoint = _tmdb_endpoint_kind(kind)
+            if kind == "movie":
+                data = _get_json(
+                    f"https://api.themoviedb.org/3/{endpoint}/{tmdb_id}/release_dates?api_key={api_key}"
+                )
+                us = next(
+                    (entry for entry in data.get("results", []) if entry.get("iso_3166_1") == "US"),
+                    {},
+                )
+                certification = next(
+                    (
+                        release.get("certification", "").strip()
+                        for release in us.get("release_dates", [])
+                        if release.get("certification", "").strip()
+                    ),
+                    "",
+                )
+            else:
+                data = _get_json(
+                    f"https://api.themoviedb.org/3/{endpoint}/{tmdb_id}/content_ratings?api_key={api_key}"
+                )
+                certification = next(
+                    (
+                        entry.get("rating", "").strip()
+                        for entry in data.get("results", [])
+                        if entry.get("iso_3166_1") == "US" and entry.get("rating", "").strip()
+                    ),
+                    "",
+                )
+        except TmdbError:
+            pass
+
+    # ponytail: TMDb keywords + ratings are the free robust content guide now;
+    # a richer IMDb dataset is a future upgrade only if Matías chooses that source.
+    result = {"certification": certification}
+    _CERTIFICATION_CACHE[cache_key] = (_now_monotonic() + TITLE_CACHE_TTL_SECONDS, result)
+    _CERTIFICATION_CACHE.move_to_end(cache_key)
+    while len(_CERTIFICATION_CACHE) > TITLE_CACHE_MAX_ENTRIES:
+        _CERTIFICATION_CACHE.popitem(last=False)
+    return result.copy()
 
 
 def _tags_from_keywords(keywords: list[str]) -> set[str]:

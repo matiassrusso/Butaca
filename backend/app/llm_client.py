@@ -950,16 +950,21 @@ _CHAT_TITLE_OVERRIDE_EN = (
     "name it for comparison, never as tonight's plan, unless they explicitly ask to rewatch it."
 )
 _CHAT_TASK = (
-    "Estás charlando con esta persona sobre cine. Respondé su último mensaje: contestá lo "
-    "que preguntó, recomendale algo si lo pide, discutí si no estás de acuerdo. Máximo 4 "
-    "frases, es una charla y no un ensayo. Si el mensaje no tiene nada que ver con cine, "
-    "decilo con humor y volvé al tema."
+    "Sos un experto y sabio de cine que además conoce el gusto de esta persona. Respondé "
+    "su último mensaje: podés contestar preguntas factuales (trama sin spoilers grandes "
+    "salvo que los pida, reparto, dirección, año, duración, contexto y datos curiosos), "
+    "dar opiniones, discutir y recomendar. El perfil de gusto es personalización, no tu "
+    "única fuente. Mantené la charla concisa, pero usá más de cuatro frases si una pregunta "
+    "factual o detallada lo necesita. Si el mensaje no tiene nada que ver con cine, decilo "
+    "con humor y volvé al tema."
 )
 _CHAT_TASK_EN = (
-    "You're chatting with this person about movies. Answer their last message: address what "
-    "they asked, recommend something if they want it, push back if you disagree. Four "
-    "sentences max, this is a conversation and not an essay. If the message has nothing to "
-    "do with film, say so with some humor and steer back."
+    "You're a film expert and sage who also knows this person's taste. Answer their last "
+    "message: you can handle factual questions (plot without major spoilers unless requested, "
+    "cast, direction, year, runtime, context and trivia), offer opinions, discuss and "
+    "recommend. Their taste profile personalizes your answer; it is not your only source. "
+    "Keep the conversation concise, but use more than four sentences when a factual or detailed "
+    "question needs it. If the message has nothing to do with film, say so with some humor and steer back."
 )
 _CHAT_NO_HISTORY = (
     "OJO: esta persona todavía no puntuó nada, así que no conocés su gusto. No inventes que "
@@ -1031,6 +1036,89 @@ def _chat_signals_block(watchlist: list[str], feedback: dict | None, lang: str) 
     return "\n".join(lines) + f"\n{_CHAT_SIGNALS_NOTE_BY_LANG[lang]}\n"
 
 
+_CONTENT_KEYWORD_MARKERS = (
+    "sex", "sexual", "nudity", "nude", "erotic", "violence", "violent", "gore", "blood",
+    "drug", "cocaine", "heroin", "alcohol", "rape",
+)
+
+
+def extract_chat_title(messages: list[tuple[str, str]]) -> dict | None:
+    """Cheap, best-effort title extraction for chat grounding."""
+    api_key = os.environ.get("NVIDIA_API_KEY")
+    if not api_key:
+        return None
+    context = "\n".join(
+        f"{'Usuario' if role == 'user' else 'Butaca'}: {content}"
+        for role, content in messages[-3:]
+    )
+    prompt = (
+        "Del ultimo mensaje del usuario y este breve contexto, extrae la pelicula o serie concreta "
+        "sobre la que pregunta. Si no hay una, devuelve titulo vacio. Responde solo JSON exacto "
+        '{"title": "...", "year": null}.\n\n'
+        f"{context}"
+    )
+    try:
+        result = _call_nvidia_with_fallback(prompt, api_key)
+    except LlmError:
+        return None
+    title = str(result.get("title") or "").strip()
+    if not title or title.lower() in {"null", "none", "n/a"}:
+        return None
+    year = result.get("year")
+    return {"title": title[:200], "year": year if isinstance(year, int) else None}
+
+
+def _chat_grounding_block(grounding: dict | None, lang: str) -> str:
+    if not grounding:
+        return ""
+    content_keywords = [
+        keyword for keyword in grounding.get("keywords", [])
+        if any(marker in keyword.lower() for marker in _CONTENT_KEYWORD_MARKERS)
+    ]
+    kind = grounding.get("kind")
+    if lang == "es":
+        kind_label = "película" if kind == "movie" else "serie"
+        unavailable = "No disponible"
+        content_instruction = (
+            "Para preguntas factuales o de contenido, anclate a estos datos. Para sexo, desnudez, "
+            "violencia o drogas usá estas keywords y la clasificación: si no lo confirman, decí "
+            "honestamente que no podés confirmarlo con estos datos y ofrecé la clasificación como referencia."
+        )
+        header = f"DATOS REALES DE TMDB SOBRE {grounding.get('title', '')} (tratalos como verdad; no los contradigas)"
+        fields = (
+            f"Tipo: {kind_label} | Año: {grounding.get('year') or unavailable}\n"
+            f"Géneros: {', '.join(grounding.get('genres', [])) or unavailable}\n"
+            f"Director: {grounding.get('director') or unavailable}\n"
+            f"Reparto principal: {', '.join(grounding.get('actors', [])) or unavailable}\n"
+            f"Sinopsis: {grounding.get('overview') or unavailable}\n"
+            f"Duración: {str(grounding['runtime']) + ' min' if grounding.get('runtime') else unavailable} | "
+            f"Nota TMDb: {grounding.get('vote_average') if grounding.get('vote_average') is not None else unavailable}\n"
+            f"Clasificación US: {grounding.get('certification') or unavailable}\n"
+            f"Señales de contenido (keywords): {', '.join(content_keywords) or 'Sin señales específicas en las keywords de TMDb'}"
+        )
+    else:
+        kind_label = "movie" if kind == "movie" else "series"
+        unavailable = "Unavailable"
+        content_instruction = (
+            "For factual or content questions, ground your answer in these facts. For sex, nudity, "
+            "violence or drugs, use these keywords and the certification: if they do not confirm it, "
+            "say honestly that you cannot confirm it from this data and offer the rating as context."
+        )
+        header = f"REAL TMDB DATA ABOUT {grounding.get('title', '')} (treat it as truth; do not contradict it)"
+        fields = (
+            f"Type: {kind_label} | Year: {grounding.get('year') or unavailable}\n"
+            f"Genres: {', '.join(grounding.get('genres', [])) or unavailable}\n"
+            f"Director: {grounding.get('director') or unavailable}\n"
+            f"Lead cast: {', '.join(grounding.get('actors', [])) or unavailable}\n"
+            f"Overview: {grounding.get('overview') or unavailable}\n"
+            f"Runtime: {str(grounding['runtime']) + ' min' if grounding.get('runtime') else unavailable} | "
+            f"TMDb rating: {grounding.get('vote_average') if grounding.get('vote_average') is not None else unavailable}\n"
+            f"US certification: {grounding.get('certification') or unavailable}\n"
+            f"Content signals (keywords): {', '.join(content_keywords) or 'No specific TMDb keyword signals'}"
+        )
+    return f"{header}\n{fields}\n{content_instruction}\n"
+
+
 def _build_chat_prompt(
     ratings: list[RatedItem],
     profile: dict | None,
@@ -1038,6 +1126,7 @@ def _build_chat_prompt(
     lang: str = "es",
     watchlist: list[str] | None = None,
     feedback: dict | None = None,
+    grounding: dict | None = None,
 ) -> str:
     """Tarea: conversar. Misma voz y mismas reglas de escritura que
     _build_prompt y _build_verdict_prompt — ver AGENT_VOICE arriba."""
@@ -1045,6 +1134,7 @@ def _build_chat_prompt(
     language_line = "" if lang == "es" else "Write your ENTIRE reply in English.\n\n"
     facts = _profile_facts(profile)
     signals = _chat_signals_block(watchlist or [], feedback, lang)
+    grounding_block = _chat_grounding_block(grounding, lang)
     no_history = "" if ratings else f"{_CHAT_NO_HISTORY_BY_LANG[lang]}\n\n"
     return (
         f"{_AGENT_VOICE_BY_LANG[lang]}\n\n"
@@ -1052,6 +1142,7 @@ def _build_chat_prompt(
         f"{_profile_block(ratings)}\n"
         f"{facts}\n\n"
         f"{signals}\n"
+        f"{grounding_block}\n"
         f"{no_history}"
         f"{_CHAT_TASK_BY_LANG[lang]}\n\n"
         f"{_chat_history_lines(messages, lang)}\n\n"
@@ -1070,6 +1161,7 @@ def chat_reply(
     lang: str = "es",
     watchlist: list[str] | None = None,
     feedback: dict | None = None,
+    grounding: dict | None = None,
 ) -> str:
     """La versión conversacional del agente (/chat). Sin cache: cada turno es
     distinto del anterior por definición, así que una clave de cache nunca
@@ -1078,7 +1170,7 @@ def chat_reply(
     if not api_key:
         raise LlmError("NVIDIA_API_KEY no configurada.")
 
-    prompt = _build_chat_prompt(ratings, profile, messages, lang, watchlist, feedback)
+    prompt = _build_chat_prompt(ratings, profile, messages, lang, watchlist, feedback, grounding)
     result = _call_nvidia_with_fallback(prompt, api_key)
     reply = capitalize_sentence(str(result.get("reply", "")).strip())
     if not reply:
