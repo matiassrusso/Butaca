@@ -736,6 +736,27 @@ def test_delete_account_wipes_user_and_all_their_rows() -> None:
     )
     assert seed.status_code == 200
 
+    # seed the tables that reference users but were historically missing from
+    # delete_user_completely: leaving any of them out makes the final
+    # DELETE FROM users fail on the FK constraint (Postgres always, SQLite with
+    # foreign_keys=ON) so the whole delete rolls back and the account is stuck.
+    with db.get_connection() as conn:
+        conn.execute(
+            "INSERT INTO site_feedback (user_id, message, email) VALUES (?, 'me encanta', '')",
+            (user_id,),
+        )
+        conn.execute(
+            "INSERT INTO swipe_asked_titles (user_id, title) VALUES (?, 'Heat')", (user_id,)
+        )
+        conn.execute(
+            "INSERT INTO swipe_pool_cursor (user_id, kind, next_page) VALUES (?, 'movie', 3)",
+            (user_id,),
+        )
+        conn.execute(
+            "INSERT INTO pairwise_preferences (user_id, winner_title, loser_title) VALUES (?, 'Heat', 'Collateral')",
+            (user_id,),
+        )
+
     response = client.request(
         "DELETE", "/auth/account", json={"password": "supersecret"}, headers=headers
     )
@@ -756,6 +777,10 @@ def test_delete_account_wipes_user_and_all_their_rows() -> None:
             "recommendation_sessions",
             "recommendations_served",
             "feedback",
+            "site_feedback",
+            "swipe_asked_titles",
+            "swipe_pool_cursor",
+            "pairwise_preferences",
             "taste_profiles",
             "watchlist_items",
             "sessions",
