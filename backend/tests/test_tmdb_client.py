@@ -1,3 +1,6 @@
+import io
+from urllib.error import HTTPError
+
 import pytest
 
 from backend.app import tmdb_client
@@ -583,7 +586,7 @@ def test_fetch_title_by_id_caches_result(monkeypatch) -> None:
     assert len(calls) == 1
 
 
-def test_fetch_title_by_id_returns_none_on_tmdb_error(monkeypatch) -> None:
+def test_fetch_title_by_id_propagates_transient_tmdb_error(monkeypatch) -> None:
     monkeypatch.setenv("TMDB_API_KEY", "fake-key")
 
     def boom(url: str) -> dict:
@@ -591,7 +594,25 @@ def test_fetch_title_by_id_returns_none_on_tmdb_error(monkeypatch) -> None:
 
     monkeypatch.setattr(tmdb_client, "_get_json", boom)
 
+    with pytest.raises(tmdb_client.TmdbError):
+        tmdb_client.fetch_title_by_id(999999)
+
+
+def test_fetch_title_by_id_caches_only_explicit_404_as_missing(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    calls = 0
+
+    def missing(_url: str) -> dict:
+        nonlocal calls
+        calls += 1
+        error = HTTPError("https://tmdb.test", 404, "not found", {}, io.BytesIO())
+        raise tmdb_client.TmdbError("not found") from error
+
+    monkeypatch.setattr(tmdb_client, "_get_json", missing)
+
     assert tmdb_client.fetch_title_by_id(999999) is None
+    assert tmdb_client.fetch_title_by_id(999999) is None
+    assert calls == 1
 
 
 def test_fetch_similar_titles_requires_api_key(monkeypatch) -> None:

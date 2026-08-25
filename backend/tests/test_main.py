@@ -885,6 +885,16 @@ def test_recommend_zip_genres_mode_requires_at_least_one_genre() -> None:
     assert response.status_code == 400
 
 
+def test_invalid_genres_import_does_not_persist_ratings() -> None:
+    headers = _auth_headers("genreimportpure")
+    user_id = db.get_user_by_username("genreimportpure")["id"]
+
+    response = _post_zip(headers, mode="genres", genres="")
+
+    assert response.status_code == 400
+    assert db.get_watched_items(user_id) == []
+
+
 def test_recommend_zip_genres_mode_filters_by_selected_genres(monkeypatch) -> None:
     # mode="genres" pide su propio pool a TMDb (fetch_candidates_for_options)
     # en vez de post-filtrar fetch_candidates (bug arreglado 2026-08-02).
@@ -1617,7 +1627,7 @@ def test_refine_session_applies_llm_and_persists(monkeypatch) -> None:
     # "Current picks" de la home, 2026-07-31).
     def fake_predict(user_id, ratings, heuristic, lang="es"):
         picks = [
-            rec.model_copy(update={"why": f"razón del agente {i}"})
+            rec.model_copy(update={"why": f"razón del agente {i}", "match_score": 99})
             for i, rec in enumerate(heuristic.recommendations)
         ]
         return heuristic.model_copy(update={"recommendations": picks})
@@ -1630,6 +1640,7 @@ def test_refine_session_applies_llm_and_persists(monkeypatch) -> None:
     body = response.json()
     assert body["refined"] is True
     assert body["recommendations"][0]["why"] == "razón del agente 0"
+    assert body["recommendations"][0]["match_score"] == fast["recommendations"][0]["match_score"]
     # ningún pick se pierde por el camino
     assert len(body["recommendations"]) == len(fast["recommendations"])
 

@@ -264,8 +264,16 @@ def _partition(graph: igraph.Graph, resolution: float) -> list[list[int]]:
     return _compact_clusters([list(group) for group in partition])
 
 
+L2_RESOLUTION = 5.5
+MIN_L1_GENRE_SIZE = 8
+TV_GENRE_CANONICAL_IDS = {
+    10759: 28, 10765: 878, 10768: 10752, 10762: 10751, 10766: 18,
+    10764: None, 10763: None, 10767: None,
+}
+
+
 def _cluster_l2(graph: igraph.Graph) -> list[list[int]]:
-    return _partition(graph, resolution=1.6)
+    return _partition(graph, resolution=L2_RESOLUTION)
 
 
 def _fallback_label(samples: list[dict]) -> str:
@@ -370,7 +378,22 @@ def _genre_ids(item: dict) -> list[int]:
         else tmdb_client.TV_GENRE_NAME_ID_MAP
     )
     ids = [name_map[name] for name in item.get("genres", []) if name in name_map]
+    if item.get("kind") != "movie":
+        ids = [TV_GENRE_CANONICAL_IDS.get(genre_id, genre_id) for genre_id in ids]
+        ids = [genre_id for genre_id in ids if genre_id is not None]
     return list(dict.fromkeys(ids)) or [OTHER_GENRE_ID]
+
+
+def _fold_small_genres(genre_ids_by_title: list[list[int]]) -> list[list[int]]:
+    counts = Counter(genre_id for genre_ids in genre_ids_by_title for genre_id in genre_ids)
+    small = {
+        genre_id for genre_id, count in counts.items()
+        if genre_id != OTHER_GENRE_ID and count < MIN_L1_GENRE_SIZE
+    }
+    return [
+        [genre_id for genre_id in genre_ids if genre_id not in small] or [OTHER_GENRE_ID]
+        for genre_ids in genre_ids_by_title
+    ]
 
 
 def layout_by_genre_anchors(
@@ -399,7 +422,7 @@ def layout_by_genre_anchors(
 def recompute(seed_cap: int = 1500, k: int = 15) -> dict:
     seed = _seed_titles(seed_cap)
     if not seed:
-        return {"seeded": 0, "embedded": 0, "l1_clusters": 0, "l2_clusters": 0, "genres": 0}
+        return {"seeded": 0, "new_embeddings": 0, "clustered": 0, "l1_clusters": 0, "l2_clusters": 0, "genres": 0}
 
     with ThreadPoolExecutor(max_workers=METADATA_WORKERS) as pool:
         records = list(pool.map(_metadata_for_item, seed))
@@ -438,13 +461,15 @@ def recompute(seed_cap: int = 1500, k: int = 15) -> dict:
     records = [item for item, _ in embedded]
     vectors = [vector for _, vector in embedded]
 
-    genre_ids_by_title = [_genre_ids(record) for record in records]
+    genre_ids_by_title = _fold_small_genres([_genre_ids(record) for record in records])
     l1_ids = [genre_ids[0] for genre_ids in genre_ids_by_title]
     positions = layout_by_genre_anchors(vectors, genre_ids_by_title)
     genre_names_by_id = {OTHER_GENRE_ID: OTHER_GENRE_LABEL}
     for record, genre_ids in zip(records, genre_ids_by_title):
-        name_map = tmdb_client.GENRE_ID_NAME_MAP if record["kind"] == "movie" else tmdb_client.TV_GENRE_ID_NAME_MAP
-        genre_names_by_id.update({genre_id: name_map[genre_id] for genre_id in genre_ids if genre_id in name_map})
+        genre_names_by_id.update({
+            genre_id: tmdb_client.GENRE_ID_NAME_MAP[genre_id]
+            for genre_id in genre_ids if genre_id in tmdb_client.GENRE_ID_NAME_MAP
+        })
     graph = _build_knn_graph(vectors, k=k)
     l2_groups = _cluster_l2(graph)
     l2_ids = [0] * len(records)
@@ -488,7 +513,8 @@ def recompute(seed_cap: int = 1500, k: int = 15) -> dict:
     db.save_vibe_clusters(labels, assignments)
     return {
         "seeded": len(records),
-        "embedded": len(generated),
+        "new_embeddings": len(generated),
+        "clustered": len(records),
         # cuántos títulos de la muestra quedaron sin clusterizar por cuota:
         # sin esto, una corrida a medias se lee igual que una completa.
         "pending_embeddings": len(seed) - len(records),

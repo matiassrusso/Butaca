@@ -121,6 +121,7 @@ def test_google_login_links_an_existing_local_account(google_configured) -> None
         json={"username": "local", "password": "supersecret", "email": "local@gmail.com"},
     )
     local_id = db.get_user_by_username("local")["id"]
+    db.mark_email_verified(local_id)
     google_configured("tok-local", sub="google-local", email="local@gmail.com")
 
     body = client.post("/auth/google", json={"access_token": "tok-local"}).json()
@@ -131,6 +132,22 @@ def test_google_login_links_an_existing_local_account(google_configured) -> None
     assert client.post(
         "/auth/login", json={"username": "local", "password": "supersecret"}
     ).status_code == 200
+
+
+def test_google_login_does_not_link_an_unverified_local_email(google_configured) -> None:
+    client.post(
+        "/auth/register",
+        json={"username": "precreated", "password": "supersecret", "email": "victim@gmail.com"},
+    )
+    existing = db.get_user_by_username("precreated")
+    google_configured("tok-victim", sub="google-victim", email="victim@gmail.com")
+
+    response = client.post("/auth/google", json={"access_token": "tok-victim"})
+
+    assert response.status_code == 200
+    assert response.json()["username"] != "precreated"
+    assert db.get_user_by_username("precreated")["google_sub"] is None
+    assert db.get_user_by_google_sub("google-victim")["id"] != existing["id"]
 
 
 def test_google_login_rejects_an_invalid_token(google_configured) -> None:

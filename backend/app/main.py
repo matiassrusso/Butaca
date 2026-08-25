@@ -310,7 +310,7 @@ def _build_vibe_map() -> dict:
     # sin título no hay nada que mostrar al pasar el mouse: son filas viejas,
     # de antes de que title_clusters guardara el nombre (ver
     # /admin/vibes/backfill-titles). Se saltean en vez de dibujar puntos mudos.
-    rows = [row for row in db.get_vibe_map_rows(vibes_clustering.EMBEDDING_MODEL) if row["title"]]
+    rows = [row for row in db.get_vibe_map_rows() if row["title"]]
     if not rows:
         return {"points": [], "groups": [], "movements": []}
 
@@ -378,7 +378,7 @@ def vibes_map(user: sqlite3.Row | None = Depends(auth.get_optional_user)) -> Vib
 
 
 @app.get("/catalog/stats", response_model=CatalogStatsResponse)
-def catalog_stats() -> CatalogStatsResponse:
+def catalog_stats(lang: str = Depends(errors.request_lang)) -> CatalogStatsResponse:
     if not tmdb_client.is_configured():
         raise HTTPException(status_code=503, detail=errors.msg("tmdb_unconfigured", lang))
     try:
@@ -584,8 +584,8 @@ def _run_vibe_recompute() -> None:
         # los clusters cambiaron: la proyección cacheada del mapa quedó vieja
         _invalidate_vibe_map_cache()
         _VIBE_RECOMPUTE_STATE = {"status": "done", "result": result}
-    except (vibes_clustering.VibeError, tmdb_client.TmdbError) as exc:
-        logger.warning("Vibe recompute failed: %s", exc)
+    except Exception as exc:
+        logger.exception("Vibe recompute failed: %s", exc)
         _VIBE_RECOMPUTE_STATE = {"status": "error", "error": str(exc)}
     finally:
         _VIBE_RECOMPUTE_LOCK.release()
@@ -836,7 +836,7 @@ def google_login(
         # una cuenta local con ese mismo mail es del dueño del mail: Google ya
         # lo verificó, así que atarlas es correcto y evita cuentas duplicadas
         existing = db.get_user_by_email(profile["email"])
-        if existing is not None:
+        if existing is not None and existing["email_verified"]:
             db.link_google_account(existing["id"], profile["sub"], profile["email"])
             user = db.get_user_by_username(existing["username"])
         elif current is not None and current["is_guest"]:
@@ -1181,6 +1181,11 @@ def _validate_recommend_params(mode: str, kind_filter: str, lang: str = "es") ->
         raise HTTPException(status_code=400, detail=errors.msg("invalid_kind_filter", lang))
 
 
+def _validate_recommend_genres(mode: str, genres: str, lang: str) -> None:
+    if mode == "genres" and not any(key.strip() for key in genres.split(",")):
+        raise HTTPException(status_code=400, detail=errors.msg("no_genre_selected", lang))
+
+
 def _enrich_loved_ratings_with_genre_tags(ratings: list[RatedItem]) -> None:
     """Mutates loved titles (rating >= 4) in place, adding their real TMDb
     genre tags on top of whatever tags they already have. Only loved titles
@@ -1302,6 +1307,19 @@ def _finish_recommend(
     swap in the LLM-written reasons without blocking the first render.
     persist=False when ratings were just read back from the DB (the "usar mi
     perfil" shortcut) — re-saving them would insert duplicate rated_items."""
+    _validate_recommend_genres(mode, genres, lang)
+    selected_genres = [key.strip() for key in genres.split(",") if key.strip()]
+    if len(selected_genres) > MAX_SELECTED_OPTIONS:
+        raise HTTPException(status_code=400, detail=errors.msg("too_many_options", lang, n=MAX_SELECTED_OPTIONS))
+    vibe_labels = {f"vibe-l2:{row['cluster_id']}": row["label"] for row in db.get_vibe_clusters(level=2)}
+    selected_static_options = [key for key in selected_genres if key in GENRE_OPTIONS]
+    selected_vibe_tags = [key for key in selected_genres if key in vibe_labels]
+    required_any_groups = tuple(
+        [frozenset(GENRE_OPTIONS[key]) for key in selected_static_options]
+        + [frozenset({tag}) for tag in selected_vibe_tags]
+    )
+    if mode == "genres" and not required_any_groups:
+        raise HTTPException(status_code=400, detail=errors.msg("no_genre_selected", lang))
     _enforce_recommend_rate_limit(user["id"], lang)
 
     if not ratings:
@@ -1754,6 +1772,7 @@ async def recommend_titles_from_zip(
     lang: str = Depends(errors.request_lang),
 ) -> RecommendResponse:
     _validate_recommend_params(mode, kind_filter, lang)
+    _validate_recommend_genres(mode, genres, lang)
 
     if not (file.filename or "").lower().endswith(".zip"):
         raise HTTPException(status_code=400, detail=errors.msg("not_a_zip", lang))
@@ -1792,6 +1811,7 @@ def recommend_titles_from_letterboxd(
     lang: str = Depends(errors.request_lang),
 ) -> RecommendResponse:
     _validate_recommend_params(mode, kind_filter, lang)
+    _validate_recommend_genres(mode, genres, lang)
 
     try:
         ratings, extra_seen = letterboxd_scrape.fetch_letterboxd_diary(username)
@@ -2114,7 +2134,9 @@ def _swipe_popular_pool(user_id: int, count: int, kinds: tuple[str, ...] = ("mov
 
 @app.get("/titles/swipe-batch", response_model=OnboardingTitlesResponse)
 def swipe_batch(
-    kind: str = "movie", user: sqlite3.Row = Depends(auth.get_current_user)
+    kind: str = "movie",
+    user: sqlite3.Row = Depends(auth.get_current_user),
+    lang: str = Depends(errors.request_lang),
 ) -> OnboardingTitlesResponse:
     """Tanda de títulos MUY POPULARES sin puntuar para la sección de swipe
     "marcá lo que viste" (idea de Matías, 2026-08-02): un lugar donde volver
@@ -2123,7 +2145,9 @@ def swipe_batch(
     "ya ofrecido" -- la próxima tanda nunca lo repite, la hayas puntuado o
     marcado "no la vi". `kind` filtra movie/series/both (default movie:
     piden mayormente puntuar películas)."""
-    picked = _swipe_popular_pool(user["id"], SWIPE_BATCH_SIZE, SWIPE_KINDS.get(kind, SWIPE_KINDS["movie"]))
+    if kind not in SWIPE_KINDS:
+        raise HTTPException(status_code=400, detail=errors.msg("invalid_kind", lang))
+    picked = _swipe_popular_pool(user["id"], SWIPE_BATCH_SIZE, SWIPE_KINDS[kind])
     titles = [
         OnboardingTitle(
             title=item["title"],
@@ -2344,6 +2368,7 @@ def recommend_titles_manual(
     """Onboarding without Letterboxd: the user rated a handful of seed titles
     by hand. Build RatedItems and hand off to the shared _finish_recommend."""
     _validate_recommend_params(payload.mode, payload.kind_filter, lang)
+    _validate_recommend_genres(payload.mode, payload.genres, lang)
 
     if len(payload.ratings) < MIN_MANUAL_RATINGS:
         raise HTTPException(
@@ -2380,6 +2405,7 @@ def recommend_titles_from_profile(
     nuevo — feedback: los usuarios de modo manual tenían que re-puntuar las
     mismas pelis cada vez que volvían, aunque el perfil ya estaba guardado."""
     _validate_recommend_params(payload.mode, payload.kind_filter, lang)
+    _validate_recommend_genres(payload.mode, payload.genres, lang)
 
     ratings = _rebuild_ratings(user["id"])
     if len(ratings) < MIN_MANUAL_RATINGS:
@@ -2438,6 +2464,13 @@ def refine_session(
         logger.warning("Session refine failed, returning heuristic: %s", exc)
         return heuristic
 
+    engine_scores = {rec.id: rec.match_score for rec in recommendations if rec.id is not None}
+    refined.recommendations = [
+        rec.model_copy(update={"match_score": engine_scores[rec.id]})
+        if rec.id in engine_scores else rec
+        for rec in refined.recommendations
+    ]
+
     db.update_session_refinement(
         session_id,
         refined.taste_summary,
@@ -2456,6 +2489,8 @@ def movie_details(
     user: sqlite3.Row = Depends(auth.get_current_user),
     lang: str = Depends(errors.request_lang),
 ) -> MovieDetails:
+    if kind not in {"movie", "series"}:
+        raise HTTPException(status_code=400, detail=errors.msg("invalid_kind", lang))
     if not tmdb_client.is_configured():
         raise HTTPException(status_code=503, detail=errors.msg("tmdb_unconfigured", lang))
 
@@ -2495,6 +2530,8 @@ def similar_titles(
     perfil (ej. ama a Spider-Man pero nunca puntuó nada de esa saga),
     ofrece similares de TMDb para votar — mismo shape que
     /onboarding/titles, así el frontend reusa la misma grilla de rating."""
+    if kind not in {"movie", "series"}:
+        raise HTTPException(status_code=400, detail=errors.msg("invalid_kind", lang))
     if not tmdb_client.is_configured():
         raise HTTPException(status_code=503, detail=errors.msg("tmdb_unconfigured", lang))
     try:
@@ -2582,6 +2619,8 @@ def _chat_grounding(messages: list[tuple[str, str]]) -> dict | None:
         if not extracted:
             return None
         matches = tmdb_client.search_any_titles(extracted["title"])
+        if extracted["year"] is not None:
+            matches = [match for match in matches if match.get("year") == extracted["year"]]
         if not matches:
             return None
         match = matches[0]

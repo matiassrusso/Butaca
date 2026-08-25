@@ -8,6 +8,7 @@ from backend.app.recommender import (
     TAG_PHRASES,
     _find_reference_title,
     capitalize_sentence,
+    positive_tags_from_text,
     recommend,
 )
 
@@ -325,12 +326,26 @@ def test_recommend_preference_ratings_overrides_taste_signal() -> None:
 
 def test_recommend_uses_matching_user_tags_as_positive_signal() -> None:
     response = recommend(
-        ratings=[RatedItem(title="Tagged Movie", rating=3, tags=[" DARK "])],
+        ratings=[RatedItem(title="Tagged Movie", rating=4, tags=[" DARK "])],
         mood="",
         catalog=[{"title": "Dark Pick", "year": 2020, "kind": "movie", "tags": ["dark"]}],
     )
 
     assert response.recommendations[0].match_score > 50
+
+
+def test_recommend_ignores_tags_from_a_low_rated_title() -> None:
+    response = recommend(
+        ratings=[RatedItem(title="Disliked Action", rating=1, tags=["action"])],
+        mood="",
+        catalog=[{"title": "Action Pick", "year": 2020, "kind": "movie", "tags": ["action"]}],
+    )
+
+    assert response.recommendations == []
+
+
+def test_positive_hints_do_not_match_inside_an_unrelated_word() -> None:
+    assert "action" not in positive_tags_from_text("satisfaction guaranteed")
 
 
 def test_recommend_uses_keyword_tag_from_review_as_positive_signal() -> None:

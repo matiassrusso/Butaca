@@ -8,7 +8,7 @@ import urllib.request
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 
 from .recommender import PICK_OPTIONS, positive_tags_from_text
 
@@ -1112,7 +1112,7 @@ def fetch_title_by_id(tmdb_id: int, kind: str = "movie") -> dict | None:
 
     cache_key = (kind, tmdb_id)
     cached = _TITLE_BY_ID_CACHE.get(cache_key)
-    if cached is not None:
+    if cache_key in _TITLE_BY_ID_CACHE:
         expires_at, result = cached
         if expires_at > _now_monotonic():
             _TITLE_BY_ID_CACHE.move_to_end(cache_key)
@@ -1125,8 +1125,11 @@ def fetch_title_by_id(tmdb_id: int, kind: str = "movie") -> dict | None:
     result: dict | None
     try:
         raw = _get_json(f"https://api.themoviedb.org/3/{endpoint}/{tmdb_id}?api_key={api_key}&language=en-US")
-    except TmdbError:
-        result = None
+    except TmdbError as exc:
+        if isinstance(exc.__cause__, HTTPError) and exc.__cause__.code == 404:
+            result = None
+        else:
+            raise
     else:
         title_field = "title" if kind == "movie" else "name"
         date_field = "release_date" if kind == "movie" else "first_air_date"
@@ -1143,7 +1146,11 @@ def fetch_title_by_id(tmdb_id: int, kind: str = "movie") -> dict | None:
             # los endpoints usados en este módulo
             genre_ids = [g["id"] for g in raw.get("genres", [])]
             genres = sorted({genre_name_map[gid] for gid in genre_ids if gid in genre_name_map})
-            tags = sorted({tag for gid in genre_ids for tag in genre_tag_map.get(gid, [])})
+            overview = raw.get("overview") or ""
+            tags = sorted(
+                {tag for gid in genre_ids for tag in genre_tag_map.get(gid, [])}
+                | positive_tags_from_text(overview)
+            )
             result = {
                 "tmdb_id": raw.get("id"),
                 "title": raw[title_field].strip(),
@@ -1153,7 +1160,7 @@ def fetch_title_by_id(tmdb_id: int, kind: str = "movie") -> dict | None:
                 "tags": tags,
                 "poster_path": _image_url(raw.get("poster_path"), "w500"),
                 "backdrop_path": _image_url(raw.get("backdrop_path"), "w780"),
-                "overview": raw.get("overview") or "",
+                "overview": overview,
                 "vote_average": raw.get("vote_average"),
                 "runtime": raw.get("runtime") or next(iter(raw.get("episode_run_time") or []), None),
             }
