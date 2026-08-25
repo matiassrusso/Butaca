@@ -1,4 +1,5 @@
 import math
+import re
 from collections import Counter
 
 from .catalog import CATALOG
@@ -377,7 +378,7 @@ def positive_tags_from_text(text: str) -> set[str]:
     normalized = _normalize(text)
     tags: set[str] = set()
     for hint, hint_tags in POSITIVE_HINTS.items():
-        if hint in normalized:
+        if re.search(rf"\b{re.escape(hint)}\b", normalized):
             tags.update(hint_tags)
     return tags
 
@@ -409,10 +410,11 @@ def _collect_preference_tags(ratings: list[RatedItem]) -> tuple[set[str], set[st
 
     for item in ratings:
         review = _normalize(item.review)
-        positive_tags.update(positive_tags_from_text(item.review))
-        positive_tags.update(
-            tag for user_tag in item.tags if (tag := _normalize(user_tag)) in known_tags
-        )
+        if item.rating >= 4:
+            positive_tags.update(positive_tags_from_text(item.review))
+            positive_tags.update(
+                tag for user_tag in item.tags if (tag := _normalize(user_tag)) in known_tags
+            )
         for hint, tags in NEGATIVE_HINTS.items():
             if hint in review:
                 negative_tags.update(tags)

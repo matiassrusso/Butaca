@@ -45,6 +45,17 @@ def test_refine_requires_api_key(monkeypatch) -> None:
         llm_client.refine_recommendations([], "funny", HEURISTIC)
 
 
+def test_refine_cache_key_distinguishes_movie_and_series_with_same_tmdb_id() -> None:
+    movie = HEURISTIC.model_copy(update={"recommendations": [
+        HEURISTIC.recommendations[0].model_copy(update={"kind": "movie", "tmdb_id": 7})
+    ]})
+    series = HEURISTIC.model_copy(update={"recommendations": [
+        HEURISTIC.recommendations[0].model_copy(update={"kind": "series", "tmdb_id": 7})
+    ]})
+
+    assert llm_client._refine_cache_key([], "", movie) != llm_client._refine_cache_key([], "", series)
+
+
 def test_refine_requires_candidates(monkeypatch) -> None:
     monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
 
@@ -184,6 +195,32 @@ def test_call_nvidia_wraps_network_errors(monkeypatch) -> None:
         raise llm_client.URLError("boom")
 
     monkeypatch.setattr(llm_client.urllib.request, "urlopen", raise_url_error)
+
+    with pytest.raises(llm_client.LlmError):
+        llm_client._call_nvidia("prompt", "fake-key")
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"choices": None},
+        {"choices": [{"message": {"content": None}}]},
+        {"choices": [{"message": {"content": '{"picks": {}}'}}]},
+        {"choices": [{"message": {"content": '{"picks": ["bad"]}'}}]},
+    ],
+)
+def test_call_nvidia_wraps_malformed_response_shapes(monkeypatch, payload) -> None:
+    class _Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return json.dumps(payload).encode()
+
+    monkeypatch.setattr(llm_client.urllib.request, "urlopen", lambda *_args, **_kwargs: _Resp())
 
     with pytest.raises(llm_client.LlmError):
         llm_client._call_nvidia("prompt", "fake-key")
@@ -695,7 +732,7 @@ def test_predict_fit_skips_the_llm_for_a_title_the_user_already_rated(monkeypatc
     # real), pero no como candidato a predecir — esa línea tiene su propio
     # formato ("- título (año, tags: ...)") que no debe estar
     assert "- Fake Thriller (2020" not in captured_prompts[0]
-    assert "- Fake Comedy (2019" in captured_prompts[0]
+    assert "Fake Comedy (2019" in captured_prompts[0]
     by_refined = {r.title: r.refined for r in result.recommendations}
     assert by_refined["Fake Comedy"]  # predicho por el LLM
     assert not by_refined["Fake Thriller"]  # "ya la viste" es honesto, no una opinión del LLM
@@ -905,7 +942,7 @@ def test_chat_prompt_lifts_the_title_ban_without_lifting_the_seen_ban() -> None:
     prompt = llm_client._build_chat_prompt(CHAT_RATINGS, None, [("user", "recomendame algo")])
 
     assert "EXCEPCIÓN" in prompt
-    assert "no la vio y no la puntuó" in prompt
+    assert "no podés inferir si la vio" in prompt
 
 
 def test_chat_prompt_bans_echoing_referenced_or_already_named_titles() -> None:

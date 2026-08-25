@@ -60,8 +60,6 @@ NVIDIA_MODELS = [
     "nvidia/nemotron-3-ultra-550b-a55b",
     "meta/llama-3.1-8b-instruct",
 ]
-ATTEMPTS_PER_MODEL = 1
-RETRY_BACKOFF_SECONDS = 1.0
 REQUEST_TIMEOUT = 10
 
 # Same OrderedDict TTL+LRU idiom as tmdb_client's _DISCOVER_CACHE — avoids
@@ -187,7 +185,8 @@ def _ratings_lines(ratings: list[RatedItem]) -> str:
 
 def _candidate_lines(heuristic: RecommendResponse) -> str:
     return "\n".join(
-        f"- {rec.title} ({rec.year}, tags: {', '.join(rec.tags)}): {rec.overview[:200]}"
+        f"- [{rec.kind}, tmdb_id={rec.tmdb_id if rec.tmdb_id is not None else 'none'}] "
+        f"{rec.title} ({rec.year}, tags: {', '.join(rec.tags)}): {rec.overview[:200]}"
         for rec in heuristic.recommendations
     )
 
@@ -434,8 +433,8 @@ def _build_prompt(
         "perfil y de las reseñas NO son elegibles: esos ya los vio, recomendárselos de vuelta "
         "no le sirve de nada. Están ahí solo para que entiendas su gusto y los cites.\n\n"
         "Respondé ÚNICAMENTE con un JSON válido, sin texto ni markdown alrededor, con esta forma "
-        'exacta: {"taste_summary": "...", "picks": [{"title": "...", "why": "...", '
-        '"match_score": 85}, ...]}'
+        'exacta: {"taste_summary": "...", "picks": [{"title": "...", "kind": "movie|series", '
+        '"tmdb_id": 123, "why": "...", "match_score": 85}, ...]}'
     )
 
 
@@ -481,31 +480,30 @@ def _call_nvidia(
 
     try:
         text = payload["choices"][0]["message"]["content"]
-        return _extract_json(text)
-    except (KeyError, IndexError, json.JSONDecodeError) as exc:
+        if not isinstance(text, str):
+            raise TypeError("choices[0].message.content no es texto")
+        result = _extract_json(text)
+        if not isinstance(result, dict):
+            raise TypeError("el JSON raíz no es un objeto")
+        if "picks" in result and (
+            not isinstance(result["picks"], list)
+            or not all(isinstance(pick, dict) for pick in result["picks"])
+        ):
+            raise TypeError("picks no es una lista de objetos")
+        return result
+    except (KeyError, IndexError, TypeError, AttributeError, json.JSONDecodeError) as exc:
         raise LlmError(f"Respuesta de NVIDIA ({model}) con formato inesperado: {exc}") from exc
 
 
 def _call_nvidia_with_fallback(prompt: str, api_key: str) -> dict:
-    """Prueba cada modelo de NVIDIA_MODELS en orden, con ATTEMPTS_PER_MODEL
-    intentos por modelo. Recién si todos fallan propaga el LlmError, que el
-    llamador convierte en fallback al heurístico."""
+    """Prueba cada modelo de NVIDIA_MODELS en orden una vez."""
     last_error: LlmError | None = None
     for model in NVIDIA_MODELS:
-        for attempt in range(ATTEMPTS_PER_MODEL):
-            try:
-                return _call_nvidia(prompt, api_key, model)
-            except LlmError as exc:
-                last_error = exc
-                logger.warning(
-                    "NVIDIA %s falló (intento %d/%d): %s",
-                    model,
-                    attempt + 1,
-                    ATTEMPTS_PER_MODEL,
-                    exc,
-                )
-                if attempt + 1 < ATTEMPTS_PER_MODEL:
-                    time.sleep(RETRY_BACKOFF_SECONDS)
+        try:
+            return _call_nvidia(prompt, api_key, model)
+        except LlmError as exc:
+            last_error = exc
+            logger.warning("NVIDIA %s falló: %s", model, exc)
 
     groq_key = os.environ.get("GROQ_API_KEY")
     if groq_key:
@@ -530,10 +528,7 @@ def _refine_cache_key(
     lang: str = "es",
     audience_note: str = "",
 ) -> tuple[str, str, tuple, str, str]:
-    candidates = tuple(
-        rec.tmdb_id if rec.tmdb_id is not None else rec.title.strip().lower()
-        for rec in heuristic.recommendations
-    )
+    candidates = tuple(_candidate_identity(rec) for rec in heuristic.recommendations)
     # audience_note entra en la clave: el mismo historial con y sin la nota de
     # "son dos personas" tiene que dar dos respuestas distintas, no reusar una
     return (
@@ -583,6 +578,12 @@ def _title_key(title: str) -> str:
     return _NON_ALNUM_RE.sub("", text)
 
 
+def _candidate_identity(rec: Recommendation) -> tuple:
+    if rec.tmdb_id is not None:
+        return rec.kind, rec.tmdb_id
+    return rec.kind, _title_key(rec.title), rec.year
+
+
 def _pick_match_score(pick: dict, fallback: int) -> int:
     try:
         score = int(pick.get("match_score"))
@@ -593,23 +594,32 @@ def _pick_match_score(pick: dict, fallback: int) -> int:
 
 def _select_picks(
     result: dict, heuristic: RecommendResponse
-) -> tuple[list, set[str], list[str]]:
+) -> tuple[list, set[tuple], list[str]]:
     """Mapea los picks que devolvió el modelo contra los candidatos reales.
 
     Devuelve (picks_válidos, claves_elegidas, títulos_que_no_matchearon).
     Extraído para poder correrlo dos veces: una por la respuesta original y
     otra por la del reintento (ver refine_recommendations)."""
-    by_title = {_title_key(rec.title): rec for rec in heuristic.recommendations}
+    by_identity = {_candidate_identity(rec): rec for rec in heuristic.recommendations}
+    by_title: dict[str, list[Recommendation]] = {}
+    for rec in heuristic.recommendations:
+        by_title.setdefault(_title_key(rec.title), []).append(rec)
     reordered: list = []
-    selected_keys: set[str] = set()
+    selected_keys: set[tuple] = set()
     unmatched: list[str] = []
-    for pick in result.get("picks", []):
+    for pick in result["picks"]:
         raw_title = str(pick.get("title", ""))
-        key = _title_key(raw_title)
-        rec = by_title.get(key)
+        kind = pick.get("kind")
+        tmdb_id = pick.get("tmdb_id")
+        if kind in {"movie", "series"} and isinstance(tmdb_id, int):
+            rec = by_identity.get((kind, tmdb_id))
+        else:
+            matches = by_title.get(_title_key(raw_title), [])
+            rec = matches[0] if len(matches) == 1 else None
         if rec is None:
             unmatched.append(raw_title)
             continue
+        key = _candidate_identity(rec)
         if key in selected_keys:
             continue
         why = capitalize_sentence(str(pick.get("why", "")).strip())
@@ -689,9 +699,9 @@ def refine_recommendations(
         for rec in heuristic.recommendations:
             if len(reordered) >= 6:
                 break
-            if _title_key(rec.title) not in selected_keys:
+            if _candidate_identity(rec) not in selected_keys:
                 reordered.append(rec)
-                selected_keys.add(_title_key(rec.title))
+                selected_keys.add(_candidate_identity(rec))
 
     # Recién acá: cachear antes de validar dejaba una respuesta inservible
     # pegada 15 minutos, así que cada reintento en esa ventana fallaba igual
@@ -734,7 +744,8 @@ def _build_verdict_prompt(
         f"{_SCORE_RULE_BY_LANG[lang]}\n\n"
         f"{_MATCH_SCORE_RULE_BY_LANG[lang]}\n\n"
         "Respondé ÚNICAMENTE con un JSON válido, sin texto ni markdown alrededor, con esta forma "
-        'exacta: {"picks": [{"title": "...", "why": "...", "match_score": 85}, ...]}'
+        'exacta: {"picks": [{"title": "...", "kind": "movie|series", "tmdb_id": 123, '
+        '"why": "...", "match_score": 85}, ...]}'
         + (f" — un elemento por cada uno de los {count}, nunca menos." if plural else ".")
     )
 
@@ -742,10 +753,7 @@ def _build_verdict_prompt(
 def _verdict_cache_key(
     user_id: int, ratings: list[RatedItem], heuristic: RecommendResponse, lang: str = "es"
 ) -> tuple[int, tuple, str, str]:
-    candidates = tuple(
-        rec.tmdb_id if rec.tmdb_id is not None else rec.title.strip().lower()
-        for rec in heuristic.recommendations
-    )
+    candidates = tuple(_candidate_identity(rec) for rec in heuristic.recommendations)
     return (user_id, candidates, _profile_block(ratings), normalize_lang(lang))
 
 
@@ -775,15 +783,24 @@ def _apply_verdict_result(
 ) -> RecommendResponse:
     lang = normalize_lang(lang)
     seen_by_key, _ = _predictable_recs(ratings, heuristic)
-    by_title = {_title_key(rec.title): rec for rec in heuristic.recommendations}
+    by_identity = {_candidate_identity(rec): rec for rec in heuristic.recommendations}
+    by_title: dict[str, list[Recommendation]] = {}
+    for rec in heuristic.recommendations:
+        by_title.setdefault(_title_key(rec.title), []).append(rec)
     updates_by_key: dict[str, dict] = {}
     for pick in (result or {}).get("picks", []):
-        key = _title_key(str(pick.get("title", "")))
-        if key not in by_title:
+        kind = pick.get("kind")
+        tmdb_id = pick.get("tmdb_id")
+        if kind in {"movie", "series"} and isinstance(tmdb_id, int):
+            rec = by_identity.get((kind, tmdb_id))
+        else:
+            matches = by_title.get(_title_key(str(pick.get("title", ""))), [])
+            rec = matches[0] if len(matches) == 1 else None
+        if rec is None:
             continue
+        key = _title_key(rec.title)
         why = capitalize_sentence(str(pick.get("why", "")).strip())
         if why:
-            rec = by_title[key]
             updates_by_key[key] = {
                 "why": why,
                 "match_score": _pick_match_score(pick, rec.match_score),
@@ -927,7 +944,7 @@ _CHAT_TITLE_OVERRIDE = (
     "EXCEPCIÓN a la regla de títulos, solo acá: en esta charla SÍ podés nombrar películas "
     "y series que no están en su historial, porque parte de tu trabajo es recomendarle "
     "cosas nuevas. Lo que sigue PROHIBIDO es dar por sentado que las vio: si no está en el "
-    "perfil de arriba, no la vio y no la puntuó. Preguntale si la vio en vez de suponerlo. "
+    "perfil de arriba, no podés inferir si la vio: la lista está recortada. Preguntale en vez de suponerlo. "
     "Si en su mensaje nombra películas como ejemplo de lo que busca ('tipo X, Y, Z'), son "
     "referencia de gusto, no un pedido: no se las devuelvas como recomendación, buscá algo "
     "distinto que comparta ese clima. Tampoco repitas un título que ya nombraste vos o que "
@@ -940,7 +957,7 @@ _CHAT_TITLE_OVERRIDE_EN = (
     "EXCEPTION to the title rule, only here: in this conversation you CAN name movies and "
     "shows that aren't in their history, because part of your job is recommending new "
     "things. What's still FORBIDDEN is assuming they watched them: if it's not in the "
-    "profile above, they haven't seen it and haven't rated it. Ask instead of assuming. "
+    "profile above, you cannot infer whether they watched it: the list is truncated. Ask instead of assuming. "
     "If they name movies as examples of what they're after ('like X, Y, Z'), those are "
     "taste references, not a request — don't hand them back as the recommendation, find "
     "something different that shares that vibe. Also don't repeat a title you already "
@@ -1070,7 +1087,12 @@ def extract_chat_title(messages: list[tuple[str, str]]) -> dict | None:
 
 def _chat_grounding_block(grounding: dict | None, lang: str) -> str:
     if not grounding:
-        return ""
+        return (
+            "No tenés datos verificados de TMDb sobre el título: no afirmes trama, reparto, "
+            "duración ni contenido como hechos; aclaralo.\n"
+            if lang == "es"
+            else "You have no verified TMDb data about the title: do not state plot, cast, runtime or content as facts; say so clearly.\n"
+        )
     content_keywords = [
         keyword for keyword in grounding.get("keywords", [])
         if any(marker in keyword.lower() for marker in _CONTENT_KEYWORD_MARKERS)

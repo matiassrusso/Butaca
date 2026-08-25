@@ -26,6 +26,16 @@ def test_parse_letterboxd_zip_requires_a_real_zip() -> None:
         letterboxd_zip.parse_letterboxd_zip(b"not a zip")
 
 
+def test_parse_letterboxd_zip_rejects_oversized_uncompressed_archive(monkeypatch) -> None:
+    data = _build_zip({"ratings.csv": RATINGS_CSV})
+    info = zipfile.ZipInfo("ratings.csv")
+    info.file_size = letterboxd_zip.MAX_UNCOMPRESSED_ZIP_SIZE + 1
+    monkeypatch.setattr(zipfile.ZipFile, "infolist", lambda _self: [info])
+
+    with pytest.raises(letterboxd_zip.ZipParseError):
+        letterboxd_zip.parse_letterboxd_zip(data)
+
+
 def test_parse_letterboxd_zip_rejects_malformed_csv_field() -> None:
     oversized_field = "a" * 200_000
     data = _build_zip({"ratings.csv": f"Name,Rating\n{oversized_field},4.5\n"})

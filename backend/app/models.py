@@ -4,11 +4,11 @@ from pydantic import BaseModel, Field
 
 
 class RatedItem(BaseModel):
-    title: str
+    title: str = Field(max_length=300)
     rating: float = Field(ge=0, le=5)
-    review: str = ""
-    watched_date: str = ""
-    tags: list[str] = Field(default_factory=list)
+    review: str = Field(default="", max_length=5000)
+    watched_date: str = Field(default="", max_length=20)
+    tags: list[str] = Field(default_factory=list, max_length=50)
     # 'import' = rating numerico real de Letterboxd (zip/username). 'star' =
     # rating preciso del selector actual de Butaca. 'manual' = rating sintético
     # histórico de los tres botones viejos. 'like' = like/favorito de
@@ -25,8 +25,8 @@ class RatedItem(BaseModel):
 
 
 class RecommendRequest(BaseModel):
-    mood: str = ""
-    ratings: list[RatedItem] = Field(default_factory=list)
+    mood: str = Field(default="", max_length=100)
+    ratings: list[RatedItem] = Field(default_factory=list, max_length=5000)
 
 
 class ManualRating(BaseModel):
@@ -36,8 +36,8 @@ class ManualRating(BaseModel):
 
 class ManualRecommendRequest(BaseModel):
     # onboarding without Letterboxd: the user rated a handful of seed titles
-    ratings: list[ManualRating] = Field(default_factory=list)
-    mood: str = ""
+    ratings: list[ManualRating] = Field(default_factory=list, max_length=5000)
+    mood: str = Field(default="", max_length=100)
     mode: str = "profile"
     kind_filter: str = "both"
     genres: str = ""
@@ -47,7 +47,7 @@ class ManualRecommendRequest(BaseModel):
 class ProfileRecommendRequest(BaseModel):
     # regenerate picks from the profile already saved in the DB, no new
     # source needed — the "usar mi perfil" shortcut for repeat manual users
-    mood: str = ""
+    mood: str = Field(default="", max_length=100)
     mode: str = "profile"
     kind_filter: str = "both"
     genres: str = ""
@@ -238,7 +238,7 @@ class FeedbackRequest(BaseModel):
 
 class SiteFeedbackRequest(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
-    email: str = Field(default="", max_length=320)
+    email: str = Field(default="", max_length=320, pattern=r"^$|^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 class RateTitleRequest(BaseModel):
@@ -250,7 +250,7 @@ class RateTitleRequest(BaseModel):
     title: str = Field(min_length=1, max_length=300)
     rating: float = Field(ge=0.5, le=5, multiple_of=0.5)
     tmdb_id: int | None = None
-    review: str = ""
+    review: str = Field(default="", max_length=5000)
 
 
 class WatchlistAddRequest(BaseModel):

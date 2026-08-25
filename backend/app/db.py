@@ -1479,7 +1479,7 @@ def get_random_cluster_keys(limit: int) -> list[tuple[int, str]]:
     return [(row["tmdb_id"], row["kind"]) for row in rows]
 
 
-def get_vibe_map_rows(model: str) -> list[dict]:
+def get_vibe_map_rows() -> list[dict]:
     """Todo lo que necesita el mapa de vibras en una sola query: la asignación
     de clusters de Leiden más el vector que la produjo. El JOIN es por
     (tmdb_id, kind) porque los ids de TMDb se pisan entre película y serie."""

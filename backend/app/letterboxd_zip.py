@@ -17,10 +17,24 @@ WATCHLIST_FILE = "watchlist.csv"
 LIKE_RATING = 4.5  # synthetic rating for liked-but-unrated titles
 FAVORITE_RATING = 5.0  # synthetic rating for explicit "Favorite Films"
 REWATCH_BONUS = 0.5
+MAX_UNCOMPRESSED_ZIP_SIZE = 200 * 1024 * 1024
+MAX_ZIP_ENTRIES = 1000
 
 
 class ZipParseError(Exception):
     pass
+
+
+def _open_zip(data: bytes) -> zipfile.ZipFile:
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(data))
+    except zipfile.BadZipFile as exc:
+        raise ZipParseError("Ese archivo no es un .zip válido.") from exc
+    infos = zf.infolist()
+    if len(infos) > MAX_ZIP_ENTRIES or sum(info.file_size for info in infos) > MAX_UNCOMPRESSED_ZIP_SIZE:
+        zf.close()
+        raise ZipParseError("Ese zip es demasiado grande.")
+    return zf
 
 
 def _normalize(title: str) -> str:
@@ -45,8 +59,8 @@ def parse_watchlist_titles(data: bytes) -> list[str]:
     unpacks it, for a value only /recommend/zip's watchlist mode needs. Returns
     [] if the file is absent (older exports) or empty."""
     try:
-        zf = zipfile.ZipFile(io.BytesIO(data))
-    except zipfile.BadZipFile:
+        zf = _open_zip(data)
+    except ZipParseError:
         return []
 
     titles: list[str] = []
@@ -64,10 +78,7 @@ def parse_letterboxd_zip(data: bytes) -> tuple[list[RatedItem], set[str], int]:
     """Returns (ratings, extra_seen, discarded_rows) — discarded_rows counts
     rows from the base ratings/reviews CSV that had no usable title+rating,
     so the caller can tell the user their import wasn't 100% complete."""
-    try:
-        zf = zipfile.ZipFile(io.BytesIO(data))
-    except zipfile.BadZipFile as exc:
-        raise ZipParseError("Ese archivo no es un .zip válido.") from exc
+    zf = _open_zip(data)
 
     base_rows = None
     for name in RATINGS_FILES:
