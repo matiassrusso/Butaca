@@ -4,6 +4,11 @@ import { useLang } from "../lib/i18n";
 
 const STORAGE_KEY = "butaca-theme";
 
+function applyTheme(theme: "light" | "dark") {
+  document.documentElement.classList.toggle("dark", theme === "dark");
+  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", theme === "dark" ? "#211c19" : "#faf6ed");
+}
+
 function getInitial(): "light" | "dark" {
   if (typeof window === "undefined") return "light";
   const saved = window.localStorage.getItem(STORAGE_KEY);
@@ -20,14 +25,14 @@ export function useTheme() {
   useEffect(() => {
     const t = getInitial();
     setTheme(t);
-    document.documentElement.classList.toggle("dark", t === "dark");
+    applyTheme(t);
     setMounted(true);
   }, []);
 
   function toggle() {
     const next = theme === "dark" ? "light" : "dark";
     setTheme(next);
-    document.documentElement.classList.toggle("dark", next === "dark");
+    applyTheme(next);
     window.localStorage.setItem(STORAGE_KEY, next);
   }
 

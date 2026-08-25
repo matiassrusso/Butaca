@@ -34,6 +34,9 @@ export default function Login() {
   const [forgotSent, setForgotSent] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<{ username?: string; email?: string; password?: string }>({});
   const slowTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const usernameRef = useRef<HTMLInputElement>(null);
+  const emailRef = useRef<HTMLInputElement>(null);
+  const passwordRef = useRef<HTMLInputElement>(null);
 
   const needsEmail = mode === "register" || mode === "claim";
 
@@ -44,6 +47,9 @@ export default function Login() {
       errs.email = t("auth.errEmailInvalid");
     if (mode !== "forgot" && password.length < 8) errs.password = t("auth.errPasswordMin");
     setFieldErrors(errs);
+    if (errs.username) usernameRef.current?.focus();
+    else if (errs.email) emailRef.current?.focus();
+    else if (errs.password) passwordRef.current?.focus();
     return Object.keys(errs).length === 0;
   }
 
@@ -88,11 +94,15 @@ export default function Login() {
 
     try {
       if (mode === "forgot") {
-        await fetch(`${API_BASE_URL}/auth/forgot-password`, {
+        const response = await fetch(`${API_BASE_URL}/auth/forgot-password`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ username }),
         });
+        if (!response.ok) {
+          const body = await response.json().catch(() => null);
+          throw new Error(body?.detail ?? t("auth.errAuth"));
+        }
         setForgotSent(true);
         return;
       }
@@ -115,10 +125,10 @@ export default function Login() {
 
   return (
     <PageTransition>
-      <main className="grid grid-cols-1 lg:grid-cols-2 min-h-[calc(100vh-4rem)]">
+      <main id="main-content" className="grid grid-cols-1 lg:grid-cols-2 min-h-[calc(100vh-4rem)]">
         <div className="bg-foreground text-background p-12 lg:p-16 flex flex-col justify-between gap-16">
           <div className="font-mono text-[10px] uppercase tracking-widest opacity-60">
-            [Access · Butaca]
+            {t("auth.accessHeading")}
           </div>
           <div>
             <h1 className="text-6xl md:text-7xl xl:text-8xl font-black uppercase tracking-tighter leading-[0.85] mb-8">
@@ -196,18 +206,23 @@ export default function Login() {
                     {t("auth.usernameLabel")}
                   </span>
                   <input
+                    ref={usernameRef}
+                    id="auth-username"
+                    name="username"
+                    autoComplete="username"
                     value={username}
                     onChange={(event) => {
                       setUsername(event.target.value);
                       if (fieldErrors.username) setFieldErrors((e) => ({ ...e, username: undefined }));
                     }}
                     aria-invalid={!!fieldErrors.username}
+                    aria-describedby={fieldErrors.username ? "auth-username-error" : undefined}
                     className={`mt-2 w-full bg-transparent border-b-2 py-3 font-mono placeholder:text-muted-foreground focus:outline-none focus:border-accent ${
                       fieldErrors.username ? "border-destructive" : "border-foreground"
                     }`}
                   />
                   {fieldErrors.username && (
-                    <span className="mt-2 block font-mono text-[10px] uppercase tracking-widest text-destructive">
+                    <span id="auth-username-error" role="alert" className="mt-2 block font-mono text-[10px] uppercase tracking-widest text-destructive">
                       {fieldErrors.username}
                     </span>
                   )}
@@ -219,19 +234,24 @@ export default function Login() {
                       {t("auth.emailLabel")}
                     </span>
                     <input
+                      ref={emailRef}
+                      id="auth-email"
+                      name="email"
                       type="email"
+                      autoComplete="email"
                       value={email}
                       onChange={(event) => {
                         setEmail(event.target.value);
                         if (fieldErrors.email) setFieldErrors((e) => ({ ...e, email: undefined }));
                       }}
                       aria-invalid={!!fieldErrors.email}
+                      aria-describedby={fieldErrors.email ? "auth-email-error" : undefined}
                       className={`mt-2 w-full bg-transparent border-b-2 py-3 font-mono placeholder:text-muted-foreground focus:outline-none focus:border-accent ${
                         fieldErrors.email ? "border-destructive" : "border-foreground"
                       }`}
                     />
                     {fieldErrors.email && (
-                      <span className="mt-2 block font-mono text-[10px] uppercase tracking-widest text-destructive">
+                      <span id="auth-email-error" role="alert" className="mt-2 block font-mono text-[10px] uppercase tracking-widest text-destructive">
                         {fieldErrors.email}
                       </span>
                     )}
@@ -244,19 +264,24 @@ export default function Login() {
                       {t("auth.passwordLabel")}
                     </span>
                     <input
+                      ref={passwordRef}
+                      id="auth-password"
+                      name="password"
                       type="password"
+                      autoComplete={mode === "register" || isClaiming ? "new-password" : "current-password"}
                       value={password}
                       onChange={(event) => {
                         setPassword(event.target.value);
                         if (fieldErrors.password) setFieldErrors((e) => ({ ...e, password: undefined }));
                       }}
                       aria-invalid={!!fieldErrors.password}
+                      aria-describedby={fieldErrors.password ? "auth-password-error" : undefined}
                       className={`mt-2 w-full bg-transparent border-b-2 py-3 font-mono focus:outline-none focus:border-accent ${
                         fieldErrors.password ? "border-destructive" : "border-foreground"
                       }`}
                     />
                     {fieldErrors.password && (
-                      <span className="mt-2 block font-mono text-[10px] uppercase tracking-widest text-destructive">
+                      <span id="auth-password-error" role="alert" className="mt-2 block font-mono text-[10px] uppercase tracking-widest text-destructive">
                         {fieldErrors.password}
                       </span>
                     )}
@@ -349,7 +374,7 @@ export default function Login() {
               )}
 
               {error ? (
-                <div className="p-4 border-2 border-destructive/50 font-mono text-xs text-destructive">
+                <div aria-live="assertive" className="p-4 border-2 border-destructive/50 font-mono text-xs text-destructive">
                   {error}
                 </div>
               ) : null}

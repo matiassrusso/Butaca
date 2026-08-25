@@ -64,6 +64,7 @@ export const PROFILE: Record<string, Entry> = {
     es: "No pude armar tu perfil de gusto.",
     en: "Couldn't build your taste profile.",
   },
+  "profile.summaryError": { es: "No pude cargar la actividad de tu cuenta.", en: "Couldn't load your account activity." },
   "profile.emptyTitle": {
     es: "Todavía no hay suficiente para armar tu perfil",
     en: "Not enough yet to build your profile",

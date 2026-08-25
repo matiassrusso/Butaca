@@ -83,6 +83,7 @@ type Props = {
 export function GoogleSignInButton({ onCredential, disabled, label }: Props) {
   const { t } = useLang();
   const [ready, setReady] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
   const clientRef = useRef<TokenClient | null>(null);
   // el cliente de Google se crea una sola vez, así que el callback se lee de
   // un ref para no recrearlo en cada render del padre
@@ -110,6 +111,7 @@ export function GoogleSignInButton({ onCredential, disabled, label }: Props) {
       .catch(() => {
         // sin conexión con Google el botón no aparece; el resto del login
         // (usuario/contraseña, invitado) sigue funcionando
+        if (!cancelled) setLoadFailed(true);
       });
 
     return () => {
@@ -117,7 +119,11 @@ export function GoogleSignInButton({ onCredential, disabled, label }: Props) {
     };
   }, []);
 
-  if (!CLIENT_ID || !ready) return null;
+  if (!CLIENT_ID) return null;
+  if (loadFailed) {
+    return <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">{t("auth.googleUnavailable")}</p>;
+  }
+  if (!ready) return null;
 
   return (
     <button

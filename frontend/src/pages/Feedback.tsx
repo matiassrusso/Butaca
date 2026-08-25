@@ -43,7 +43,7 @@ export default function Feedback() {
 
   return (
     <PageTransition>
-      <main className="max-w-2xl mx-auto px-6 pt-16 pb-24">
+      <main id="main-content" className="max-w-2xl mx-auto px-6 pt-16 pb-24">
         <header className="pb-8 border-b-2 border-foreground mb-8">
           <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-4">
             {t("feedback.kicker")}
@@ -81,6 +81,8 @@ export default function Feedback() {
               </label>
               <textarea
                 id="site-feedback-message"
+                name="message"
+                autoComplete="off"
                 value={message}
                 onChange={(event) => setMessage(event.target.value)}
                 required
@@ -100,7 +102,10 @@ export default function Feedback() {
               </label>
               <input
                 id="site-feedback-email"
+                name="email"
                 type="email"
+                autoComplete="email"
+                spellCheck={false}
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
                 maxLength={320}

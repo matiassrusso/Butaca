@@ -43,7 +43,7 @@ export default function VerifyEmail() {
 
   return (
     <PageTransition>
-      <main className="min-h-[calc(100vh-4rem)] flex items-center justify-center p-12">
+      <main id="main-content" className="min-h-[calc(100vh-4rem)] flex items-center justify-center p-12">
         <div className="w-full max-w-sm space-y-8">
           <div>
             <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-2">

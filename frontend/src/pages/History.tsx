@@ -212,7 +212,7 @@ export default function History() {
 
   return (
     <PageTransition>
-      <main className="max-w-7xl mx-auto px-6 pt-16 pb-24">
+      <main id="main-content" className="max-w-7xl mx-auto px-6 pt-16 pb-24">
         <header className="pb-8 border-b-2 border-foreground mb-8">
           <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-4">
             {t("history.kicker")}

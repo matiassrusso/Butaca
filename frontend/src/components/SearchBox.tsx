@@ -32,6 +32,8 @@ export function SearchBox() {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [open, setOpen] = useState(false);
   const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState(false);
+  const [searchRetry, setSearchRetry] = useState(0);
   const [verdictFor, setVerdictFor] = useState<number | null>(null);
   const [selectedRec, setSelectedRec] = useState<Recommendation | null>(null);
   const boxRef = useRef<HTMLDivElement>(null);
@@ -61,26 +63,34 @@ export function SearchBox() {
     const trimmed = query.trim();
     if (trimmed.length < 2 || !token) {
       setResults([]);
+      setSearchError(false);
       setSearching(false);
       return;
     }
 
     let cancelled = false;
     setSearching(true);
+    setSearchError(false);
     // debounce: sin esto sale un request por tecla y TMDb devuelve resultados
     // de una query vieja después de una nueva
     const timer = setTimeout(() => {
       fetch(`${API_BASE_URL}/titles/search?q=${encodeURIComponent(trimmed)}`, {
         headers: { Authorization: `Bearer ${token}` },
       })
-        .then((response) => (response.ok ? response.json() : null))
-        .then((body: { titles: SearchResult[] } | null) => {
+        .then(async (response) => {
+          if (!response.ok) throw new Error();
+          return response.json() as Promise<{ titles: SearchResult[] }>;
+        })
+        .then((body) => {
           if (cancelled) return;
-          setResults(body?.titles ?? []);
+          setResults(body.titles ?? []);
           setOpen(true);
         })
         .catch(() => {
-          if (!cancelled) setResults([]);
+          if (!cancelled) {
+            setSearchError(true);
+            setOpen(true);
+          }
         })
         .finally(() => {
           if (!cancelled) setSearching(false);
@@ -91,7 +101,7 @@ export function SearchBox() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [query, token]);
+  }, [query, token, searchRetry]);
 
   async function openVerdict(item: SearchResult) {
     if (item.tmdb_id == null || !token) return;
@@ -148,7 +158,12 @@ export function SearchBox() {
 
         {open && (
           <div className="absolute right-0 mt-2 w-80 max-h-96 overflow-y-auto border-2 border-foreground bg-background shadow-xl">
-            {results.length === 0 ? (
+            {searchError ? (
+              <div className="px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-destructive">
+                <p>{t("search.error")}</p>
+                <button type="button" onClick={() => setSearchRetry((n) => n + 1)} className="mt-2 border border-foreground px-2 py-1 text-foreground hover:border-accent hover:text-accent">{t("common.retry")}</button>
+              </div>
+            ) : results.length === 0 ? (
               <p className="px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
                 {t("search.noResults")}
               </p>
@@ -161,7 +176,7 @@ export function SearchBox() {
                   className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-accent/10 disabled:opacity-50 transition-colors"
                 >
                   {item.poster_path ? (
-                    <img src={item.poster_path} alt="" className="w-8 aspect-[2/3] object-cover shrink-0" />
+                    <img src={item.poster_path} alt="" width={32} height={48} loading="lazy" className="w-8 aspect-[2/3] object-cover shrink-0" />
                   ) : (
                     <div className="w-8 aspect-[2/3] bg-secondary flex items-center justify-center shrink-0">
                       <Film className="w-3 h-3 text-muted-foreground/40" />

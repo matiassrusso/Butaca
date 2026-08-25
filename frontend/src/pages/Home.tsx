@@ -87,6 +87,8 @@ export default function Home() {
   const [feedbackState, setFeedbackState] = useState<Record<number, FeedbackStatus>>({});
   const [weeklyPicks, setWeeklyPicks] = useState<Recommendation[]>([]);
   const [weeklyLoading, setWeeklyLoading] = useState(true);
+  const [weeklyError, setWeeklyError] = useState(false);
+  const [weeklyRetry, setWeeklyRetry] = useState(0);
   // el typewriter del "why" vive en el modal pero su memoria (qué why ya se
   // animó) tiene que sobrevivir a que el modal se desmonte al cerrarlo, así
   // que la ref vive acá — sin esto la home mostraba el texto completo de una,
@@ -187,7 +189,10 @@ export default function Home() {
       return fetch(
         `${API_BASE_URL}/weekly`,
         token ? { headers: { Authorization: `Bearer ${token}` } } : {},
-      ).then((response) => (response.ok ? response.json() : null));
+      ).then((response) => {
+        if (!response.ok) throw new Error();
+        return response.json() as Promise<RecommendResponse>;
+      });
     }
 
     function applyWeekly(body: RecommendResponse) {
@@ -210,11 +215,12 @@ export default function Home() {
           if (cancelled || !body) return;
           applyWeekly(body);
           if (!body.refined) pollUntilRefined(attempt + 1);
-        });
+        }).catch(() => undefined);
       }, WEEKLY_POLL_INTERVAL_MS);
     }
 
     setWeeklyLoading(true);
+    setWeeklyError(false);
     loadWeekly()
       .then((body) => {
         if (cancelled || !body) return;
@@ -222,7 +228,7 @@ export default function Home() {
         if (token && !body.refined) pollUntilRefined(0);
       })
       .catch(() => {
-        if (!cancelled) setWeeklyPicks([]);
+        if (!cancelled) setWeeklyError(true);
       })
       .finally(() => {
         if (!cancelled) setWeeklyLoading(false);
@@ -231,14 +237,14 @@ export default function Home() {
       cancelled = true;
       clearTimeout(pollTimer);
     };
-  }, [token, lang]);
+  }, [token, lang, weeklyRetry]);
 
   const currentPicks = latestSession?.recommendations.slice(0, 3) ?? [];
 
   return (
     <PageTransition>
       {/* Hero — cinematic, layered */}
-      <section className="relative overflow-hidden border-b-2 border-foreground min-h-[92vh] flex items-end pb-16 pt-24">
+      <section id="main-content" className="relative overflow-hidden border-b-2 border-foreground min-h-[92vh] flex items-end pb-16 pt-24">
         <div aria-hidden className="absolute inset-0 -z-10">
           <div className="orb bg-accent size-[42vw] top-[-8vw] left-[-6vw]" />
           <div className="orb bg-foreground/40 dark:bg-accent/50 size-[35vw] bottom-[-10vw] right-[-8vw]" style={{ animationDelay: "-6s" }} />
@@ -331,7 +337,7 @@ export default function Home() {
         </div>
       </div>
 
-      {(weeklyLoading || weeklyPicks.length > 0) && (
+      {(weeklyLoading || weeklyPicks.length > 0 || weeklyError) && (
         <section className="max-w-7xl mx-auto px-6 py-24 border-b-2 border-foreground">
           <div className="flex items-baseline gap-4 mb-10">
             <span className="font-mono text-xs px-2 py-1 border border-foreground/20">
@@ -362,6 +368,11 @@ export default function Home() {
                   <div className="h-3 bg-secondary mt-2 w-1/2" />
                 </div>
               ))}
+            </div>
+          ) : weeklyError ? (
+            <div className="flex items-center gap-3 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+              <span>{t("home.weekly.error")}</span>
+              <button type="button" onClick={() => setWeeklyRetry((n) => n + 1)} className="border-2 border-foreground px-3 py-2 hover:border-accent hover:text-accent">{t("common.retry")}</button>
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">

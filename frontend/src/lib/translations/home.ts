@@ -34,6 +34,7 @@ export const HOME: Record<string, Entry> = {
     es: "para ver qué tan bien va cada una con vos.",
     en: "to see how well each one fits you.",
   },
+  "home.weekly.error": { es: "Las recomendaciones semanales no están disponibles ahora.", en: "This week's picks aren't available right now." },
 
   // ─── Current picks ────────────────────────────────────────────────────
   "home.currentPicks.label": { es: "[Current picks]", en: "[Current picks]" },

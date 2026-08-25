@@ -66,6 +66,9 @@ export const RECOMMEND: Record<string, Entry> = {
   "recommend.viewSwipe": { es: "Una por una", en: "One by one" },
   "recommend.searchPlaceholder": { es: "¿Viste otra? Buscala por nombre…", en: "Seen something else? Search it by name…" },
   "recommend.searchEmpty": { es: "Sin resultados para “{query}”.", en: "No results for “{query}”." },
+  "recommend.searchError": { es: "No pude buscar títulos ahora.", en: "Couldn't search titles right now." },
+  "recommend.titlesError": { es: "No pude cargar las películas para puntuar.", en: "Couldn't load the movies to rate." },
+  "recommend.optionsError": { es: "No pude cargar las opciones de género.", en: "Couldn't load the genre options." },
 
   "recommend.letterboxdRating": { es: "Rating de Letterboxd", en: "Letterboxd rating" },
   "recommend.notSeen": { es: "No la vi", en: "Haven't seen it" },

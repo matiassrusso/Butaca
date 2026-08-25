@@ -180,7 +180,7 @@ export default function Rate() {
 
   return (
     <PageTransition>
-      <main className="max-w-2xl mx-auto px-6 pt-16 pb-24">
+      <main id="main-content" className="max-w-2xl mx-auto px-6 pt-16 pb-24">
         <header className="pb-8 border-b-2 border-foreground mb-8">
           <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-4">
             {t("rate.tag")}
@@ -280,6 +280,8 @@ export default function Rate() {
                     <img
                       src={current.poster_path}
                       alt={current.title}
+                      width={342}
+                      height={513}
                       draggable={false}
                       className="w-full aspect-[2/3] object-cover pointer-events-none"
                     />

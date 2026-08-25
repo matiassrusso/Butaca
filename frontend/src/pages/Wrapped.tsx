@@ -51,6 +51,14 @@ function locale(lang: Lang): string {
   return lang === "en" ? "en-US" : "es-AR";
 }
 
+function formatNumber(value: number, lang: Lang, options?: Intl.NumberFormatOptions): string {
+  return new Intl.NumberFormat(locale(lang), options).format(value);
+}
+
+function formatDecade(decade: number, lang: Lang): string {
+  return lang === "en" ? `${decade}s` : `década de ${decade}`;
+}
+
 // Intl ya sabe los doce meses en los dos idiomas: mantener 24 claves a mano
 // sería puro trabajo repetido
 function monthName(month: number, lang: Lang, style: "short" | "long" = "short"): string {
@@ -115,7 +123,7 @@ function BarRow({ label, value, max, caption }: { label: string; value: number; 
 // chat. No hay generación de imagen a propósito — la página está pensada para
 // que una captura quede bien.
 function ShareRow({ data }: { data: WrappedData }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const [copied, setCopied] = useState<"text" | "link" | null>(null);
 
   async function copy(kind: "text" | "link", value: string) {
@@ -134,8 +142,8 @@ function ShareRow({ data }: { data: WrappedData }) {
   const url = `${window.location.origin}/wrapped${data.year ? `?year=${data.year}` : ""}`;
   const summary = t("wrapped.shareText", {
     year: data.year ?? "",
-    total: data.total,
-    average: data.average_rating ?? t("wrapped.noAverage"),
+    total: formatNumber(data.total, lang),
+    average: data.average_rating == null ? t("wrapped.noAverage") : formatNumber(data.average_rating, lang, { maximumFractionDigits: 1 }),
     top: data.favorites[0]?.title ?? "—",
     url,
   });
@@ -227,7 +235,7 @@ export default function Wrapped() {
 
   return (
     <PageTransition>
-      <main className="max-w-5xl mx-auto px-5 sm:px-6 pt-12 pb-24">
+      <main id="main-content" className="max-w-5xl mx-auto px-5 sm:px-6 pt-12 pb-24">
         <header className="pb-8 border-b-2 border-foreground mb-10">
           <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-3">
             {t("wrapped.kicker")}
@@ -263,7 +271,7 @@ export default function Wrapped() {
                     }`}
                   >
                     {entry.year}
-                    <span className="ml-2 opacity-60">{entry.count}</span>
+                    <span className="ml-2 opacity-60">{formatNumber(entry.count, lang)}</span>
                   </button>
                 ))}
               </div>
@@ -307,7 +315,7 @@ export default function Wrapped() {
             <p className="font-mono text-xs uppercase leading-relaxed text-muted-foreground max-w-md mx-auto">
               {data.total === 0
                 ? t("wrapped.emptyYearNone", { year: data.year })
-                : t("wrapped.emptyYearBody", { n: data.total, year: data.year })}
+                : t("wrapped.emptyYearBody", { n: formatNumber(data.total, lang), year: data.year })}
             </p>
           </div>
         )}
@@ -316,14 +324,14 @@ export default function Wrapped() {
           <>
             <div className="grid grid-cols-2 md:grid-cols-4 border-2 border-foreground">
               {[
-                { label: t("wrapped.statTitles"), value: data.total },
+                { label: t("wrapped.statTitles"), value: formatNumber(data.total, lang) },
                 {
                   label: t("wrapped.statAverage"),
-                  value: data.average_rating ?? t("wrapped.noAverage"),
-                  note: data.average_rating !== null ? t("wrapped.averageNote", { n: data.precise_count }) : undefined,
+                  value: data.average_rating == null ? t("wrapped.noAverage") : formatNumber(data.average_rating, lang, { maximumFractionDigits: 1 }),
+                  note: data.average_rating !== null ? t("wrapped.averageNote", { n: formatNumber(data.precise_count, lang) }) : undefined,
                 },
-                { label: t("wrapped.statReviews"), value: data.review_count },
-                { label: t("wrapped.statPicks"), value: data.picks_count },
+                { label: t("wrapped.statReviews"), value: formatNumber(data.review_count, lang) },
+                { label: t("wrapped.statPicks"), value: formatNumber(data.picks_count, lang) },
               ].map((stat, i) => (
                 <div
                   key={stat.label}
@@ -347,10 +355,10 @@ export default function Wrapped() {
             {/* qué se está contando: sin esto los números no se pueden explicar */}
             <p className="font-mono text-[10px] uppercase tracking-widest leading-relaxed text-muted-foreground/70 mt-4 max-w-3xl">
               {data.dated_count === data.total
-                ? t("wrapped.countingNoteAll", { total: data.total })
+                ? t("wrapped.countingNoteAll", { total: formatNumber(data.total, lang) })
                 : data.dated_count === 0
-                  ? t("wrapped.countingNoteNone", { total: data.total })
-                  : t("wrapped.countingNote", { dated: data.dated_count, total: data.total })}
+                  ? t("wrapped.countingNoteNone", { total: formatNumber(data.total, lang) })
+                  : t("wrapped.countingNote", { dated: formatNumber(data.dated_count, lang), total: formatNumber(data.total, lang) })}
             </p>
 
             {data.favorites.length > 0 && (
@@ -400,6 +408,7 @@ export default function Wrapped() {
                     label={monthName(entry.month, lang)}
                     value={entry.count}
                     max={monthMax}
+                    caption={formatNumber(entry.count, lang)}
                   />
                 ))}
               </div>
@@ -410,12 +419,12 @@ export default function Wrapped() {
                 <SectionTitle
                   label={t("wrapped.decades")}
                   note={t("wrapped.decadesNote", {
-                    n: data.decades.reduce((sum, d) => sum + d.count, 0),
+                    n: formatNumber(data.decades.reduce((sum, d) => sum + d.count, 0), lang),
                   })}
                 />
                 <div className="space-y-2">
                   {data.decades.map((entry) => (
-                    <BarRow key={entry.decade} label={`${entry.decade}s`} value={entry.count} max={decadeMax} />
+                    <BarRow key={entry.decade} label={formatDecade(entry.decade, lang)} value={entry.count} max={decadeMax} caption={formatNumber(entry.count, lang)} />
                   ))}
                 </div>
               </section>
@@ -438,7 +447,7 @@ export default function Wrapped() {
                         </span>
                         <span className="font-serif italic text-xl sm:text-2xl truncate">{movement.label}</span>
                       </span>
-                      <span className="font-mono text-xs text-accent shrink-0">{movement.count}</span>
+                      <span className="font-mono text-xs text-accent shrink-0">{formatNumber(movement.count, lang)}</span>
                     </li>
                   ))}
                 </ol>
@@ -455,7 +464,7 @@ export default function Wrapped() {
                       label={monthName(Number(point.month.slice(5, 7)), lang)}
                       value={point.avg_match}
                       max={100}
-                      caption={`${point.avg_match}%`}
+                      caption={`${formatNumber(point.avg_match, lang, { maximumFractionDigits: 1 })}%`}
                     />
                   ))}
                 </div>
@@ -472,7 +481,7 @@ export default function Wrapped() {
                       className="px-3 py-2 border-2 border-foreground/20 font-mono text-[10px] uppercase tracking-widest"
                     >
                       {vibe.label}
-                      <span className="ml-2 text-accent">{vibe.count}</span>
+                      <span className="ml-2 text-accent">{formatNumber(vibe.count, lang)}</span>
                     </span>
                   ))}
                 </div>

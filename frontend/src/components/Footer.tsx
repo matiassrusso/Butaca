@@ -1,5 +1,5 @@
 import { Github, Linkedin } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "wouter";
 
 import { API_BASE_URL } from "@/hooks/useAuth";
@@ -13,11 +13,13 @@ const SOCIAL_LINKS = [
   { label: "GitHub", href: "https://github.com/matiassrusso", Icon: Github },
 ];
 
-const compactNumber = new Intl.NumberFormat("en", { notation: "compact" });
-
 export function Footer() {
   const [stats, setStats] = useState<CatalogStats | null>(null);
-  const { t } = useLang();
+  const { t, lang } = useLang();
+  const compactNumber = useMemo(
+    () => new Intl.NumberFormat(lang === "en" ? "en-US" : "es-AR", { notation: "compact" }),
+    [lang],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -56,7 +58,7 @@ export function Footer() {
                   target="_blank"
                   rel="noopener noreferrer"
                   aria-label={label}
-                  className="flex items-center gap-2 border border-background/30 px-3 py-2 font-mono text-[10px] uppercase tracking-widest opacity-70 hover:opacity-100 hover:border-background transition-all"
+                  className="flex items-center gap-2 border border-background/30 px-3 py-2 font-mono text-[10px] uppercase tracking-widest opacity-70 hover:opacity-100 hover:border-background transition-[opacity,border-color]"
                 >
                   <Icon size={14} aria-hidden="true" />
                   {label}
@@ -64,7 +66,7 @@ export function Footer() {
               ))}
               <Link
                 href="/feedback"
-                className="flex items-center gap-2 border border-background/30 px-3 py-2 font-mono text-[10px] uppercase tracking-widest opacity-70 hover:opacity-100 hover:border-background transition-all"
+                className="flex items-center gap-2 border border-background/30 px-3 py-2 font-mono text-[10px] uppercase tracking-widest opacity-70 hover:opacity-100 hover:border-background transition-[opacity,border-color]"
               >
                 {t("feedback.footerLink")}
               </Link>

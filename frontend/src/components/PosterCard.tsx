@@ -63,6 +63,8 @@ export function PosterCard({
             <img
               src={poster}
               alt={rec.title}
+              width={342}
+              height={513}
               loading="lazy"
               className="w-full aspect-[2/3] object-cover bg-secondary outline outline-1 -outline-offset-1 outline-black/10 transition-transform duration-700 group-hover:scale-[1.04]"
             />
@@ -99,7 +101,7 @@ export function PosterCard({
               style={{ transform: "translateZ(40px)" }}
               title={unknown ? t("modal.unknownMatchHint") : undefined}
             >
-              {unknown ? t("match.unknown") : `${rec.match_score}% match`}
+              {unknown ? t("match.unknown") : t("modal.match", { score: rec.match_score })}
             </div>
           ))}
 

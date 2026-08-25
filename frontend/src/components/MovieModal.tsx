@@ -1,5 +1,5 @@
 import { ExternalLink, Film, Loader2 } from "lucide-react";
-import { useEffect, useState, type MutableRefObject } from "react";
+import { useEffect, useRef, useState, type MutableRefObject } from "react";
 import { createPortal } from "react-dom";
 
 import { API_BASE_URL } from "@/hooks/useAuth";
@@ -218,6 +218,8 @@ function DisagreePanel({
           <img
             src={current.poster_path}
             alt={current.title}
+            width={64}
+            height={96}
             className="w-16 aspect-[2/3] object-cover shrink-0 outline outline-1 -outline-offset-1 outline-black/10"
           />
         ) : (
@@ -299,6 +301,9 @@ export function MovieModal({
   const [reviewDraft, setReviewDraft] = useState("");
   const [ratingSaving, setRatingSaving] = useState(false);
   const [loadingDetails, setLoadingDetails] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
 
   // "no estoy de acuerdo con el match": después de juntar VOTES_NEEDED
   // opiniones se recalcula contra el perfil ya actualizado. El resultado se
@@ -340,12 +345,35 @@ export function MovieModal({
   }
 
   useEffect(() => {
+    openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
+    closeRef.current?.focus();
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+      }
+      if (event.key !== "Tab" || !dialogRef.current) return;
+      const focusable = dialogRef.current.querySelectorAll<HTMLElement>('a[href], button:not(:disabled), textarea:not(:disabled), input:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])');
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+    document.addEventListener("keydown", onKeyDown);
     return () => {
       document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", onKeyDown);
+      openerRef.current?.focus();
     };
-  }, []);
+  }, [onClose]);
 
   useEffect(() => {
     let cancelled = false;
@@ -390,19 +418,23 @@ export function MovieModal({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[100] bg-foreground/60 backdrop-blur-sm flex items-start justify-center p-6 overflow-y-auto"
+      className="fixed inset-0 z-[100] bg-foreground/60 backdrop-blur-sm flex items-start justify-center p-6 overflow-y-auto overscroll-contain"
       onClick={onClose}
     >
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="movie-modal-title"
         className="bg-background max-w-4xl w-full mt-12 mb-12 border-2 border-foreground"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex justify-between items-baseline border-b-2 border-foreground px-6 py-4">
           <span className="font-mono text-[10px] uppercase tracking-widest">
-            [Detail] · {rec.id}
+            {t("modal.detail")} · {rec.id}
           </span>
-          <button onClick={onClose} className="font-mono text-xs hover:text-accent p-2 -m-2">
-            [close ×]
+          <button ref={closeRef} type="button" onClick={onClose} aria-label={t("modal.close")} className="font-mono text-xs hover:text-accent p-2 -m-2">
+            {t("common.close")} ×
           </button>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-5 gap-8 p-6">
@@ -411,6 +443,8 @@ export function MovieModal({
               <img
                 src={rec.poster_path}
                 alt={rec.title}
+                width={342}
+                height={513}
                 className="w-full aspect-[2/3] object-cover outline outline-1 -outline-offset-1 outline-black/10"
               />
             ) : (
@@ -420,7 +454,7 @@ export function MovieModal({
             )}
           </div>
           <div className="md:col-span-3 flex flex-col">
-            <h2 className="text-4xl md:text-5xl font-black uppercase tracking-tighter leading-[0.9] mb-4">
+            <h2 id="movie-modal-title" className="text-4xl md:text-5xl font-black uppercase tracking-tighter leading-[0.9] mb-4">
               {rec.title}
             </h2>
             <div className="font-mono text-xs text-muted-foreground uppercase tracking-widest mb-6">
@@ -433,7 +467,7 @@ export function MovieModal({
               ) : isUnknownMatch(shown.match_score) ? (
                 t("match.unknown")
               ) : (
-                `${shown.match_score}% match`
+                t("modal.match", { score: shown.match_score })
               )}
               {rec.tmdb_id != null && token && !readOnly && !recalculating && (
                 <span className="relative inline-block">
@@ -537,7 +571,7 @@ export function MovieModal({
                             key={prov.name}
                             className="inline-flex items-center gap-1.5 font-mono text-[10px] uppercase px-2 py-1 border border-foreground/20"
                           >
-                            {prov.logo_path && <img src={prov.logo_path} alt="" className="w-4 h-4" />}
+                            {prov.logo_path && <img src={prov.logo_path} alt="" width={16} height={16} loading="lazy" className="w-4 h-4" />}
                             {prov.name}
                           </span>
                         ))}

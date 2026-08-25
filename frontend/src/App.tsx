@@ -9,6 +9,7 @@ import { Footer } from "./components/Footer";
 import { Navbar } from "./components/Navbar";
 import { AuthProvider } from "./hooks/useAuth";
 import { LanguageProvider } from "./lib/i18n";
+import { useLang } from "./lib/i18n";
 import Chat from "./pages/Chat";
 import Feedback from "./pages/Feedback";
 import Games from "./pages/Games";
@@ -51,10 +52,16 @@ function Router() {
   );
 }
 
+function SkipLink() {
+  const { t } = useLang();
+  return <a className="skip-link" href="#main-content">{t("common.skipToContent")}</a>;
+}
+
 export default function App() {
   return (
     <ErrorBoundary>
       <LanguageProvider>
+      <SkipLink />
       <AuthProvider>
         <Toaster
           toastOptions={{

@@ -41,7 +41,7 @@ export default function ResetPassword() {
 
   return (
     <PageTransition>
-      <main className="min-h-[calc(100vh-4rem)] flex items-center justify-center p-12">
+      <main id="main-content" className="min-h-[calc(100vh-4rem)] flex items-center justify-center p-12">
         <div className="w-full max-w-sm space-y-8">
           <div>
             <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-2">
@@ -74,6 +74,8 @@ export default function ResetPassword() {
                 </span>
                 <input
                   type="password"
+                  name="new-password"
+                  autoComplete="new-password"
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
                   minLength={8}
@@ -87,11 +89,11 @@ export default function ResetPassword() {
                 disabled={loading || !token}
                 className="w-full py-4 bg-foreground text-background font-mono text-xs uppercase tracking-widest hover:bg-accent transition-colors disabled:opacity-60"
               >
-                {loading ? "..." : t("auth.resetSubmit")}
+                {loading ? t("auth.resetting") : t("auth.resetSubmit")}
               </button>
 
               {error ? (
-                <div className="p-4 border-2 border-destructive/50 font-mono text-xs text-destructive">
+                <div aria-live="assertive" className="p-4 border-2 border-destructive/50 font-mono text-xs text-destructive">
                   {error}
                 </div>
               ) : null}

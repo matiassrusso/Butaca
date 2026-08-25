@@ -10,6 +10,7 @@ export const AUTH: Record<string, Entry> = {
   // ─── Login: panel izquierdo ───────────────────────────────────────────
   "auth.heroTitleLead": { es: "Volvé a la", en: "Back to the" },
   "auth.heroTitleAccent": { es: "función", en: "show" },
+  "auth.accessHeading": { es: "[Acceso · Butaca]", en: "[Access · Butaca]" },
 
   // ─── Login: encabezados por modo ──────────────────────────────────────
   "auth.tagClaim": { es: "[Guardá tu cuenta]", en: "[Save your account]" },
@@ -53,6 +54,7 @@ export const AUTH: Record<string, Entry> = {
 
   // ─── Login: Google e invitado ─────────────────────────────────────────
   "auth.googleButton": { es: "Continuar con Google", en: "Continue with Google" },
+  "auth.googleUnavailable": { es: "Google no está disponible ahora. Probá de nuevo más tarde.", en: "Google isn't available right now. Try again later." },
   "auth.googleKeepsRatings": {
     es: "Con Google también conservás lo que puntuaste.",
     en: "With Google you keep everything you rated too.",
@@ -107,6 +109,7 @@ export const AUTH: Record<string, Entry> = {
   "auth.resetGoToLogin": { es: "Ir a entrar →", en: "Go to sign in →" },
   "auth.resetNewPassword": { es: "Nueva password", en: "New password" },
   "auth.resetSubmit": { es: "Cambiar contraseña →", en: "Change password →" },
+  "auth.resetting": { es: "Restableciendo…", en: "Resetting…" },
   "auth.errResetFailed": {
     es: "No pude cambiar tu contraseña.",
     en: "Couldn't change your password.",
