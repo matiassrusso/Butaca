@@ -11,6 +11,8 @@
 export type Entry = { es: string; en: string };
 
 export const SHARED: Record<string, Entry> = {
+  "errorBoundary.title": { es: "Ocurrió un error inesperado.", en: "Something went wrong." },
+  "errorBoundary.reload": { es: "Recargar", en: "Reload" },
   // ─── Navbar / menú ────────────────────────────────────────────────────
   "nav.tagline": { es: "Cineclub", en: "Film Club" },
   "nav.recommend": { es: "Recomendar", en: "Recommend" },
@@ -43,11 +45,13 @@ export const SHARED: Record<string, Entry> = {
   "nav.langAria": { es: "Cambiar idioma", en: "Change language" },
   "nav.langToEn": { es: "English", en: "English" },
   "nav.langToEs": { es: "Español", en: "Español" },
+  "nav.socials": { es: "Redes", en: "Socials" },
 
   // ─── Buscador ─────────────────────────────────────────────────────────
   "search.placeholder": { es: "Buscar película o serie…", en: "Search a movie or show…" },
   "search.aria": { es: "Buscar títulos", en: "Search titles" },
   "search.noResults": { es: "Sin resultados", en: "No results" },
+  "search.error": { es: "No pude buscar ahora. Reintentá.", en: "Couldn't search right now. Try again." },
   "search.loading": { es: "Buscando…", en: "Searching…" },
   "search.verdictLoading": { es: "Calculando tu veredicto…", en: "Working out your verdict…" },
 
@@ -64,6 +68,7 @@ export const SHARED: Record<string, Entry> = {
   "common.cancel": { es: "Cancelar", en: "Cancel" },
   "common.save": { es: "Guardar", en: "Save" },
   "common.back": { es: "Volver", en: "Back" },
+  "common.skipToContent": { es: "Saltar al contenido", en: "Skip to content" },
   "common.next": { es: "Siguiente", en: "Next" },
   "common.movies": { es: "Películas", en: "Movies" },
   "common.series": { es: "Series", en: "Shows" },

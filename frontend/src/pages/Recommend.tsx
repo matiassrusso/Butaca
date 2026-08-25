@@ -77,8 +77,9 @@ export type OnboardingTitle = {
 };
 
 const MIN_MANUAL_RATINGS = 10; // keep in sync with backend/app/main.py::MIN_MANUAL_RATINGS
-function formatFileSize(bytes: number): string {
-  return bytes < 1024 * 1024 ? `${Math.round(bytes / 1024)} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+function formatFileSize(bytes: number, lang: "es" | "en"): string {
+  const value = bytes < 1024 * 1024 ? Math.round(bytes / 1024) : bytes / (1024 * 1024);
+  return `${new Intl.NumberFormat(lang === "en" ? "en-US" : "es-AR", { maximumFractionDigits: 1 }).format(value)} ${bytes < 1024 * 1024 ? "KB" : "MB"}`;
 }
 
 const tabCls = (active: boolean) =>
@@ -142,6 +143,8 @@ function ManualRatingCard({
             <img
               src={item.poster_path}
               alt={item.title}
+              width={342}
+              height={513}
               loading="lazy"
               className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-[1.04]"
             />
@@ -285,6 +288,8 @@ function SwipeRating({
             <img
               src={current.poster_path}
               alt={current.title}
+              width={342}
+              height={513}
               draggable={false}
               className="w-full aspect-[2/3] object-cover pointer-events-none"
             />
@@ -325,17 +330,24 @@ export default function Recommend() {
   const [kindFilter, setKindFilter] = useState<KindFilter>("movie");
   const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
   const [pickOptions, setPickOptions] = useState<PickOption[]>([]);
+  const [loadingOptions, setLoadingOptions] = useState(true);
+  const [optionsError, setOptionsError] = useState(false);
+  const [optionsRetry, setOptionsRetry] = useState(0);
 
   // picker "a tu elección" — público, sin auth, se carga una sola vez al
   // montar (no depende de sesión ni de mode)
   useEffect(() => {
+    setLoadingOptions(true);
+    setOptionsError(false);
     fetch(`${API_BASE_URL}/recommend/options`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((body: { options: PickOption[] } | null) => {
-        if (body) setPickOptions(body.options);
+      .then(async (r) => {
+        if (!r.ok) throw new Error();
+        return r.json() as Promise<{ options: PickOption[] }>;
       })
-      .catch(() => {});
-  }, []);
+      .then((body) => setPickOptions(body.options))
+      .catch(() => setOptionsError(true))
+      .finally(() => setLoadingOptions(false));
+  }, [optionsRetry]);
 
   const [importMethod, setImportMethod] = useState<ImportMethod>("zip");
   const [zipFile, setZipFile] = useState<File | null>(null);
@@ -381,11 +393,14 @@ export default function Recommend() {
   // onboarding without Letterboxd: seed titles fetched lazily, ratings by title
   const [onboardingTitles, setOnboardingTitles] = useState<OnboardingTitle[]>([]);
   const [loadingTitles, setLoadingTitles] = useState(false);
+  const [titlesError, setTitlesError] = useState(false);
+  const [titlesRetry, setTitlesRetry] = useState(0);
   const [manualRatings, setManualRatings] = useState<Record<string, number>>({});
   // titles the user searched and added (seen a film that isn't in the seed list)
   const [addedTitles, setAddedTitles] = useState<OnboardingTitle[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<OnboardingTitle[]>([]);
+  const [searchError, setSearchError] = useState(false);
   // mismo umbral que el debounce de más abajo (2 caracteres) — mientras hay
   // una búsqueda activa, la grilla de posters muestra los resultados en vez
   // de la lista semilla
@@ -444,10 +459,13 @@ export default function Recommend() {
   useEffect(() => {
     if (importMethod !== "manual" || onboardingTitles.length || loadingTitles || !token) return;
     setLoadingTitles(true);
+    setTitlesError(false);
     fetch(`${API_BASE_URL}/onboarding/titles`, { headers: { Authorization: `Bearer ${token}` } })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((body: { titles: OnboardingTitle[] } | null) => {
-        if (!body) return;
+      .then(async (r) => {
+        if (!r.ok) throw new Error();
+        return r.json() as Promise<{ titles: OnboardingTitle[] }>;
+      })
+      .then((body) => {
         setOnboardingTitles(body.titles);
         const prefilled = Object.fromEntries(
           body.titles
@@ -458,9 +476,9 @@ export default function Recommend() {
           setManualRatings((prev) => ({ ...prefilled, ...prev }));
         }
       })
-      .catch(() => {})
+      .catch(() => setTitlesError(true))
       .finally(() => setLoadingTitles(false));
-  }, [importMethod, onboardingTitles.length, loadingTitles, token]);
+  }, [importMethod, onboardingTitles.length, loadingTitles, token, titlesRetry]);
 
   function rateManual(title: string, rating: number | null) {
     setManualRatings((prev) => {
@@ -479,16 +497,22 @@ export default function Recommend() {
       return;
     }
     const controller = new AbortController();
+    setSearchError(false);
     const timer = setTimeout(() => {
       fetch(`${API_BASE_URL}/onboarding/search?q=${encodeURIComponent(query)}`, {
         headers: { Authorization: `Bearer ${token}` },
         signal: controller.signal,
       })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((body: { titles: OnboardingTitle[] } | null) => {
-          if (body) setSearchResults(body.titles);
+        .then(async (r) => {
+          if (!r.ok) throw new Error();
+          return r.json() as Promise<{ titles: OnboardingTitle[] }>;
         })
-        .catch(() => {});
+        .then((body) => {
+          setSearchResults(body.titles);
+        })
+        .catch((error: unknown) => {
+          if (!(error instanceof DOMException && error.name === "AbortError")) setSearchError(true);
+        });
     }, 350);
     return () => {
       clearTimeout(timer);
@@ -515,7 +539,7 @@ export default function Recommend() {
     setZipFile(file);
   }, [t]);
 
-  function handleDrop(event: React.DragEvent<HTMLDivElement>) {
+  function handleDrop(event: React.DragEvent<HTMLLabelElement>) {
     event.preventDefault();
     setIsDragging(false);
     const dropped = event.dataTransfer.files[0];
@@ -541,7 +565,7 @@ export default function Recommend() {
       : importMethod === "username"
         ? letterboxdUsername.trim().length > 0
         : manualCount >= MIN_MANUAL_RATINGS;
-  const step2Valid = mode !== "genres" || selectedGenres.length > 0;
+  const step2Valid = mode !== "genres" || (pickOptions.length > 0 && selectedGenres.length > 0);
   const canGenerate = hasSource && step2Valid;
 
   // hint junto al botón deshabilitado: qué falta para poder continuar
@@ -678,7 +702,7 @@ export default function Recommend() {
 
   return (
     <PageTransition>
-      <main className="max-w-7xl mx-auto px-6 pt-16 pb-24">
+      <main id="main-content" className="max-w-7xl mx-auto px-6 pt-16 pb-24">
         <header className="pb-10 border-b-2 border-foreground mb-12">
           <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-4">
             {t("recommend.eyebrow")}
@@ -760,19 +784,19 @@ export default function Recommend() {
                     <p className="font-mono text-[10px] uppercase leading-relaxed text-muted-foreground mb-3">
                       {t("recommend.zipHint")}
                     </p>
-                    <div
+                    <label
+                      htmlFor="letterboxd-zip"
                       onDrop={handleDrop}
                       onDragOver={(e) => {
                         e.preventDefault();
                         setIsDragging(true);
                       }}
                       onDragLeave={() => setIsDragging(false)}
-                      onClick={() => fileInputRef.current?.click()}
                       className={`border-2 border-dashed p-8 text-center cursor-pointer transition-colors ${
                         isDragging ? "border-accent bg-accent/5" : "border-foreground/30 hover:border-foreground"
                       }`}
                     >
-                      <input ref={fileInputRef} type="file" accept=".zip,application/zip" onChange={handleFileInput} className="hidden" />
+                      <input id="letterboxd-zip" ref={fileInputRef} type="file" accept=".zip,application/zip" onChange={handleFileInput} className="sr-only" />
                       <div className="font-mono text-xs uppercase tracking-widest mb-2">
                         {isDragging ? t("recommend.dropActive") : t("recommend.dropIdle")}
                       </div>
@@ -782,14 +806,14 @@ export default function Recommend() {
                       {zipFile ? (
                         <div className="inline-flex items-center gap-2 font-mono text-[10px] text-accent">
                           <CheckCircle className="w-3 h-3" />
-                          {zipFile.name} · {formatFileSize(zipFile.size)}
+                          {zipFile.name} · {formatFileSize(zipFile.size, lang)}
                         </div>
                       ) : (
                         <div className="font-mono text-[10px] text-muted-foreground/60">
                           {t("recommend.dropOnlyZip")}
                         </div>
                       )}
-                    </div>
+                    </label>
                   </div>
                 ) : importMethod === "username" ? (
                   <div className="max-w-xl">
@@ -881,7 +905,12 @@ export default function Recommend() {
                         posters de abajo mientras hay una búsqueda activa, y
                         se puntúan ahí directo */}
                     {isSearching ? (
-                      searchResults.length > 0 ? (
+                      searchError ? (
+                        <div className="py-6 font-mono text-[10px] uppercase tracking-widest text-destructive">
+                          <p>{t("recommend.searchError")}</p>
+                          <button type="button" onClick={() => setSearchQuery(`${searchQuery} `)} className="mt-3 border-2 border-foreground px-3 py-2 text-foreground hover:border-accent hover:text-accent">{t("common.retry")}</button>
+                        </div>
+                      ) : searchResults.length > 0 ? (
                         <ManualRatingGrid
                           titles={searchResults}
                           ratings={manualRatings}
@@ -899,6 +928,11 @@ export default function Recommend() {
                     ) : loadingTitles ? (
                       <div className="p-12 text-center">
                         <Loader2 className="w-6 h-6 text-accent animate-spin mx-auto" />
+                      </div>
+                    ) : titlesError ? (
+                      <div className="py-12 text-center font-mono text-[10px] uppercase tracking-widest text-destructive">
+                        <p>{t("recommend.titlesError")}</p>
+                        <button type="button" onClick={() => setTitlesRetry((n) => n + 1)} className="mt-3 border-2 border-foreground px-3 py-2 text-foreground hover:border-accent hover:text-accent">{t("common.retry")}</button>
                       </div>
                     ) : ratingView === "swipe" ? (
                       <SwipeRating titles={manualTitles} ratings={manualRatings} onRate={rateManual} />
@@ -928,9 +962,14 @@ export default function Recommend() {
                   {modeOptions.map((option) => {
                     const disabled =
                       (option.mode === "watchlist" && importMethod !== "zip") ||
-                      (option.mode === "recent" && importMethod === "manual");
+                      (option.mode === "recent" && importMethod === "manual") ||
+                      (option.mode === "genres" && (loadingOptions || optionsError));
                     const disabledReason =
-                      option.mode === "watchlist"
+                      option.mode === "genres"
+                        ? loadingOptions
+                          ? t("common.loading")
+                          : t("recommend.optionsError")
+                        : option.mode === "watchlist"
                         ? t("recommend.modeWatchlistDisabled")
                         : t("recommend.modeRecentDisabled");
                     return (
@@ -962,6 +1001,12 @@ export default function Recommend() {
 
                 {mode === "genres" && (
                   <div className="mt-6 max-w-2xl">
+                    {optionsError && (
+                      <div className="mb-4 font-mono text-[10px] uppercase tracking-widest text-destructive">
+                        <p>{t("recommend.optionsError")}</p>
+                        <button type="button" onClick={() => setOptionsRetry((n) => n + 1)} className="mt-2 border-2 border-foreground px-3 py-2 text-foreground hover:border-accent hover:text-accent">{t("common.retry")}</button>
+                      </div>
+                    )}
                     <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-3">
                       {t("recommend.picksSelected", {
                         n: selectedGenres.length,

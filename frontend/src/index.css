@@ -92,10 +92,10 @@
     /* fade suave al togglear modo claro/oscuro -- solo colores, no layout.
        elementos con su propio transition-colors (hover de botones, etc.)
        ganan por especificidad y mantienen su timing más rápido. */
-    transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease, fill 0.3s ease, stroke 0.3s ease;
   }
 
   html {
+    color-scheme: light dark;
     scroll-behavior: smooth;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -127,6 +127,22 @@
     cursor: pointer;
   }
 }
+
+.skip-link {
+  position: fixed;
+  left: 1rem;
+  top: -4rem;
+  z-index: 100;
+  padding: 0.75rem 1rem;
+  border: 2px solid var(--foreground);
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.skip-link:focus { top: 1rem; }
 
 @keyframes reveal-up {
   from { opacity: 0; transform: translateY(20px); }

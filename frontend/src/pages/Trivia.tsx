@@ -71,7 +71,7 @@ export default function Trivia() {
 
   return (
     <PageTransition>
-      <main className="max-w-2xl mx-auto px-6 pt-16 pb-24">
+      <main id="main-content" className="max-w-2xl mx-auto px-6 pt-16 pb-24">
         <header className="pb-8 border-b-2 border-foreground mb-8">
           <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-4">
             {t("games.tagSingle")}
@@ -121,6 +121,8 @@ export default function Trivia() {
                 <img
                   src={question.poster_path}
                   alt={question.title}
+                  width={96}
+                  height={144}
                   className="w-24 aspect-[2/3] object-cover shrink-0 outline outline-1 -outline-offset-1 outline-black/10"
                 />
               ) : (

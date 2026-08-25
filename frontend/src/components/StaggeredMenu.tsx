@@ -56,6 +56,7 @@ export function StaggeredMenu({
 }: StaggeredMenuProps) {
   const { t } = useLang();
   const [open, setOpen] = useState(false);
+  const [reducedMotion] = useState(() => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false);
   const [location] = useLocation();
   const openRef = useRef(false);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -81,11 +82,11 @@ export function StaggeredMenu({
       preLayerElsRef.current = preLayers;
 
       const offscreen = position === "left" ? -100 : 100;
-      gsap.set([panel, ...preLayers], { xPercent: offscreen });
+      gsap.set([panel, ...preLayers], { xPercent: reducedMotion ? 0 : offscreen });
       gsap.set(icon, { rotate: 0, transformOrigin: "50% 50%" });
     });
     return () => ctx.revert();
-  }, [position]);
+  }, [position, reducedMotion]);
 
   const buildOpenTimeline = useCallback(() => {
     const panel = panelRef.current;
@@ -160,10 +161,12 @@ export function StaggeredMenu({
   }, [position]);
 
   const playOpen = useCallback(() => {
+    if (reducedMotion) return;
     buildOpenTimeline()?.play(0);
-  }, [buildOpenTimeline]);
+  }, [buildOpenTimeline, reducedMotion]);
 
   const playClose = useCallback(() => {
+    if (reducedMotion) return;
     openTlRef.current?.kill();
     openTlRef.current = null;
 
@@ -179,11 +182,15 @@ export function StaggeredMenu({
       ease: "power3.in",
       overwrite: "auto",
     });
-  }, [position]);
+  }, [position, reducedMotion]);
 
   const animateIcon = useCallback((opening: boolean) => {
     const icon = iconRef.current;
     if (!icon) return;
+    if (reducedMotion) {
+      gsap.set(icon, { rotate: opening ? 225 : 0 });
+      return;
+    }
     spinTweenRef.current?.kill();
     spinTweenRef.current = gsap.to(icon, {
       rotate: opening ? 225 : 0,
@@ -191,7 +198,7 @@ export function StaggeredMenu({
       ease: opening ? "power4.out" : "power3.inOut",
       overwrite: "auto",
     });
-  }, []);
+  }, [reducedMotion]);
 
   const closeMenu = useCallback(() => {
     if (!openRef.current) return;
@@ -209,6 +216,7 @@ export function StaggeredMenu({
     if (target) {
       onMenuOpen?.();
       playOpen();
+      requestAnimationFrame(() => panelRef.current?.querySelector<HTMLElement>("a, button")?.focus());
     } else {
       onMenuClose?.();
       playClose();
@@ -230,6 +238,10 @@ export function StaggeredMenu({
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [open, closeMenu]);
+
+  useEffect(() => {
+    if (!open) toggleBtnRef.current?.focus();
+  }, [open]);
 
   useEffect(() => {
     if (!closeOnClickAway || !open) return;
@@ -274,7 +286,7 @@ export function StaggeredMenu({
         </span>
       </button>
 
-      {createPortal(
+      {open && createPortal(
         <>
           <div ref={preLayersRef} className="sm-prelayers" data-position={position} aria-hidden="true">
             <div className="sm-prelayer sm-prelayer-1" />
@@ -313,7 +325,7 @@ export function StaggeredMenu({
 
               {displaySocials && socialItems.length > 0 && (
                 <div className="sm-socials">
-                  <h3 className="sm-socials-title">Socials</h3>
+                  <h3 className="sm-socials-title">{t("nav.socials")}</h3>
                   <ul className="sm-socials-list">
                     {socialItems.map((s) => (
                       <li key={s.label}>

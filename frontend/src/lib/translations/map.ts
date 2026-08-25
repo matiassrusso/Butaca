@@ -53,9 +53,11 @@ export const MAP: Record<string, Entry> = {
   "map.searchCount": { es: "{n} en el mapa", en: "{n} on the map" },
   "map.resetView": { es: "Reencuadrar", en: "Reset view" },
   "map.zoomHint": {
-    es: "Rueda para acercar, arrastrá para moverte.",
-    en: "Wheel to zoom, drag to pan.",
+    es: "Rueda o controles +/- para acercar; pinch y arrastre para moverte.",
+    en: "Wheel or +/- controls to zoom; pinch and drag to move.",
   },
+  "map.zoomIn": { es: "Acercar mapa", en: "Zoom in" },
+  "map.zoomOut": { es: "Alejar mapa", en: "Zoom out" },
   "map.homeCta": { es: "Ver el mapa", en: "See the map" },
   "map.homeLead": {
     es: "Mil títulos, agrupados en movimientos por sus propios vectores. Nadie escribió esas categorías a mano.",

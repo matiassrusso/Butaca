@@ -88,7 +88,7 @@ export default function Together() {
 
   return (
     <PageTransition>
-      <main className="max-w-5xl mx-auto px-6 pt-16 pb-24">
+      <main id="main-content" className="max-w-5xl mx-auto px-6 pt-16 pb-24">
         <header className="pb-8 border-b-2 border-foreground mb-8">
           <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-4 flex items-center gap-2">
             <Users className="w-3.5 h-3.5" />

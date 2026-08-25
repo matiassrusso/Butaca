@@ -71,6 +71,7 @@
   flex-direction: column;
   padding: 6rem 2rem 2rem;
   overflow-y: auto;
+  overscroll-behavior: contain;
   /* debajo de la navbar (z-50) a propósito: el panel la cubriría y el botón
      de cerrar quedaría inalcanzable. El padding-top deja libre esa franja. */
   z-index: 40;

@@ -44,6 +44,10 @@ function formatMemberSince(value: string, lang: Lang): string {
   });
 }
 
+function formatDecade(decade: number, lang: Lang): string {
+  return lang === "en" ? `${decade}s` : `década de ${decade}`;
+}
+
 const RADAR_SIZE = 360;
 const RADAR_CENTER = RADAR_SIZE / 2;
 const RADAR_RADIUS = 140;
@@ -55,6 +59,7 @@ const RADAR_RADIUS = 140;
 const RADAR_LABEL_PAD = 56;
 
 function GenreRadar({ genres }: { genres: GenreWeight[] }) {
+  const { t } = useLang();
   const n = genres.length;
   const maxWeight = Math.max(...genres.map((g) => g.weight), 1);
 
@@ -71,9 +76,13 @@ function GenreRadar({ genres }: { genres: GenreWeight[] }) {
 
   return (
     <svg
+      role="img"
+      aria-labelledby="genre-radar-title genre-radar-description"
       viewBox={`${-RADAR_LABEL_PAD} 0 ${RADAR_SIZE + RADAR_LABEL_PAD * 2} ${RADAR_SIZE}`}
       className="w-full h-auto max-w-md mx-auto"
     >
+      <title id="genre-radar-title">{t("profile.genreSignature")}</title>
+      <desc id="genre-radar-description">{genres.map((genre) => `${genre.genre}: ${genre.weight}`).join(", ")}</desc>
       {[0.25, 0.5, 0.75, 1].map((ring) => (
         <circle key={ring} cx={RADAR_CENTER} cy={RADAR_CENTER} r={RADAR_RADIUS * ring} fill="none" stroke="currentColor" strokeOpacity={0.08} />
       ))}
@@ -108,6 +117,7 @@ function GenreRadar({ genres }: { genres: GenreWeight[] }) {
 }
 
 function DecadeHeatmap({ decades }: { decades: DecadeCount[] }) {
+  const { lang } = useLang();
   const maxCount = Math.max(...decades.map((d) => d.count), 1);
 
   return (
@@ -117,7 +127,7 @@ function DecadeHeatmap({ decades }: { decades: DecadeCount[] }) {
         return (
           <div key={d.decade} className="flex items-center gap-4">
             <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground w-16 shrink-0">
-              {d.decade}s
+              {formatDecade(d.decade, lang)}
             </span>
             <div className="flex-1 h-8 bg-foreground/5">
               <div className="h-full bg-accent" style={{ width: `${pct * 100}%`, opacity: 0.3 + pct * 0.7 }} />
@@ -233,8 +243,11 @@ function AllowTogetherToggle() {
   return (
     <div className="mt-6 border-2 border-foreground p-5">
       <button
+        type="button"
         onClick={toggle}
         disabled={saving}
+        role="switch"
+        aria-checked={allowed}
         className="w-full flex items-center justify-between gap-4 text-left disabled:opacity-60"
       >
         <span className="font-mono text-[10px] uppercase tracking-widest">
@@ -265,6 +278,8 @@ export default function Profile() {
   const [, navigate] = useLocation();
   const [profile, setProfile] = useState<TasteProfile | null>(null);
   const [summary, setSummary] = useState<ProfileSummary | null>(null);
+  const [summaryError, setSummaryError] = useState(false);
+  const [summaryRetry, setSummaryRetry] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [openReview, setOpenReview] = useState<string | null>(null);
@@ -307,14 +322,20 @@ export default function Profile() {
 
     // el summary (cuenta + actividad) es independiente del mapa de afinidad:
     // si TMDb falla, el header del perfil se muestra igual
+    setSummaryError(false);
     fetch(`${API_BASE_URL}/profile/summary`, {
       headers: { Authorization: `Bearer ${token}` },
     })
-      .then((response) => (response.ok ? response.json() : null))
-      .then((body: ProfileSummary | null) => {
-        if (!cancelled && body) setSummary(body);
+      .then(async (response) => {
+        if (!response.ok) throw new Error();
+        return response.json() as Promise<ProfileSummary>;
       })
-      .catch(() => {});
+      .then((body) => {
+        if (!cancelled) setSummary(body);
+      })
+      .catch(() => {
+        if (!cancelled) setSummaryError(true);
+      });
 
     fetch(`${API_BASE_URL}/profile/taste`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -339,7 +360,7 @@ export default function Profile() {
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [token, summaryRetry]);
 
   if (authLoading || !isAuthenticated) {
     return (
@@ -353,7 +374,7 @@ export default function Profile() {
 
   return (
     <PageTransition>
-      <main className="max-w-7xl mx-auto px-6 pt-16 pb-24">
+      <main id="main-content" className="max-w-7xl mx-auto px-6 pt-16 pb-24">
         {/* Perfil real (feedback #20): identidad + actividad, no solo el mapa */}
         <header className="pb-10 border-b-2 border-foreground mb-16">
           <div className="flex flex-col md:flex-row md:items-end gap-8">
@@ -367,6 +388,8 @@ export default function Profile() {
                       ? t("profile.avatarAlt", { title: summary.top_title })
                       : t("profile.avatarFallbackAlt")
                   }
+                  width={128}
+                  height={128}
                   className="size-28 md:size-32 object-cover border-2 border-foreground"
                 />
               ) : (
@@ -431,6 +454,12 @@ export default function Profile() {
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+          {summaryError && (
+            <div className="mt-6 flex items-center gap-3 border-2 border-destructive/50 p-4 font-mono text-[10px] uppercase tracking-widest text-destructive">
+              <span>{t("profile.summaryError")}</span>
+              <button type="button" onClick={() => setSummaryRetry((n) => n + 1)} className="border-2 border-foreground px-2 py-1 text-foreground hover:border-accent hover:text-accent">{t("common.retry")}</button>
             </div>
           )}
 

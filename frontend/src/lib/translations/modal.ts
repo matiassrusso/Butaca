@@ -5,6 +5,9 @@ import type { Entry } from "./shared";
 // pedido (query param `lang`).
 
 export const MODAL: Record<string, Entry> = {
+  "modal.detail": { es: "[Detalle]", en: "[Detail]" },
+  "modal.close": { es: "Cerrar detalle", en: "Close details" },
+  "modal.match": { es: "{score}% de afinidad", en: "{score}% match" },
   // ─── Panel "no estoy de acuerdo" ──────────────────────────────────────
   "modal.disagree": { es: "¿No estás de acuerdo?", en: "Don't agree?" },
   "modal.similarLoading": { es: "Buscando parecidas...", en: "Looking for similar ones..." },

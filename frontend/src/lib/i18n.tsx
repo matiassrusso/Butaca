@@ -31,9 +31,11 @@ function interpolate(template: string, vars?: Vars): string {
 }
 
 export function LanguageProvider({ children }: { children: ReactNode }) {
-  const [lang, setLangState] = useState<Lang>(() =>
-    normalizeLang(localStorage.getItem(LANG_KEY)),
-  );
+  const [lang, setLangState] = useState<Lang>(() => {
+    const saved = localStorage.getItem(LANG_KEY);
+    if (saved) return normalizeLang(saved);
+    return normalizeLang(navigator.languages?.[0] ?? navigator.language);
+  });
 
   useEffect(() => {
     localStorage.setItem(LANG_KEY, lang);

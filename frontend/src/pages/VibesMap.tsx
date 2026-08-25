@@ -55,7 +55,7 @@ function fade(value: number, start: number, end: number) {
 
 export default function VibesMap() {
   const { token, isAuthenticated } = useAuth();
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const [data, setData] = useState<MapResponse | null>(null);
   const [failed, setFailed] = useState(false);
   const [focus, setFocus] = useState<number | null>(null);
@@ -68,8 +68,11 @@ export default function VibesMap() {
   // esto lo multiplica encima). Se resetea al cambiar de región.
   const [userZoom, setUserZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [reload, setReload] = useState(0);
   const dragRef = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
   const draggedRef = useRef(false);
+  const pointersRef = useRef(new Map<number, { x: number; y: number }>());
+  const pinchRef = useRef<{ distance: number; zoom: number } | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const seenWhysRef = useRef<Map<number, string>>(new Map());
 
@@ -88,10 +91,14 @@ export default function VibesMap() {
 
   useEffect(() => {
     let cancelled = false;
+    setFailed(false);
     fetch(`${API_BASE_URL}/vibes/map`, token ? { headers: { Authorization: `Bearer ${token}` } } : {})
       .then((response) => (response.ok ? response.json() : Promise.reject(new Error())))
       .then((body: MapResponse) => {
-        if (!cancelled) setData(body);
+        if (!cancelled) {
+          setData(body);
+          setFailed(false);
+        }
       })
       .catch(() => {
         if (!cancelled) setFailed(true);
@@ -99,7 +106,7 @@ export default function VibesMap() {
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [token, reload]);
 
   // los puntos vienen en un espacio centrado en 0 de tamaño variable: se
   // reescalan una sola vez al viewBox, no en cada render de cada círculo.
@@ -322,7 +329,7 @@ export default function VibesMap() {
 
   return (
     <PageTransition>
-      <main className="max-w-7xl mx-auto px-6 pt-16 pb-24">
+      <main id="main-content" className="max-w-7xl mx-auto px-6 pt-16 pb-24">
         <header className="pb-8 border-b-2 border-foreground mb-8">
           <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-4">
             {t("map.tag")}
@@ -340,7 +347,7 @@ export default function VibesMap() {
           {data && data.points.length > 0 && (
             <div className="mt-6 flex flex-wrap gap-8">
               {[
-                [data.points.length.toLocaleString(), t("map.statTitles")],
+                [new Intl.NumberFormat(lang === "en" ? "en-US" : "es-AR").format(data.points.length), t("map.statTitles")],
                 [String(data.movements.length), t("map.statMovements")],
                 [String(data.groups.length), t("map.statGenres")],
               ].map(([value, label]) => (
@@ -356,7 +363,12 @@ export default function VibesMap() {
         </header>
 
         {failed && (
-          <p className="font-mono text-xs text-muted-foreground">{t("map.error")}</p>
+          <div className="flex items-center gap-3 font-mono text-xs text-muted-foreground">
+            <p>{t("map.error")}</p>
+            <button type="button" onClick={() => setReload((n) => n + 1)} className="border-2 border-foreground px-2 py-1 uppercase hover:border-accent hover:text-accent">
+              {t("common.retry")}
+            </button>
+          </div>
         )}
 
         {!failed && !data && (
@@ -376,15 +388,29 @@ export default function VibesMap() {
               <svg
                 ref={svgRef}
                 viewBox={viewBox}
-                className="w-full h-auto block touch-pan-y transition-[view-box] duration-300 select-none"
+                className="w-full h-auto block touch-none transition-[view-box] duration-300 select-none"
                 style={{ cursor: dragRef.current ? "grabbing" : "grab" }}
                 role="img"
                 aria-label={t("map.titleAccent")}
                 onPointerDown={(e) => {
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                  pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+                  const pointers = [...pointersRef.current.values()];
+                  if (pointers.length === 2) {
+                    pinchRef.current = { distance: Math.hypot(pointers[0].x - pointers[1].x, pointers[0].y - pointers[1].y), zoom: userZoom };
+                    return;
+                  }
                   dragRef.current = { x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y };
                   draggedRef.current = false;
                 }}
                 onPointerMove={(e) => {
+                  if (pointersRef.current.has(e.pointerId)) pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+                  const pointers = [...pointersRef.current.values()];
+                  if (pointers.length === 2 && pinchRef.current) {
+                    const distance = Math.hypot(pointers[0].x - pointers[1].x, pointers[0].y - pointers[1].y);
+                    setUserZoom(Math.min(8, Math.max(1, pinchRef.current.zoom * (distance / pinchRef.current.distance))));
+                    return;
+                  }
                   if (!dragRef.current || !svgRef.current) return;
                   const rect = svgRef.current.getBoundingClientRect();
                   const unitPerPx = VIEW_WIDTH / zoom / rect.width;
@@ -396,10 +422,19 @@ export default function VibesMap() {
                     y: dragRef.current.panY - (e.clientY - dragRef.current.y) * unitPerPx,
                   });
                 }}
-                onPointerUp={() => {
+                onPointerUp={(e) => {
+                  pointersRef.current.delete(e.pointerId);
+                  if (pointersRef.current.size < 2) pinchRef.current = null;
                   dragRef.current = null;
                 }}
-                onPointerLeave={() => {
+                onPointerCancel={(e) => {
+                  pointersRef.current.delete(e.pointerId);
+                  if (pointersRef.current.size < 2) pinchRef.current = null;
+                  dragRef.current = null;
+                }}
+                onPointerLeave={(e) => {
+                  pointersRef.current.delete(e.pointerId);
+                  if (pointersRef.current.size < 2) pinchRef.current = null;
                   dragRef.current = null;
                   setHovered(null);
                 }}
@@ -438,7 +473,7 @@ export default function VibesMap() {
                   const hit = q !== "" && matchQuery && matchKind;
                   const color = GROUP_COLORS[(point.group_id - 1) % GROUP_COLORS.length];
                   const r = (point.rated ? 7 : hit ? 6 : 4.5) / zoom;
-                  const visibility = Math.max(titleOpacity, hit ? 0.55 : 0);
+                  const visibility = Math.max(0.32, titleOpacity, hit ? 0.55 : 0);
                   const shared = {
                     fill: point.rated ? "none" : hit ? "var(--accent)" : color,
                     stroke: point.rated ? color : hit ? "var(--accent)" : "none",
@@ -450,6 +485,15 @@ export default function VibesMap() {
                     onMouseLeave: () => setHovered(null),
                     onClick: () => {
                       if (!draggedRef.current) openPoint(point);
+                    },
+                    role: "button",
+                    tabIndex: 0,
+                    "aria-label": `${point.title} (${point.year})`,
+                    onKeyDown: (event: React.KeyboardEvent<SVGCircleElement | SVGRectElement>) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        openPoint(point);
+                      }
                     },
                   } as const;
                   // series = cuadrado, pelis = círculo (Matías, 2026-08-20: había
@@ -518,6 +562,11 @@ export default function VibesMap() {
                 ))}
               </svg>
 
+              <div className="absolute top-3 right-3 flex gap-1">
+                <button type="button" onClick={() => setUserZoom((z) => Math.min(8, z * 1.25))} aria-label={t("map.zoomIn")} className="size-7 border-2 border-foreground bg-background font-mono hover:border-accent hover:text-accent">+</button>
+                <button type="button" onClick={() => setUserZoom((z) => Math.max(1, z / 1.25))} aria-label={t("map.zoomOut")} className="size-7 border-2 border-foreground bg-background font-mono hover:border-accent hover:text-accent">−</button>
+              </div>
+
               {(userZoom !== 1 || pan.x !== 0 || pan.y !== 0) && (
                 <button
                   type="button"
@@ -525,7 +574,7 @@ export default function VibesMap() {
                     setUserZoom(1);
                     setPan({ x: 0, y: 0 });
                   }}
-                  className="absolute top-3 right-3 px-2 py-1 font-mono text-[9px] uppercase tracking-widest border-2 border-foreground bg-background hover:text-accent hover:border-accent transition-colors"
+                  className="absolute top-12 right-3 px-2 py-1 font-mono text-[9px] uppercase tracking-widest border-2 border-foreground bg-background hover:text-accent hover:border-accent transition-colors"
                 >
                   {t("map.resetView")}
                 </button>
@@ -537,7 +586,7 @@ export default function VibesMap() {
               {hovered && (
                 <div className="pointer-events-none absolute left-3 bottom-3 max-w-[90%] flex items-center gap-3 border-2 border-foreground bg-background px-3 py-2">
                   {hovered.poster_path && (
-                    <img src={hovered.poster_path} alt="" className="w-8 aspect-[2/3] object-cover" />
+                    <img src={hovered.poster_path} alt="" width={32} height={48} loading="lazy" className="w-8 aspect-[2/3] object-cover" />
                   )}
                   <div className="min-w-0">
                     <div className="text-sm font-black uppercase tracking-tight truncate">
@@ -564,6 +613,9 @@ export default function VibesMap() {
             <aside className="space-y-6">
               <div>
                 <input
+                  name="map-search"
+                  autoComplete="off"
+                  aria-label={t("map.search")}
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder={t("map.search")}

@@ -85,7 +85,7 @@ export default function Chat() {
 
   return (
     <PageTransition>
-      <main className="max-w-2xl mx-auto px-6 pt-16 pb-24">
+      <main id="main-content" className="max-w-2xl mx-auto px-6 pt-16 pb-24">
         <header className="pb-8 border-b-2 border-foreground mb-8">
           <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-4">
             {t("chat.tag")}
@@ -130,8 +130,8 @@ export default function Chat() {
               <p
                 className={
                   message.role === "user"
-                    ? "inline-block text-left px-4 py-3 border-2 border-foreground/20 text-sm whitespace-pre-wrap"
-                    : "border-l-2 border-accent pl-4 text-base leading-relaxed whitespace-pre-wrap"
+                    ? "inline-block max-w-full text-left px-4 py-3 border-2 border-foreground/20 text-sm whitespace-pre-wrap break-words"
+                    : "border-l-2 border-accent pl-4 text-base leading-relaxed whitespace-pre-wrap break-words"
                 }
               >
                 {message.content}

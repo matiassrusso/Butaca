@@ -30,6 +30,8 @@ function Poster({ item, onPick, disabled }: { item: OnboardingTitle; onPick: () 
           <img
             src={item.poster_path}
             alt={item.title}
+            width={342}
+            height={513}
             className="w-full aspect-[2/3] object-cover transition-transform duration-500 group-hover:scale-[1.04]"
           />
         ) : (
@@ -104,7 +106,7 @@ export default function PairwiseGame() {
 
   return (
     <PageTransition>
-      <main className="max-w-3xl mx-auto px-6 pt-16 pb-24">
+      <main id="main-content" className="max-w-3xl mx-auto px-6 pt-16 pb-24">
         <header className="pb-8 border-b-2 border-foreground mb-8">
           <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-4">
             {t("games.tagSingle")}
