@@ -135,7 +135,7 @@ export default function Rate() {
       const response = await fetch(`${API_BASE_URL}/profile/rate`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ title: current.title, rating, tmdb_id: current.tmdb_id }),
+        body: JSON.stringify({ title: current.title, rating, tmdb_id: current.tmdb_id, kind: current.kind }),
       });
       if (!response.ok) throw new Error();
       setRated((n) => n + 1);

@@ -117,6 +117,7 @@ export default function History() {
           title: finalTitle,
           rating,
           tmdb_id: title ? tmdbId ?? null : rec.tmdb_id,
+          kind: rec.kind,
           review,
         }),
       });

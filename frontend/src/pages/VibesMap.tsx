@@ -746,6 +746,7 @@ export default function VibesMap() {
                   title: finalTitle,
                   rating,
                   tmdb_id: title ? tmdbId ?? null : selectedRec.tmdb_id,
+                  kind: selectedRec.kind,
                   review,
                 }),
               });

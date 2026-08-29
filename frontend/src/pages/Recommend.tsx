@@ -588,7 +588,13 @@ export default function Recommend() {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
           body: JSON.stringify({
-            ratings: Object.entries(manualRatings).map(([title, rating]) => ({ title, rating })),
+            // manualRatings solo guarda título→puntaje; el kind real vive en
+            // manualTitles (seed + agregados), así que se lo re-adjunta acá
+            ratings: Object.entries(manualRatings).map(([title, rating]) => ({
+              title,
+              rating,
+              kind: manualTitles.find((mt) => mt.title === title)?.kind ?? "movie",
+            })),
             mood: "",
             mode,
             kind_filter: kindFilter,
@@ -675,6 +681,7 @@ export default function Recommend() {
           title: finalTitle,
           rating,
           tmdb_id: title ? tmdbId ?? null : rec.tmdb_id,
+          kind: rec.kind,
           review,
         }),
       });
@@ -784,6 +791,8 @@ export default function Recommend() {
                     <p className="font-mono text-[10px] uppercase leading-relaxed text-muted-foreground mb-3">
                       {t("recommend.zipHint")}
                     </p>
+                    {/* block: un <label> es inline por default, así que con hijos en
+                        bloque el borde punteado no cerraba caja y se veía descuadrado */}
                     <label
                       htmlFor="letterboxd-zip"
                       onDrop={handleDrop}
@@ -792,7 +801,7 @@ export default function Recommend() {
                         setIsDragging(true);
                       }}
                       onDragLeave={() => setIsDragging(false)}
-                      className={`border-2 border-dashed p-8 text-center cursor-pointer transition-colors ${
+                      className={`block border-2 border-dashed p-8 text-center cursor-pointer transition-colors ${
                         isDragging ? "border-accent bg-accent/5" : "border-foreground/30 hover:border-foreground"
                       }`}
                     >
