@@ -24,16 +24,25 @@ Registro vivo. Matías probó butaca.xyz y reportó 9 cosas rotas/mejorables ant
 - **#8 juego 5 rondas + saltear:** `_pairwise_tied_pair` solo muestra pares con MISMO rating por diseño (para no fabricar ratings). "Ilimitado" necesita rediseño. → **Decisión de Matías.**
 - **#2 zip:** falta reproducir. → Repro en browser.
 
-## Hecho esta sesión
+## Decisiones de Matías (respondidas)
+- **#2 zip:** es solo VISUAL — el cartel del dropzone se ve roto, la subida anda. → fix CSS.
+- **#6:** SÍ, watchlist como señal suave en el scoring.
+- **#8:** el rating no es la preferencia actual. Comparar pares diversos (mismo tipo, distinto rating/género) y que la elección pese como señal real de gusto por encima de las estrellas. Ej: puede preferir La Odisea sobre Toy Story aunque le haya puesto menos rating. Combinar con #7: mismo-kind (no serie vs peli) pero relajar el rating igual.
 
-- ✅ **#3/#4/#9 — cadena LLM reconstruida** (`backend/app/llm_client.py`): re-medido el catálogo (83 modelos, `scratchpad/nv_sweep.py`). Nuevo primario `nemotron-3-nano-30b-a3b` (~0.7-0.9s, JSON OK), fallbacks `lightning-30b` (3.7-4.4s) + `mistral-nemotron` (~5s). Sacados ultra-550b (503/timeout) y llama-3.1-8b (410). `REQUEST_TIMEOUT` 10→8s. Comentario del historial actualizado. **525 tests verdes. SIN deployar todavía.**
-- ✅ **#1 — chat nombra el pick** (`_CHAT_TASK` ES/EN): regla de nombrar título+año explícito al recomendar.
+## Hecho y DEPLOYADO (live en prod, commit 78876f9)
+- ✅ **#3/#4/#9 — cadena LLM reconstruida** (`llm_client.py`): re-medido el catálogo (83 modelos, `scratchpad/nv_sweep.py`). Primario `nemotron-3-nano-30b-a3b` (~0.7-0.9s), fallbacks `lightning-30b` + `mistral-nemotron`. Sacados ultra-550b (503) y llama-3.1-8b (410). `REQUEST_TIMEOUT` 10→8s.
+- ✅ **#1 — chat nombra el pick** (`_CHAT_TASK` ES/EN).
 
-## Worktrees Codex preparados (dispatch bloqueado)
-- `C:\Users\matia\butaca-wt\kind` (branch `fix/rated-items-kind`) — spec en scratchpad/spec-kind.md
-- `C:\Users\matia\butaca-wt\profile-page` (branch `fix/profile-page`) — spec en scratchpad/spec-profile.md
-- `codex exec` bloqueado por el clasificador de auto-mode. Pendiente decisión de Matías: permitir codex o usar subagentes Claude.
+## Mergeado a main (NO deployado todavía — falta el frontend agent)
+- ✅ **#7 backend — columna `kind`** (merge `dacadf0`): migración idempotente, `_resolve_watched_title` por kind correcto, `_pairwise_tied_pair` mismo-kind. 527 tests. **Gap: el frontend todavía no manda kind al puntuar** (lo está haciendo el agente de abajo). Filas viejas quedan 'movie' (Breaking Bad ya guardado mal sigue mal hasta re-ratear).
+- ✅ **#5 perfil** (merge `ad6b146`): sacada la lista de 140+ items, botón → `/history` (que ya muestra reseñas + estrellas-vs-texto bien). Mató un bug: estrellas para ratings sintéticos.
 
-## Estado
-(vivo)
-</content>
+## En curso / pendiente
+- ⏳ **subagente frontend** (worktree `frontend-kind`, branch `fix/frontend-kind-cartel`): #7-frontend (mandar kind en los ~6 call sites de rate) + #2 (visual del cartel del dropzone). Al terminar: merge + test + build + deploy del batch.
+- 🔜 **#6** (watchlist señal suave): sumar tags de watchlist a `preferred_tags` en `_finish_recommend` (espejo de "interested"). Ojo latencia — resolver watchlist contra TMDb es caro; hacerlo cacheado/capado o en el write path. NO apurar.
+- 🔜 **#8** (juego): relajar `_pairwise_tied_pair` a mismo-kind cualquier-rating + skip + ilimitado, y que `pairwise_preferences` pese en el scoring (recommender._find_reference_title ya la usa para desempatar; ampliar). Frontend: `PairwiseGame.tsx` botón saltear.
+
+## Nota operativa
+- Codex `exec` en background quedó inestable acá (no-op + clasificador). El dispatch paralelo va por subagentes Claude. Regla `Bash(codex exec:*)` agregada a `.claude/settings.local.json` igual.
+- Worktrees a limpiar al final: kind, profile-page, frontend-kind (+ los viejos: chat, emb, map, mobile-*, together, wrapped).
+

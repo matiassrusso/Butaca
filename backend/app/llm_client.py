@@ -40,25 +40,31 @@ GROQ_MODEL = "llama-3.3-70b-versatile"
 #     llama-3.1-8b, con Groq de último recurso.
 #   - 2026-08-29: TODA esa cadena estaba muerta en prod (log real: lightning y
 #     ultra-550b timeout 10s cada uno, llama-3.1-8b → 410 Gone/retirado, Groq
-#     → 403 desde Render) → todo caía a heurístico tras ~20s. Re-medido el
-#     catálogo (83 modelos, prompt de refine real + json_object): el ganador
-#     nuevo es nemotron-3-nano-30b-a3b en ~0.7-0.9s con JSON válido, muy por
-#     encima del resto. lightning-30b quedó de fallback (3.7-4.4s, intermitente),
-#     mistral-nemotron de último recurso (4.7-5.2s). ultra-550b (503/timeout) y
-#     llama-3.1-8b (410) sacados por muertos. Groq sigue 403 desde Render.
-# No revalidar esta elección sin medir de nuevo (scratchpad/nv_sweep.py) — la
-# congestión free-tier varía con el tiempo.
-MODEL = "nvidia/nemotron-3-nano-30b-a3b"
+#     → 403 desde Render) → todo caía a heurístico tras ~20s.
+#   - 2026-08-29 (2do pase): LECCIÓN — medir JSON válido NO alcanza, hay que
+#     medir que el modelo ELIJA de la lista de candidatos (matched/total). El
+#     "ganador" nemotron-3-nano-30b respondía en <1s pero devolvía picks=0
+#     SIEMPRE (JSON válido y vacío) → refined=False en prod igual. Re-medido con
+#     una lista de candidatos real (scratchpad/nv_match.py): lightning-30b da
+#     3/3 en ~7s, super-120b 3/3 en ~5s (pero es "famoso" → se congestiona:
+#     estaba 503 a las 14:33), mistral-nemotron timeout 20s, nano 0 picks. Por
+#     eso el primario correcto es lightning-30b (calidad sobre latencia), con
+#     super-120b de fallback. Groq sigue 403 desde Render.
+# OJO free-tier: solo hay 2 modelos que eligen bien Y responden <10s, y los dos
+# se congestionan a veces (a las 14:33 ambos timeoutearon). Si vuelve a caer
+# todo a heurístico, la solución de fondo es pagar (decisión de Matías), no
+# rotar más modelos gratis. No revalidar sin medir de nuevo con nv_match.py.
+MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b"
 # Fallback chain: se intenta cada modelo una vez, sin reintento por modelo.
-# Los tres andan hoy con JSON válido; cubre que el primario timeoutee o
-# devuelva basura, NO una caída total del endpoint (mismo host) — para eso
-# queda Groq más abajo (hoy 403 desde Render, pero fast-fail e inofensivo).
+# Los dos eligen bien de la lista (medido); cubre que el primario timeoutee.
+# nano y mistral quedaron afuera: nano devuelve picks=0, mistral timeoutea.
 NVIDIA_MODELS = [
     MODEL,
-    "nvidia/nemotron-3.5-lightning-30b-a3b",
-    "mistralai/mistral-nemotron",
+    "nvidia/nemotron-3-super-120b-a12b",
 ]
-REQUEST_TIMEOUT = 8
+# lightning ronda 7s, así que 8s dejaba casi sin margen. 10s le da aire sin
+# volver al peor caso viejo (eran 2 modelos × reintento = 4 timeouts).
+REQUEST_TIMEOUT = 10
 
 # Same OrderedDict TTL+LRU idiom as tmdb_client's _DISCOVER_CACHE — avoids
 # repeating the call (and burning free-tier quota) when picks are
