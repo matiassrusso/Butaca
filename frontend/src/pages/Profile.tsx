@@ -31,7 +31,6 @@ type ProfileSummary = {
   watchlist_count: number;
   top_title: string | null;
   avatar_url: string | null;
-  items: { title: string; rating: number; review: string; created_at: string }[];
 };
 
 // created_at viene como "YYYY-MM-DD HH:MM:SS" UTC de ambos backends
@@ -282,7 +281,6 @@ export default function Profile() {
   const [summaryRetry, setSummaryRetry] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [openReview, setOpenReview] = useState<string | null>(null);
 
   // danger zone: delete account (two-step — type username + password)
   const [confirmUsername, setConfirmUsername] = useState("");
@@ -463,40 +461,21 @@ export default function Profile() {
             </div>
           )}
 
-          {summary?.items.length ? (
-            <section className="mt-10 border-2 border-foreground">
-              <div className="px-5 py-3 border-b-2 border-foreground font-mono text-[10px] uppercase tracking-widest">
-                {t("profile.ratings")}
-              </div>
-              <div className="divide-y divide-foreground/10">
-                {summary.items.map((item) => {
-                  const key = `${item.title}-${item.created_at}`;
-                  const reviewOpen = openReview === key;
-                  return (
-                    <div key={key} className="px-5 py-4">
-                      <div className="flex items-baseline justify-between gap-4">
-                        <span className="font-medium">{item.title}</span>
-                        <span className="shrink-0 font-mono text-sm text-accent">
-                          {"★".repeat(Math.floor(item.rating))}{item.rating % 1 ? "½" : ""}
-                        </span>
-                      </div>
-                      {item.review && (
-                        <>
-                          <button
-                            onClick={() => setOpenReview(reviewOpen ? null : key)}
-                            className="mt-1 font-mono text-[9px] uppercase tracking-widest text-accent underline decoration-dotted"
-                          >
-                            {reviewOpen ? t("history.hideReview") : t("history.showReview")}
-                          </button>
-                          {reviewOpen && <p className="mt-2 text-sm text-muted-foreground">{item.review}</p>}
-                        </>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
-          ) : null}
+          {/* La lista completa de ratings y reseñas vive en /history (pestaña
+              Vistas): misma data (get_watched_items), ya con reseñas y la regla
+              de estrellas-vs-texto por source. El perfil solo linkea, no duplica
+              la lista de 140+ items que lo hacía interminable. */}
+          {summary && summary.rated_count > 0 && (
+            <button
+              onClick={() => navigate("/history")}
+              className="mt-10 w-full px-5 py-4 border-2 border-foreground flex items-center justify-between gap-4 hover:bg-accent hover:border-accent hover:text-accent-foreground transition-colors text-left"
+            >
+              <span className="font-black uppercase tracking-tighter text-xl">{t("profile.viewRatings")}</span>
+              <span className="font-mono text-[10px] uppercase tracking-widest shrink-0">
+                {t("profile.viewRatingsCount", { n: summary.rated_count })} →
+              </span>
+            </button>
+          )}
 
           {/* el resumen anual se descubre desde acá además de la navbar: el
               perfil es donde el usuario ya vino a mirarse a sí mismo */}
