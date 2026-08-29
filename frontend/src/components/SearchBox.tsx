@@ -224,6 +224,9 @@ export function SearchBox() {
                 title: finalTitle,
                 rating,
                 tmdb_id: title ? tmdbId ?? null : selectedRec.tmdb_id,
+                // los similares se piden con kind=selectedRec.kind, así que este
+                // kind es correcto tanto para el rec como para sus similares
+                kind: selectedRec.kind,
                 review,
               }),
               });
