@@ -22,6 +22,9 @@ class RatedItem(BaseModel):
     # riesgo de matchear un remake con el mismo nombre) en
     # _enrich_loved_ratings_with_genre_tags y taste_profile.build_taste_profile
     tmdb_id: int | None = None
+    # 'movie' | 'series'. Necesario para resolver el título contra el endpoint
+    # correcto de TMDb (los ids de movie y TV son espacios separados).
+    kind: str = "movie"
 
 
 class RecommendRequest(BaseModel):
@@ -32,6 +35,7 @@ class RecommendRequest(BaseModel):
 class ManualRating(BaseModel):
     title: str = Field(min_length=1, max_length=300)
     rating: float = Field(ge=0.5, le=5, multiple_of=0.5)
+    kind: str = "movie"
 
 
 class ManualRecommendRequest(BaseModel):
@@ -251,6 +255,7 @@ class RateTitleRequest(BaseModel):
     rating: float = Field(ge=0.5, le=5, multiple_of=0.5)
     tmdb_id: int | None = None
     review: str = Field(default="", max_length=5000)
+    kind: str = "movie"
 
 
 class WatchlistAddRequest(BaseModel):

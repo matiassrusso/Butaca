@@ -145,6 +145,7 @@ def _rebuild_ratings(user_id: int) -> list[RatedItem]:
             watched_date=item.get("watched_date", ""),
             source=item.get("source", "import"),
             tmdb_id=item.get("tmdb_id"),
+            kind=item.get("kind", "movie"),
         )
         for item in db.get_watched_items(user_id)
     ]
@@ -1338,7 +1339,7 @@ def _finish_recommend(
         db.save_rated_items(
             user["id"],
             [
-                (item.title, item.rating, item.review, item.watched_date, item.source, item.tmdb_id)
+                (item.title, item.rating, item.review, item.watched_date, item.source, item.tmdb_id, item.kind)
                 for item in ratings
             ],
         )
@@ -2164,13 +2165,19 @@ def swipe_batch(
 
 
 def _resolve_watched_title(row: dict) -> dict | None:
-    """rated_items solo guarda title/tmdb_id -- year/poster se resuelven
-    contra TMDb al vuelo (mismo patrón que /onboarding/titles). tmdb_id sin
-    "kind" en el schema viene del tmdb:movieId del feed de username, así que
-    asumir "movie" ahí es consistente con el resto del proyecto."""
+    """rated_items guarda title/tmdb_id/kind -- year/poster se resuelven contra
+    TMDb al vuelo (mismo patrón que /onboarding/titles). El kind es clave: los
+    ids de movie y TV en TMDb son espacios separados, así que resolver una
+    serie contra /movie/<id> devuelve una peli random (bug real 2026-08)."""
+    kind = row.get("kind") or "movie"
     try:
         if row.get("tmdb_id"):
-            return tmdb_client.fetch_title_by_id(row["tmdb_id"], kind="movie")
+            return tmdb_client.fetch_title_by_id(row["tmdb_id"], kind=kind)
+        if kind == "series":
+            # search_title busca movie primero, así que una serie sin id
+            # matchearía una peli con nombre parecido -- /search/multi respeta el kind
+            matches = tmdb_client.search_any_titles(row["title"])
+            return next((m for m in matches if m.get("kind") == "series"), None)
         return tmdb_client.search_title(row["title"])
     except tmdb_client.TmdbError:
         return None
@@ -2185,9 +2192,12 @@ def _pairwise_tied_pair(user_id: int) -> tuple[dict, dict] | tuple[None, None]:
     además hace que la comparación sirva de desempate real más adelante
     (ver recommender._find_reference_title)."""
     watched = db.get_watched_items(user_id)
-    by_rating: dict[float, list[dict]] = {}
+    # Agrupa por (rating, kind): nunca comparar una serie con una peli (bug real
+    # 2026-08). Sin el kind en la clave, empatar en rating alcanzaba para
+    # enfrentar "Breaking Bad" contra "Rocky".
+    by_rating: dict[tuple[float, str], list[dict]] = {}
     for item in watched:
-        by_rating.setdefault(item["rating"], []).append(item)
+        by_rating.setdefault((item["rating"], item.get("kind") or "movie"), []).append(item)
     tied_groups = [group for group in by_rating.values() if len(group) >= 2]
     if not tied_groups:
         return None, None
@@ -2377,7 +2387,7 @@ def recommend_titles_manual(
         )
 
     ratings = [
-        RatedItem(title=item.title, rating=item.rating, source="star") for item in payload.ratings
+        RatedItem(title=item.title, rating=item.rating, source="star", kind=item.kind) for item in payload.ratings
     ]
     # every rated title is one the user has seen — never recommend it back
     extra_seen = {item.title for item in ratings}
@@ -2606,7 +2616,7 @@ def rate_title(
             "source": "import",
         }
     db.save_rated_items(
-        user["id"], [(payload.title, payload.rating, payload.review, "", "star", payload.tmdb_id)]
+        user["id"], [(payload.title, payload.rating, payload.review, "", "star", payload.tmdb_id, payload.kind)]
     )
     db.invalidate_taste_profile(user["id"])
     return {"status": "saved", "rating": payload.rating, "review": payload.review, "source": "star"}

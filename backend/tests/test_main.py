@@ -2137,6 +2137,68 @@ def test_pairwise_choose_records_preference_without_touching_ratings() -> None:
     assert db.get_pairwise_win_counts(user_id) == {"winner movie": 1}
 
 
+def test_pairwise_match_never_pairs_a_series_with_a_movie(monkeypatch) -> None:
+    # bug real (2026-08): sin agrupar por kind, una peli y una serie con el
+    # mismo rating se enfrentaban ("Breaking Bad" vs "Rocky"). Con un solo
+    # título por kind no hay empate válido -> par vacío, nunca cruzado.
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        "backend.app.main.tmdb_client.fetch_title_by_id",
+        lambda tmdb_id, kind="movie": {
+            "tmdb_id": tmdb_id, "title": f"T{tmdb_id}", "year": 2010, "kind": kind, "poster_path": None
+        },
+    )
+    headers = _auth_headers("pairwisekind")
+    user_id = db.get_user_by_username("pairwisekind")["id"]
+    db.save_rated_items(
+        user_id,
+        [
+            ("A Movie", 4.5, "", "", "star", 10, "movie"),
+            ("A Series", 4.5, "", "", "star", 20, "series"),
+        ],
+    )
+
+    response = client.get("/games/pairwise", headers=headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["left"] is None and body["right"] is None
+
+
+def test_pairwise_match_pairs_two_series_and_resolves_against_tv_endpoint(monkeypatch) -> None:
+    # (a) dos series con el mismo rating se emparejan entre sí (y no con la
+    # peli del mismo rating); (b) cada una se resuelve contra el endpoint de
+    # TV, no el de movie -- los ids de movie/TV en TMDb son espacios separados.
+    captured_kinds: list[str] = []
+
+    def fake_by_id(tmdb_id, kind="movie"):
+        captured_kinds.append(kind)
+        return {"tmdb_id": tmdb_id, "title": f"S{tmdb_id}", "year": 2015, "kind": kind, "poster_path": None}
+
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setattr("backend.app.main.tmdb_client.fetch_title_by_id", fake_by_id)
+    headers = _auth_headers("pairwiseseries")
+    user_id = db.get_user_by_username("pairwiseseries")["id"]
+    db.save_rated_items(
+        user_id,
+        [
+            ("Series One", 4.5, "", "", "star", 30, "series"),
+            ("Series Two", 4.5, "", "", "star", 31, "series"),
+            ("Some Movie", 4.5, "", "", "star", 32, "movie"),
+        ],
+    )
+
+    response = client.get("/games/pairwise", headers=headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["left"] is not None and body["right"] is not None
+    assert {body["left"]["title"], body["right"]["title"]} == {"Series One", "Series Two"}
+    assert body["left"]["kind"] == "series" and body["right"]["kind"] == "series"
+    # ninguna serie se resolvió contra /movie/<id>
+    assert captured_kinds and all(k == "series" for k in captured_kinds)
+
+
 def test_trivia_question_requires_auth() -> None:
     assert client.get("/games/trivia").status_code == 401
 
