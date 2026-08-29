@@ -80,6 +80,10 @@ CREATE TABLE IF NOT EXISTS rated_items (
     -- NULL para zip/manual, que no lo traen. Cuando está, se evita una
     -- búsqueda por texto en taste_profile/_enrich_loved_ratings_with_genre_tags
     tmdb_id INTEGER,
+    -- 'movie' | 'series'. Los ids de movie y TV en TMDb son espacios
+    -- separados: sin esto, resolver una serie contra /movie/<id> devuelve una
+    -- peli random (bug real 2026-08). Letterboxd/zip son solo pelis → 'movie'.
+    kind TEXT NOT NULL DEFAULT 'movie',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -271,6 +275,7 @@ CREATE TABLE IF NOT EXISTS rated_items (
     watched_date TEXT NOT NULL DEFAULT '',
     source TEXT NOT NULL DEFAULT 'import',
     tmdb_id INTEGER,
+    kind TEXT NOT NULL DEFAULT 'movie',
     created_at TEXT NOT NULL DEFAULT ({_PG_NOW})
 );
 
@@ -456,6 +461,11 @@ def _run_migrations(conn) -> None:
         conn.execute("ALTER TABLE rated_items ADD COLUMN source TEXT NOT NULL DEFAULT 'import'")
     if not _has_column(conn, "rated_items", "tmdb_id"):
         conn.execute("ALTER TABLE rated_items ADD COLUMN tmdb_id INTEGER")
+    if not _has_column(conn, "rated_items", "kind"):
+        # Filas viejas quedan en 'movie': no se puede inferir el kind histórico
+        # de forma confiable, y Letterboxd (la fuente de casi todo lo viejo) es
+        # solo pelis. Lo importante es que las nuevas se guarden bien.
+        conn.execute("ALTER TABLE rated_items ADD COLUMN kind TEXT NOT NULL DEFAULT 'movie'")
     if not _has_column(conn, "users", "email"):
         conn.execute("ALTER TABLE users ADD COLUMN email TEXT")
     if not _has_column(conn, "users", "email_verified"):
@@ -849,16 +859,20 @@ def delete_user_completely(user_id: int, username: str) -> None:
 
 
 def save_rated_items(
-    user_id: int, items: list[tuple[str, float, str, str, str, int | None]]
+    user_id: int,
+    items: list[tuple[str, float, str, str, str, int | None]]
+    | list[tuple[str, float, str, str, str, int | None, str]],
 ) -> None:
     if not items:
         return
     with get_connection() as conn:
         conn.executemany(
-            "INSERT INTO rated_items (user_id, title, rating, review, watched_date, source, tmdb_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO rated_items (user_id, title, rating, review, watched_date, source, tmdb_id, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             [
-                (user_id, title, rating, review, watched_date, source, tmdb_id)
-                for title, rating, review, watched_date, source, tmdb_id in items
+                # ponytail: kind opcional (7mo elemento) para no romper los
+                # callers/tests que pasan 6-tuplas — default 'movie' donde no se sabe
+                (user_id, *item[:6], item[6] if len(item) > 6 else "movie")
+                for item in items
             ],
         )
 
@@ -925,7 +939,7 @@ def get_watched_items(user_id: int) -> list[dict]:
     with get_connection() as conn:
         rows = conn.execute(
             """
-            SELECT title, rating, review, watched_date, source, tmdb_id, created_at
+            SELECT title, rating, review, watched_date, source, tmdb_id, kind, created_at
             FROM rated_items
             WHERE user_id = ?
             ORDER BY created_at DESC, id DESC
