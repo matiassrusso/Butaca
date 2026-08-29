@@ -29,18 +29,37 @@ Registro vivo. Matías probó butaca.xyz y reportó 9 cosas rotas/mejorables ant
 - **#6:** SÍ, watchlist como señal suave en el scoring.
 - **#8:** el rating no es la preferencia actual. Comparar pares diversos (mismo tipo, distinto rating/género) y que la elección pese como señal real de gusto por encima de las estrellas. Ej: puede preferir La Odisea sobre Toy Story aunque le haya puesto menos rating. Combinar con #7: mismo-kind (no serie vs peli) pero relajar el rating igual.
 
-## Hecho y DEPLOYADO (live en prod, commit 78876f9)
-- ✅ **#3/#4/#9 — cadena LLM reconstruida** (`llm_client.py`): re-medido el catálogo (83 modelos, `scratchpad/nv_sweep.py`). Primario `nemotron-3-nano-30b-a3b` (~0.7-0.9s), fallbacks `lightning-30b` + `mistral-nemotron`. Sacados ultra-550b (503) y llama-3.1-8b (410). `REQUEST_TIMEOUT` 10→8s.
-- ✅ **#1 — chat nombra el pick** (`_CHAT_TASK` ES/EN).
+## 🔴 HALLAZGO CLAVE — el LLM no se arregla gratis (decisión de Matías pendiente)
+El test end-to-end contra prod (guest + /recommend/manual) destapó lo real:
+- **NVIDIA free-tier TIMEOUTEA desde la IP de Render** (lightning y super-120b, 10s c/u), aunque desde otras IPs responden 5-7s. Groq sigue 403 desde Render. → Render está deprioritizado/congestionado en el free-tier. **Mis mediciones locales (nv_sweep/nv_match) NO sirven para decidir** porque miden desde otra IP.
+- Lección aparte: medir JSON válido no alcanza — hay que medir que el modelo ELIJA de la lista de candidatos. `nano-30b` respondía <1s pero devolvía **picks=0 siempre** → heurístico igual.
+- **No se arregla rotando modelos gratis.** Solo hay 2 que eligen bien Y responden <10s (lightning, super-120b) y los dos timeoutean desde Render cuando el free-tier está saturado.
+- **Damage control DEPLOYADO** (commit `2d5af9b`): 1 solo modelo (lightning) + timeout 8s → falla rápido a heurístico (~8s) en vez de colgar 20-30s. Los PICKS siguen siendo buenos (motor real de embeddings+scoring); solo el "why" queda genérico cuando el free-tier está saturado. Cuando NO está saturado, lightning da why real ~7s.
+- **Decisión de fondo pendiente de Matías:** LLM pago confiable (el código ya habla formato OpenAI chat-completions → agregar OpenAI/gpt-4o-mini u otro endpoint compatible es un cambio chico; costo ~centavos por el volumen real, rate-limited) vs lanzar con why genérico por ahora.
+- Aparte: latencia cold ~10-14s por la resolución del perfil contra TMDb (match_titles, ~150 llamadas). Se amortiza con la cache de 24h (usuarios que vuelven van rápido), pero el primer recommend de un usuario nuevo es lento. Issue separado del LLM.
+
+## Hecho y DEPLOYADO (live en prod)
+- ✅ **#1 — chat nombra el pick** (`_CHAT_TASK` ES/EN). (commit 78876f9)
+- ✅ **#3/#4/#9 — cadena LLM**: ver hallazgo arriba. Damage control live; solución de fondo = decisión de pago.
+- ✅ **#7 kind backend+frontend** (merges `dacadf0` + frontend-kind): series se resuelven bien, pairwise mismo-kind, frontend manda kind al puntuar. Filas viejas quedan 'movie'.
+- ✅ **#5 perfil** (merge `ad6b146`): perfil corto + reseñas via /history.
+- ✅ **#2 dropzone visual** (merge frontend-kind): el `<label>` era `display:inline` → borde punteado fragmentado; se agregó `block`.
 
 ## Mergeado a main (NO deployado todavía — falta el frontend agent)
 - ✅ **#7 backend — columna `kind`** (merge `dacadf0`): migración idempotente, `_resolve_watched_title` por kind correcto, `_pairwise_tied_pair` mismo-kind. 527 tests. **Gap: el frontend todavía no manda kind al puntuar** (lo está haciendo el agente de abajo). Filas viejas quedan 'movie' (Breaking Bad ya guardado mal sigue mal hasta re-ratear).
 - ✅ **#5 perfil** (merge `ad6b146`): sacada la lista de 140+ items, botón → `/history` (que ya muestra reseñas + estrellas-vs-texto bien). Mató un bug: estrellas para ratings sintéticos.
 
-## En curso / pendiente
-- ⏳ **subagente frontend** (worktree `frontend-kind`, branch `fix/frontend-kind-cartel`): #7-frontend (mandar kind en los ~6 call sites de rate) + #2 (visual del cartel del dropzone). Al terminar: merge + test + build + deploy del batch.
-- 🔜 **#6** (watchlist señal suave): sumar tags de watchlist a `preferred_tags` en `_finish_recommend` (espejo de "interested"). Ojo latencia — resolver watchlist contra TMDb es caro; hacerlo cacheado/capado o en el write path. NO apurar.
-- 🔜 **#8** (juego): relajar `_pairwise_tied_pair` a mismo-kind cualquier-rating + skip + ilimitado, y que `pairwise_preferences` pese en el scoring (recommender._find_reference_title ya la usa para desempatar; ampliar). Frontend: `PairwiseGame.tsx` botón saltear.
+## Hecho (mergeado a main, pendiente de push/deploy)
+- ✅ **#6 watchlist señal suave**: helper `_watchlist_preference_tags` (search_title ya trae tags de género + cachea 24h → barato, capado, paralelo) sumado a `preferred_tags` en `_finish_recommend`. Espejo de "interested". 2 tests.
+- ✅ **#8 juego rediseñado**:
+  - `_pairwise_pair` (renombrado de `_pairwise_tied_pair`): mismo-kind, rating >= 3.5 (lo que te gustó), cualquier puntaje → pool grande, ~ilimitado (antes empataba rating exacto → se agotaba en "5 rondas").
+  - **La elección ahora PESA en el scoring**: `_pairwise_preference_tags` empuja los tags de los ganadores a `preferred_tags`, ponderado por victorias (antes solo elegía a quién citar en el "why"). Actualizado el comentario de `get_pairwise_win_counts`.
+  - Frontend: botón "Me gustan los dos igual, saltear" en `PairwiseGame.tsx` + copy actualizado (games.ts, ya no dice "mismo puntaje").
+  - Tests actualizados (mismo-kind distinto-rating, degrada sin 2 liked) + 1 nuevo (preference tags ponderados). 530 tests + build verdes.
+
+## LLM — PENDIENTE decisión de Matías
+- Le pasé la comparación de opciones de pago. Recomendación: OpenAI gpt-4o-mini (~$1-5/mes, cambio de código mínimo porque ya es formato OpenAI), con truco de NVIDIA-gratis-primario-timeout-corto → OpenAI-fallback para pagar casi nada. Espera que consiga la key (`OPENAI_API_KEY` en Render) y hago el wiring.
+- Latencia cold ~10-14s (TMDb profile) sigue siendo issue aparte, no tocado.
 
 ## Nota operativa
 - Codex `exec` en background quedó inestable acá (no-op + clasificador). El dispatch paralelo va por subagentes Claude. Regla `Bash(codex exec:*)` agregada a `.claude/settings.local.json` igual.

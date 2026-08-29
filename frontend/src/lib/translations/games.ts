@@ -18,21 +18,24 @@ export const GAMES: Record<string, Entry> = {
   "games.pairwise.titlePrefix": { es: "¿Cuál te ", en: "Which one did you " },
   "games.pairwise.titleAccent": { es: "gustó", en: "like" },
   "games.pairwise.titleSuffix": { es: " más?", en: " more?" },
-  // ojo: el copy promete explícitamente que el par sale de títulos YA vistos
-  // y puntuados igual, y que elegir NO cambia el puntaje -- es el fix de un
-  // bug real (2026-08-03), no suavizar la promesa al traducir.
+  // rediseño 2026-08-29: el par ya NO es "mismo puntaje" -- son dos que te
+  // gustaron (del mismo tipo), aunque tengan distinto puntaje o género, y elegir
+  // SÍ afina tu perfil (pesa en el scoring, no solo en el "why"). El puntaje que
+  // les pusiste no es tu preferencia actual: podés preferir una que puntuaste
+  // más bajo.
   "games.pairwise.intro": {
-    es: "Dos pelis que ya viste y puntuaste igual. Elegí la que más te gustó -- nos ayuda a desempatar entre tus favoritas, no te cambia el puntaje.",
-    en: "Two movies you've already seen and gave the same rating. Pick the one you liked more -- it helps us break ties between your favorites, it doesn't change your rating.",
+    es: "Dos títulos que te gustaron. Elegí el que preferís hoy -- no importa qué puntaje les pusiste, tu elección afina tu perfil.",
+    en: "Two titles you liked. Pick the one you prefer today -- the rating you gave doesn't matter, your choice sharpens your profile.",
   },
   "games.pairwise.loading": { es: "Buscando un par...", en: "Looking for a pair..." },
   "games.pairwise.error": { es: "No pude armar un par para jugar.", en: "Couldn't put together a pair to play." },
   "games.pairwise.saveError": { es: "No se pudo guardar tu elección.", en: "Couldn't save your pick." },
+  "games.pairwise.skip": { es: "Me gustan los dos igual, saltear", en: "I like both the same, skip" },
   "games.pairwise.playedOne": { es: "Jugaste {n} ronda.", en: "You played {n} round." },
   "games.pairwise.playedMany": { es: "Jugaste {n} rondas.", en: "You played {n} rounds." },
   "games.pairwise.needMore": {
-    es: 'Necesitás al menos dos pelis vistas con el mismo puntaje para jugar -- puntuá más en "Puntuar más".',
-    en: 'You need at least two movies you\'ve seen with the same rating to play -- rate a few more in "Rate more".',
+    es: 'Necesitás al menos dos títulos que te hayan gustado (del mismo tipo) para jugar -- puntuá más en "Puntuar más".',
+    en: 'You need at least two titles you liked (of the same type) to play -- rate a few more in "Rate more".',
   },
   "games.pairwise.roundsOne": { es: "{n} ronda jugada", en: "{n} round played" },
   "games.pairwise.roundsMany": { es: "{n} rondas jugadas", en: "{n} rounds played" },

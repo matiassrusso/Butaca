@@ -925,8 +925,10 @@ def record_pairwise_preference(user_id: int, winner_title: str, loser_title: str
 
 def get_pairwise_win_counts(user_id: int) -> dict[str, int]:
     """Cuántas veces ganó cada título (normalizado) en el juego "¿cuál te
-    gustó más?" — usado solo para desempatar entre "amados" con el mismo
-    rating en recommender._find_reference_title, no para el scoring."""
+    gustó más?" — usado en recommender._find_reference_title para desempatar a
+    quién citar en el "why", y desde 2026-08-29 también empuja los tags del
+    ganador en el scoring (main._pairwise_preference_tags), así la elección pesa
+    sobre las estrellas."""
     with get_connection() as conn:
         rows = conn.execute(
             "SELECT winner_title, COUNT(*) AS wins FROM pairwise_preferences WHERE user_id = ? GROUP BY winner_title",

@@ -157,6 +157,18 @@ export default function PairwiseGame() {
               <Poster item={pair.left} onPick={() => choose(pair.left!, pair.right!)} disabled={choosing} />
               <Poster item={pair.right} onPick={() => choose(pair.right!, pair.left!)} disabled={choosing} />
             </div>
+            {/* saltear: cargar otro par sin registrar preferencia -- cuando los
+                dos te gustan igual y no querés elegir uno */}
+            <div className="mt-8 text-center">
+              <button
+                type="button"
+                onClick={loadPair}
+                disabled={choosing || loading}
+                className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground hover:text-foreground underline underline-offset-4 disabled:opacity-50 disabled:pointer-events-none transition-colors"
+              >
+                {t("games.pairwise.skip")}
+              </button>
+            </div>
           </div>
         )}
       </main>

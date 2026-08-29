@@ -1240,6 +1240,54 @@ def _watchlist_candidates(titles: list[str]) -> list[dict]:
     return [match for match in results if match]
 
 
+def _watchlist_preference_tags(user_id: int) -> Counter[str]:
+    """Tags de género de la watchlist del usuario, como señal positiva SUAVE
+    para el scoring (pedido de Matías, 2026-08-29: "la quiero ver" debería
+    afinar el perfil, no solo alimentar el modo watchlist y el chat). Se suman
+    al MISMO preferred_tags que feedback['interested'], así un género que
+    aparece en 2+ títulos de la watchlist cruza el umbral de recommender y
+    empuja picks parecidos, sin dominar (mismo peso que "me interesa").
+    Barato: search_title ya trae los tags de género y cachea 24h; capado y en
+    paralelo como _watchlist_candidates."""
+    titles = db.get_watchlist_items(user_id)
+    if not titles or not tmdb_client.is_configured():
+        return Counter()
+
+    def _tags(title: str) -> list[str]:
+        try:
+            match = tmdb_client.search_title(title)
+            return match.get("tags", []) if match else []
+        except tmdb_client.TmdbError:
+            return []
+
+    tags: Counter[str] = Counter()
+    with ThreadPoolExecutor(max_workers=taste_profile.MATCH_WORKERS) as pool:
+        for title_tags in pool.map(_tags, titles[:WATCHLIST_MATCH_CAP]):
+            tags.update(title_tags)
+    return tags
+
+
+def _pairwise_preference_tags(user_id: int) -> Counter[str]:
+    """Los títulos que ganás en "¿cuál te gustó más?" empujan sus tags de género
+    como señal positiva (rediseño 2026-08-29, pedido de Matías: la elección debe
+    PESAR sobre las estrellas, no solo elegir a quién citar en el "why" —
+    _find_reference_title). Ponderado por victorias: un título que preferís
+    consistentemente cruza el umbral de recommender aunque lo hayas puntuado más
+    bajo que otros. Pocos títulos (los que comparaste) → search cacheado, barato."""
+    win_counts = db.get_pairwise_win_counts(user_id)
+    if not win_counts or not tmdb_client.is_configured():
+        return Counter()
+    tags: Counter[str] = Counter()
+    for title, wins in win_counts.items():
+        try:
+            match = tmdb_client.search_title(title)
+        except tmdb_client.TmdbError:
+            continue
+        for tag in (match or {}).get("tags", []):
+            tags[tag] += wins
+    return tags
+
+
 def _movement_candidates(vibe_tags: list[str]) -> list[dict]:
     """Resuelve contra TMDb los títulos que el clustering puso en cada
     movimiento elegido.
@@ -1484,6 +1532,13 @@ def _finish_recommend(
     preferred_tags: Counter[str] = Counter()
     for item in feedback["interested"]:
         preferred_tags.update(item["tags"])
+    # "La quiero ver" (watchlist) como señal positiva suave — ver
+    # _watchlist_preference_tags. No en modo watchlist (ahí la watchlist ES el
+    # pool) ni en ephemeral (/together no tiene watchlist propia).
+    if not ephemeral and mode != "watchlist":
+        preferred_tags.update(_watchlist_preference_tags(user["id"]))
+        # las victorias del juego "¿cuál te gustó más?" también empujan gusto
+        preferred_tags.update(_pairwise_preference_tags(user["id"]))
 
     # exclude titles already recommended to this user before, so hitting
     # "nuevos picks" and regenerating with the same source+mood surfaces
@@ -2183,37 +2238,42 @@ def _resolve_watched_title(row: dict) -> dict | None:
         return None
 
 
-def _pairwise_tied_pair(user_id: int) -> tuple[dict, dict] | tuple[None, None]:
-    """Dos títulos que el usuario YA vio y puntuó IGUAL -- comparar
-    preferencia sobre algo no visto no tiene sentido (bug real reportado por
-    Matías, 2026-08-03: el juego venía de un pool de títulos sin ver, y
-    elegir cualquiera de los dos los marcaba como vistos+gustados en la
-    bitácora sin que el usuario los hubiera visto nunca). Empatar en rating
-    además hace que la comparación sirva de desempate real más adelante
-    (ver recommender._find_reference_title)."""
-    watched = db.get_watched_items(user_id)
-    # Agrupa por (rating, kind): nunca comparar una serie con una peli (bug real
-    # 2026-08). Sin el kind en la clave, empatar en rating alcanzaba para
-    # enfrentar "Breaking Bad" contra "Rocky".
-    by_rating: dict[tuple[float, str], list[dict]] = {}
-    for item in watched:
-        by_rating.setdefault((item["rating"], item.get("kind") or "movie"), []).append(item)
-    tied_groups = [group for group in by_rating.values() if len(group) >= 2]
-    if not tied_groups:
+# "¿Cuál te gustó más?": NO exige el mismo rating (rediseño 2026-08-29, pedido
+# de Matías). El rating no es la preferencia actual: podés preferir una peli que
+# puntuaste MÁS BAJO (ej. La Odisea > Toy Story) por el tipo de cine que hoy te
+# gusta. Comparás dos que te gustaron, de distinto puntaje o género, y esa
+# elección alimenta el scoring (ver _pairwise_preference_tags), no solo el "why".
+# Antes solo empataba por rating exacto → se agotaba en pocas rondas ("solo 5").
+# Ahora el pool es "todo lo que te gustó del mismo kind" → prácticamente ilimitado.
+# Se restringe a rating >= PAIRWISE_MIN_RATING (no tiene sentido comparar dos que
+# te dieron igual de mal) y al MISMO kind (nunca serie vs peli, bug 2026-08).
+PAIRWISE_MIN_RATING = 3.5
+
+
+def _pairwise_pair(user_id: int) -> tuple[dict, dict] | tuple[None, None]:
+    liked = [
+        item for item in db.get_watched_items(user_id)
+        if item["rating"] >= PAIRWISE_MIN_RATING
+    ]
+    by_kind: dict[str, list[dict]] = {}
+    for item in liked:
+        by_kind.setdefault(item.get("kind") or "movie", []).append(item)
+    groups = [group for group in by_kind.values() if len(group) >= 2]
+    if not groups:
         return None, None
-    a, b = random.sample(random.choice(tied_groups), 2)
+    a, b = random.sample(random.choice(groups), 2)
     return a, b
 
 
 @app.get("/games/pairwise", response_model=PairwiseMatchResponse)
 def pairwise_match(user: sqlite3.Row = Depends(auth.get_current_user)) -> PairwiseMatchResponse:
-    """Un par de títulos que el usuario YA vio y puntuó igual, para el juego
-    "¿cuál te gustó más?". None en cualquiera de los dos lados si no hay dos
-    títulos empatados en rating (historial muy chico, o todos con ratings
-    distintos) -- el frontend lo trata igual que un pool agotado."""
+    """Un par de títulos del MISMO kind que al usuario le gustaron (rating alto,
+    no necesariamente igual), para el juego "¿cuál te gustó más?". None en
+    cualquiera de los dos lados si no tiene 2 títulos que le hayan gustado del
+    mismo kind -- el frontend lo trata igual que un pool agotado."""
     if not tmdb_client.is_configured():
         return PairwiseMatchResponse()
-    row_a, row_b = _pairwise_tied_pair(user["id"])
+    row_a, row_b = _pairwise_pair(user["id"])
     if row_a is None or row_b is None:
         return PairwiseMatchResponse()
     resolved_a, resolved_b = _resolve_watched_title(row_a), _resolve_watched_title(row_b)

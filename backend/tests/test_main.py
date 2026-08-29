@@ -387,6 +387,54 @@ def test_enrich_loved_ratings_falls_back_to_search_when_id_lookup_misses(monkeyp
     assert ratings[0].tags == ["dark"]
 
 
+def test_watchlist_preference_tags_aggregates_genre_tags(monkeypatch) -> None:
+    # #6 (2026-08-29): la watchlist alimenta preferred_tags como señal suave.
+    # El CONTEO importa: recommender solo cuenta un tag como preferido si
+    # aparece 2+ veces, así que un género en 2 títulos de la watchlist pesa.
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setattr(main_module.db, "get_watchlist_items", lambda user_id: ["A", "B", "C"])
+    tags_by_title = {
+        "A": {"tags": ["thriller", "dark"]},
+        "B": {"tags": ["thriller"]},
+        "C": {"tags": ["comedy"]},
+    }
+    monkeypatch.setattr(
+        main_module.tmdb_client, "search_title", lambda title: tags_by_title.get(title)
+    )
+
+    result = main_module._watchlist_preference_tags(1)
+
+    assert result["thriller"] == 2  # cruza el umbral >=2 de recommender
+    assert result["dark"] == 1
+    assert result["comedy"] == 1
+
+
+def test_watchlist_preference_tags_empty_when_no_watchlist(monkeypatch) -> None:
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setattr(main_module.db, "get_watchlist_items", lambda user_id: [])
+    assert not main_module._watchlist_preference_tags(1)
+
+
+def test_pairwise_preference_tags_weights_by_win_count(monkeypatch) -> None:
+    # #8 (2026-08-29): ganar en "¿cuál te gustó más?" empuja los tags del
+    # ganador al scoring, ponderado por victorias -- así un título que preferís
+    # seguido (aunque lo puntuaste más bajo) cruza el umbral >=2 de recommender.
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        main_module.db, "get_pairwise_win_counts", lambda uid: {"la odisea": 3, "toy story": 1}
+    )
+    tags_by_title = {"la odisea": {"tags": ["epic", "drama"]}, "toy story": {"tags": ["animation"]}}
+    monkeypatch.setattr(
+        main_module.tmdb_client, "search_title", lambda title: tags_by_title.get(title)
+    )
+
+    result = main_module._pairwise_preference_tags(1)
+
+    assert result["epic"] == 3
+    assert result["drama"] == 3
+    assert result["animation"] == 1
+
+
 def test_feedback_accepts_own_recommendation() -> None:
     headers = _auth_headers("feedbackok")
     picks = _post_zip(headers).json()["recommendations"]
@@ -2067,12 +2115,12 @@ def test_pairwise_match_requires_auth() -> None:
     assert client.get("/games/pairwise").status_code == 401
 
 
-def test_pairwise_match_pairs_two_watched_titles_with_the_same_rating(monkeypatch) -> None:
-    # bug real (2026-08-03): el par salía de títulos SIN VER, y elegir
-    # cualquiera los marcaba como vistos+gustados en la bitácora aunque el
-    # usuario nunca los hubiera visto. Ahora sale de dos títulos que el
-    # usuario ya vio y puntuó IGUAL -- comparar preferencia entre algo no
-    # visto no tiene sentido.
+def test_pairwise_match_pairs_two_liked_titles_even_with_different_ratings(monkeypatch) -> None:
+    # rediseño 2026-08-29 (pedido de Matías): el juego ya NO exige el mismo
+    # rating -- el rating no es la preferencia actual. Empareja dos que te
+    # gustaron (>= PAIRWISE_MIN_RATING) del mismo kind aunque tengan distinto
+    # puntaje; lo que puntuaste bajo no entra (no tiene sentido comparar dos que
+    # te dieron igual de mal). Antes solo empataba rating exacto y se agotaba.
     monkeypatch.setenv("TMDB_API_KEY", "fake-key")
     monkeypatch.setattr(
         "backend.app.main.tmdb_client.search_title",
@@ -2083,9 +2131,9 @@ def test_pairwise_match_pairs_two_watched_titles_with_the_same_rating(monkeypatc
     db.save_rated_items(
         user_id,
         [
-            ("Tied A", 4.5, "", "", "import", None),
-            ("Tied B", 4.5, "", "", "import", None),
-            ("Untied C", 3.0, "", "", "import", None),
+            ("Liked High", 5.0, "", "", "import", None),
+            ("Liked Mid", 4.0, "", "", "import", None),
+            ("Disliked Low", 2.0, "", "", "import", None),
         ],
     )
 
@@ -2095,15 +2143,19 @@ def test_pairwise_match_pairs_two_watched_titles_with_the_same_rating(monkeypatc
     body = response.json()
     assert body["left"] is not None and body["right"] is not None
     titles = {body["left"]["title"], body["right"]["title"]}
-    assert titles == {"Tied A", "Tied B"}
+    # distinto rating (5.0 vs 4.0) pero los dos te gustaron -> se enfrentan;
+    # el de 2.0 nunca entra
+    assert titles == {"Liked High", "Liked Mid"}
 
 
-def test_pairwise_match_degrades_to_empty_pair_without_a_rating_tie(monkeypatch) -> None:
+def test_pairwise_match_degrades_to_empty_pair_without_two_liked_titles(monkeypatch) -> None:
+    # un solo título por encima del umbral de "me gustó" (>= PAIRWISE_MIN_RATING)
+    # -> no hay par, el frontend lo trata como pool agotado
     monkeypatch.setenv("TMDB_API_KEY", "fake-key")
     headers = _auth_headers("pairwisenotie")
     user_id = db.get_user_by_username("pairwisenotie")["id"]
     db.save_rated_items(
-        user_id, [("Solo A", 4.5, "", "", "import", None), ("Solo B", 3.0, "", "", "import", None)]
+        user_id, [("Solo A", 4.5, "", "", "import", None), ("Meh B", 2.5, "", "", "import", None)]
     )
 
     response = client.get("/games/pairwise", headers=headers)
