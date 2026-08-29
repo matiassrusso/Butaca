@@ -166,6 +166,14 @@ def _rating_label(rating: float, lang: str = "es") -> str:
     return labels["liked"]
 
 
+# Cuántas líneas de historial detallado entran al prompt. Bajado de 40 a 20
+# (2026-08-29): el resumen de gusto (_build_taste_digest) ya cubre el agregado
+# completo, así que estas líneas solo aportan material concreto para citar en el
+# "why". 20 de los más informativos alcanza y corta ~1/3 del input (tokens y
+# latencia del LLM) sin perder señal — ver _ratings_lines.
+RATINGS_IN_PROMPT = 20
+
+
 def _ratings_lines(ratings: list[RatedItem]) -> str:
     # los items "manual" (los tres botones históricos de Butaca) y "like"
     # (like/favorito de Letterboxd sin estrellas) tienen un
@@ -173,6 +181,11 @@ def _ratings_lines(ratings: list[RatedItem]) -> str:
     # dio un puntaje preciso — citarlo como "(4.5/5)" en el why sería un dato
     # inventado (reportado por Matías, 2026-07-30; el caso "like" seguía
     # colándose porque su source es "import", 2026-07-31).
+    #
+    # Se priorizan los MÁS informativos (con reseña, y con puntaje extremo: un 5
+    # o un 1 dicen más que un 3) en vez de los primeros 40 en orden de llegada
+    # (arbitrario). Así el recorte a 20 baja tokens Y mejora la señal.
+    ordered = sorted(ratings, key=lambda item: (bool(item.review), abs(item.rating - 3)), reverse=True)
     return (
         "\n".join(
             (
@@ -180,7 +193,7 @@ def _ratings_lines(ratings: list[RatedItem]) -> str:
                 if item.source in {"import", "star"}
                 else f"- {item.title} ({_rating_label(item.rating)}, sin puntaje numérico): {item.review or 'sin reseña'}"
             )
-            for item in ratings[:40]
+            for item in ordered[:RATINGS_IN_PROMPT]
         )
         or "sin historial"
     )
@@ -189,7 +202,7 @@ def _ratings_lines(ratings: list[RatedItem]) -> str:
 def _candidate_lines(heuristic: RecommendResponse) -> str:
     return "\n".join(
         f"- [{rec.kind}, tmdb_id={rec.tmdb_id if rec.tmdb_id is not None else 'none'}] "
-        f"{rec.title} ({rec.year}, tags: {', '.join(rec.tags)}): {rec.overview[:200]}"
+        f"{rec.title} ({rec.year}, tags: {', '.join(rec.tags)}): {rec.overview[:150]}"
         for rec in heuristic.recommendations
     )
 
