@@ -55,16 +55,15 @@ GROQ_MODEL = "llama-3.3-70b-versatile"
 # todo a heurístico, la solución de fondo es pagar (decisión de Matías), no
 # rotar más modelos gratis. No revalidar sin medir de nuevo con nv_match.py.
 MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b"
-# Fallback chain: se intenta cada modelo una vez, sin reintento por modelo.
-# Los dos eligen bien de la lista (medido); cubre que el primario timeoutee.
-# nano y mistral quedaron afuera: nano devuelve picks=0, mistral timeoutea.
-NVIDIA_MODELS = [
-    MODEL,
-    "nvidia/nemotron-3-super-120b-a12b",
-]
-# lightning ronda 7s, así que 8s dejaba casi sin margen. 10s le da aire sin
-# volver al peor caso viejo (eran 2 modelos × reintento = 4 timeouts).
-REQUEST_TIMEOUT = 10
+# UN solo modelo a propósito (damage control 2026-08-29): el test end-to-end en
+# prod mostró que lightning Y super-120b timeoutean DESDE LA IP DE RENDER (10s
+# cada uno) aunque desde otras IPs responden en 5-7s → NVIDIA free-tier está
+# congestionado/deprioriza el IP de Render. Con 2 modelos eran 20s colgado
+# antes de caer a heurístico; con uno solo el peor caso es 1 timeout. Cuando el
+# free-tier no está saturado, lightning responde ~7s y da why real. La solución
+# de fondo (LLM pago confiable) es decisión de Matías — ver nota en el log.
+NVIDIA_MODELS = [MODEL]
+REQUEST_TIMEOUT = 8
 
 # Same OrderedDict TTL+LRU idiom as tmdb_client's _DISCOVER_CACHE — avoids
 # repeating the call (and burning free-tier quota) when picks are

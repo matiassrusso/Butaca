@@ -283,6 +283,11 @@ def test_call_nvidia_omits_thinking_flag_for_non_nemotron_models(monkeypatch) ->
 def test_fallback_switches_model_when_primary_fails(monkeypatch) -> None:
     monkeypatch.setattr(llm_client.time, "sleep", lambda _s: None)
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    # el test valida el MECANISMO de fallback, así que fija su propia cadena de
+    # 2 modelos en vez de depender de NVIDIA_MODELS de prod (hoy 1 solo modelo,
+    # ver damage control 2026-08-29 en llm_client)
+    fallback_model = "nvidia/fallback-de-prueba"
+    monkeypatch.setattr(llm_client, "NVIDIA_MODELS", [llm_client.MODEL, fallback_model])
     calls: list[str] = []
 
     def fake_call(prompt, api_key, model, url=None):
@@ -297,7 +302,7 @@ def test_fallback_switches_model_when_primary_fails(monkeypatch) -> None:
 
     assert result["picks"][0]["why"] == "del fallback"
     # un solo intento del primario y recién ahí pasó al fallback (sin reintento por modelo)
-    assert calls == [llm_client.MODEL, llm_client.NVIDIA_MODELS[1]]
+    assert calls == [llm_client.MODEL, fallback_model]
 
 
 def test_fallback_raises_when_all_models_fail(monkeypatch) -> None:
