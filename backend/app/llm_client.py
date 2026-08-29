@@ -29,38 +29,36 @@ CHAT_COMPLETIONS_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 # si GROQ_API_KEY no está seteada, se lo salta sin error (ver docs/groq-setup.md).
 GROQ_CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL = "llama-3.3-70b-versatile"
-# NVIDIA NIM model catalog (build.nvidia.com, 130 modelos). chat_template_
-# kwargs.enable_thinking=false (real parámetro de API, no un truco de system
-# prompt) apaga el chain-of-thought de la familia Nemotron 3.x — eso fue lo
-# que hizo lento a Gemini antes (~20s/call sin poder apagarlo).
+# NVIDIA NIM model catalog (build.nvidia.com). chat_template_kwargs.
+# enable_thinking=false (real parámetro de API, no un truco de system prompt)
+# apaga el chain-of-thought de la familia Nemotron 3.x — eso fue lo que hizo
+# lento a Gemini antes (~20s/call sin poder apagarlo).
 #
-# ANTES el primario era nemotron-3-super-120b-a12b, elegido en su momento por
-# más capacidad de razonamiento que Nano. Se cambió el 2026-08-11 tras medir
-# los 102 modelos con endpoint de chat del catálogo (latencia real +
-# response_format json_object + el prompt real de refine, no un "decí OK"):
-# Super-120B y el fallback de entonces (llama-3.1-70b-instruct) están
-# consistentemente congestionados — timeout en Render, y hasta 20s en este
-# mismo test. Los "famosos" del catálogo parecen ser justamente los más
-# pedidos y por eso los más lentos; variantes más nuevas o menos conocidas
-# responden rápido y con calidad pareja o mejor. Otros candidatos probados y
-# descartados: llama-3.3-nemotron-super-49b-v1.5 (ignora enable_thinking,
-# 14-20s siempre), muse-glimmer-30b (timeout a los 25s), inkling (771 tokens
-# de razonamiento interno sin forma de apagarlo, 10s), glm-5.2 (9.3s, muy
-# cerca del timeout). No revalidar esta elección sin medir de nuevo — la
-# congestión de NVIDIA free-tier varía con el tiempo.
-MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b"
+# El catálogo free-tier ROTA: modelos se retiran (410 Gone) y la congestión
+# mueve cuál responde rápido. Historial de esta cadena:
+#   - 2026-08-11: primario nemotron-3.5-lightning-30b, fallbacks ultra-550b +
+#     llama-3.1-8b, con Groq de último recurso.
+#   - 2026-08-29: TODA esa cadena estaba muerta en prod (log real: lightning y
+#     ultra-550b timeout 10s cada uno, llama-3.1-8b → 410 Gone/retirado, Groq
+#     → 403 desde Render) → todo caía a heurístico tras ~20s. Re-medido el
+#     catálogo (83 modelos, prompt de refine real + json_object): el ganador
+#     nuevo es nemotron-3-nano-30b-a3b en ~0.7-0.9s con JSON válido, muy por
+#     encima del resto. lightning-30b quedó de fallback (3.7-4.4s, intermitente),
+#     mistral-nemotron de último recurso (4.7-5.2s). ultra-550b (503/timeout) y
+#     llama-3.1-8b (410) sacados por muertos. Groq sigue 403 desde Render.
+# No revalidar esta elección sin medir de nuevo (scratchpad/nv_sweep.py) — la
+# congestión free-tier varía con el tiempo.
+MODEL = "nvidia/nemotron-3-nano-30b-a3b"
 # Fallback chain: se intenta cada modelo una vez, sin reintento por modelo.
-# nemotron-3-ultra-550b-a55b es el modelo más grande del catálogo (550B) y
-# dio la mejor calidad medida, pero con un outlier de 8.5s en frío (contra
-# 2.1-2.2s normal) — por eso va segundo, no primero. Ambos NVIDIA con la
-# misma key: cubre un modelo puntual caído o que devuelva basura, NO una
-# caída total del endpoint (mismo host); para eso está Groq más abajo.
+# Los tres andan hoy con JSON válido; cubre que el primario timeoutee o
+# devuelva basura, NO una caída total del endpoint (mismo host) — para eso
+# queda Groq más abajo (hoy 403 desde Render, pero fast-fail e inofensivo).
 NVIDIA_MODELS = [
     MODEL,
-    "nvidia/nemotron-3-ultra-550b-a55b",
-    "meta/llama-3.1-8b-instruct",
+    "nvidia/nemotron-3.5-lightning-30b-a3b",
+    "mistralai/mistral-nemotron",
 ]
-REQUEST_TIMEOUT = 10
+REQUEST_TIMEOUT = 8
 
 # Same OrderedDict TTL+LRU idiom as tmdb_client's _DISCOVER_CACHE — avoids
 # repeating the call (and burning free-tier quota) when picks are
@@ -973,7 +971,10 @@ _CHAT_TASK = (
     "dar opiniones, discutir y recomendar. El perfil de gusto es personalización, no tu "
     "única fuente. Mantené la charla concisa, pero usá más de cuatro frases si una pregunta "
     "factual o detallada lo necesita. Si el mensaje no tiene nada que ver con cine, decilo "
-    "con humor y volvé al tema."
+    "con humor y volvé al tema. Si te pide algo para ver o le recomendás una película o serie, "
+    "NOMBRALA de forma explícita (título, y el año si ayuda a desambiguar) — nunca la describas "
+    "sin decir cuál es. Podés dar una recomendación principal clara y a lo sumo una o dos "
+    "alternativas, pero siempre con el título dicho."
 )
 _CHAT_TASK_EN = (
     "You're a film expert and sage who also knows this person's taste. Answer their last "
@@ -981,7 +982,10 @@ _CHAT_TASK_EN = (
     "cast, direction, year, runtime, context and trivia), offer opinions, discuss and "
     "recommend. Their taste profile personalizes your answer; it is not your only source. "
     "Keep the conversation concise, but use more than four sentences when a factual or detailed "
-    "question needs it. If the message has nothing to do with film, say so with some humor and steer back."
+    "question needs it. If the message has nothing to do with film, say so with some humor and steer back. "
+    "If they ask for something to watch or you recommend a movie or show, NAME it explicitly "
+    "(title, plus the year if it helps disambiguate) — never describe one without saying which it is. "
+    "You can give one clear main pick and at most one or two alternatives, but always with the title stated."
 )
 _CHAT_NO_HISTORY = (
     "OJO: esta persona todavía no puntuó nada, así que no conocés su gusto. No inventes que "
