@@ -24,6 +24,7 @@ export function PosterCard({
   feedback,
   showScore = true,
   featured = false,
+  refining = false,
 }: {
   rec: Recommendation;
   onSelect: () => void;
@@ -37,6 +38,9 @@ export function PosterCard({
   // badge grande en círculo (grilla de picks de /recommend) vs chico en
   // esquina (home, archivo)
   featured?: boolean;
+  // true mientras /refine está en vuelo (solo /recommend): el chip dice
+  // "escribiendo…" en vez de HEURÍSTICO para que la espera no parezca fallo
+  refining?: boolean;
 }) {
   const { t } = useLang();
   const { wrapRef, onMouseMove, onMouseLeave } = useTiltCard();
@@ -122,9 +126,11 @@ export function PosterCard({
         {showScore && !rec.refined && (
           <span
             className="absolute bottom-3 right-3 font-mono text-[9px] uppercase px-1.5 py-1 bg-background border border-foreground/20 text-muted-foreground"
-            title={t("modal.heuristicHint")}
+            title={t(refining ? "modal.refiningHint" : "modal.heuristicHint")}
           >
-            {t("modal.heuristic")}
+            {t(refining ? "modal.refining" : "modal.heuristic")}
+            {/* mismo caret pulsante que el typewriter del modal */}
+            {refining && <span className="inline-block w-1.5 h-2.5 ml-1 -mb-px bg-accent animate-pulse" />}
           </span>
         )}
       </div>
