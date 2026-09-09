@@ -1703,7 +1703,7 @@ def _finish_recommend(
 
     refined = False
     if refine and not use_llm:
-        logger.warning("LLM refine skipped: NVIDIA_API_KEY no está configurada.")
+        logger.warning("LLM refine skipped: no hay proveedor LLM configurado (GROQ_API_KEY / NVIDIA_API_KEY).")
     elif use_llm:
         try:
             # predict_fit preserves the chosen set. refine_recommendations is
@@ -2521,7 +2521,7 @@ def refine_session(
     )
 
     if not llm_client.is_configured():
-        logger.warning("Session refine skipped: NVIDIA_API_KEY no está configurada.")
+        logger.warning("Session refine skipped: no hay proveedor LLM configurado (GROQ_API_KEY / NVIDIA_API_KEY).")
         return heuristic
     if not recommendations:
         return heuristic

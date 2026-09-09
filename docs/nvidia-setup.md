@@ -24,14 +24,17 @@ nuevas o menos conocidas responden rápido con calidad pareja o mejor. Razón
 completa del orden elegido y de qué se descartó (con números): comentario
 arriba de `NVIDIA_MODELS` en `llm_client.py`.
 
-Los tres modelos NVIDIA del fallback (`nemotron-3.5-lightning-30b-a3b`,
-`nemotron-3-ultra-550b-a55b`, `llama-3.1-8b-instruct`) siguen usando la
-misma key. Los dos Nemotron soportan apagar el razonamiento vía
-`chat_template_kwargs.enable_thinking=false` (parámetro real de la API, no
-un truco de system prompt) — sin eso, un modelo de esta familia puede
-tardar 15-20s razonando puertas adentro antes de contestar (visto también
-en Gemini antes de migrar a NVIDIA, y en otros modelos NIM probados que no
-soportan apagarlo).
+**Desde el 2026-09-09 NVIDIA está fuera de la cadena sincrónica del LLM**
+(`NVIDIA_MODELS = []`): `lightning-30b` timeoutea siempre, `super-120b`
+tarda 18-20s, y varios (`nano-30b`, `llama-3.1-8b`, `llama-3.3-70b`) fueron
+retirados con 410 Gone. El proveedor primario es Groq (`docs/groq-setup.md`).
+La key de NVIDIA sigue haciendo falta para los **embeddings** del mapa de
+vibras (`vibes_clustering.py`). Si algún día un modelo NIM vuelve a servir,
+basta con listarlo en `NVIDIA_MODELS`: los Nemotron soportan apagar el
+razonamiento vía `chat_template_kwargs.enable_thinking=false` (parámetro
+real de la API, no un truco de system prompt) y `_call_nvidia` lo manda por
+prefijo de nombre — sin eso, un modelo de esta familia puede tardar 15-20s
+razonando puertas adentro antes de contestar.
 
 ## Cómo sacar la API key
 
@@ -55,12 +58,14 @@ loader chico de `.env` que ya usaba `tmdb_client.py` (stdlib, sin sumar
 - [backend/app/llm_client.py](../backend/app/llm_client.py)
   pega contra `https://integrate.api.nvidia.com/v1/chat/completions`
   (stdlib `urllib`, sin SDK), formato de chat completions estándar de OpenAI.
-  Cadena de 3 modelos NVIDIA (`NVIDIA_MODELS`, un intento cada uno) más Groq
-  como cuarto fallback opcional (`docs/groq-setup.md`) — se prueba cada uno
-  en orden hasta que alguno responda. Con `response_format: json_object` en
-  el body (medido: sin esto, ~1 de cada 3 refines devolvía JSON casi-válido
-  y caía al heurístico) y `chat_template_kwargs: {"enable_thinking": false}`
-  para los modelos Nemotron. `_extract_json` limpia el ```json``` fence si
+  Cadena de proveedores: primero `GROQ_MODELS` con `GROQ_API_KEY`
+  (`docs/groq-setup.md`), después `NVIDIA_MODELS` (hoy vacía) con
+  `NVIDIA_API_KEY` — un intento por modelo, en orden, hasta que alguno
+  responda. Con `response_format: json_object` en el body (medido: sin esto,
+  ~1 de cada 3 refines devolvía JSON casi-válido y caía al heurístico),
+  `chat_template_kwargs: {"enable_thinking": false}` para los Nemotron y
+  `reasoning_effort: "low"` para los gpt-oss de Groq. Siempre con header
+  `User-Agent` propio (Groq bloquea el default de urllib con 403). `_extract_json` limpia el ```json``` fence si
   el modelo lo agrega igual.
 - Recibe el historial parseado del CSV, el mood y los candidatos que ya
   filtró el recomendador heurístico (`recommend()` en

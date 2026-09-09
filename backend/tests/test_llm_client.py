@@ -344,14 +344,65 @@ def test_fallback_tries_groq_when_both_nvidia_models_fail(monkeypatch) -> None:
 def test_fallback_skips_groq_when_key_not_set(monkeypatch) -> None:
     monkeypatch.setattr(llm_client.time, "sleep", lambda _s: None)
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    # NVIDIA_MODELS de prod está vacía (2026-09-09): la cadena real es Groq.
+    # Acá se fija una para probar que sin GROQ_API_KEY solo se intenta NVIDIA.
+    monkeypatch.setattr(llm_client, "NVIDIA_MODELS", [llm_client.MODEL])
+    urls: list[str] = []
 
     def always_fail(prompt, api_key, model, url=None):
+        urls.append(url)
         raise llm_client.LlmError(f"{model} caído")
 
     monkeypatch.setattr(llm_client, "_call_nvidia", always_fail)
 
-    with pytest.raises(llm_client.LlmError, match=llm_client.NVIDIA_MODELS[-1]):
+    with pytest.raises(llm_client.LlmError, match=llm_client.MODEL):
         llm_client._call_nvidia_with_fallback("prompt", "fake-key")
+    assert urls == [llm_client.CHAT_COMPLETIONS_URL]
+
+
+def test_fallback_raises_when_no_provider_configured(monkeypatch) -> None:
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.setattr(llm_client, "NVIDIA_MODELS", [])
+
+    with pytest.raises(llm_client.LlmError, match="Ningún proveedor"):
+        llm_client._call_nvidia_with_fallback("prompt", "")
+
+
+def test_groq_goes_first_and_gpt_oss_gets_low_reasoning(monkeypatch) -> None:
+    monkeypatch.setenv("GROQ_API_KEY", "fake-groq-key")
+    monkeypatch.setattr(llm_client, "NVIDIA_MODELS", [llm_client.MODEL])
+    captured: dict = {}
+
+    class _Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return b'{"choices": [{"message": {"content": "{\\"ok\\": true}"}}]}'
+
+    def fake_urlopen(request, timeout):
+        captured["url"] = request.full_url
+        captured["headers"] = dict(request.header_items())
+        captured["body"] = json.loads(request.data)
+        return _Resp()
+
+    monkeypatch.setattr(llm_client.urllib.request, "urlopen", fake_urlopen)
+
+    llm_client._call_nvidia_with_fallback("prompt", "nvidia-key")
+
+    # el primero de la cadena es Groq, con su key y su URL — NVIDIA ni se intenta
+    assert captured["url"] == llm_client.GROQ_CHAT_COMPLETIONS_URL
+    assert captured["headers"]["Authorization"] == "Bearer fake-groq-key"
+    # sin User-Agent propio urllib manda "Python-urllib/3.x" y Groq responde 403
+    assert captured["headers"]["User-agent"].startswith("butaca/")
+    assert captured["body"]["model"] == llm_client.GROQ_MODELS[0]
+
+    llm_client._call_nvidia("prompt", "k", "openai/gpt-oss-120b", url=llm_client.GROQ_CHAT_COMPLETIONS_URL)
+    assert captured["body"]["reasoning_effort"] == "low"
+    assert "chat_template_kwargs" not in captured["body"]
 
 
 def test_extract_json_parses_plain_json() -> None:

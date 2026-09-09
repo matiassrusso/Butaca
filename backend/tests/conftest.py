@@ -21,6 +21,10 @@ def no_real_tmdb(monkeypatch):
 def no_real_nvidia(monkeypatch):
     # same deal as TMDB_API_KEY, but for the LLM refine step.
     monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
+    # desde 2026-09-09 Groq es el proveedor primario y is_configured() lo
+    # cuenta: sin esto, la GROQ_API_KEY real del .env local haría que los tests
+    # de "LLM no configurado" salgan a la red
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
 
 
 @pytest.fixture(autouse=True)

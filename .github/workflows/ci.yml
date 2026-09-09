@@ -18,11 +18,20 @@ on:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    # 3.12 y 3.14 a proposito (2026-09-09): 3.14 evalua las anotaciones de
+    # forma diferida (PEP 649), asi que un nombre usado solo en una anotacion
+    # y nunca importado pasa local (3.14) y explota en import con 3.12/3.13.
+    # Paso una vez con `Recommendation` en llm_client.py: CI rota 6 pushes
+    # seguidos sin que nadie lo viera, y prod (Render, >=3.14) andaba igual.
+    # 3.12 atrapa eso; 3.14 testea lo que corre prod.
+    strategy:
+      matrix:
+        python-version: ["3.12", "3.14"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
           cache: pip
           cache-dependency-path: backend/requirements.txt
       - run: pip install -r backend/requirements.txt pytest httpx

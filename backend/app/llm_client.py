@@ -10,7 +10,7 @@ from collections import Counter, OrderedDict
 from pathlib import Path
 from urllib.error import URLError
 
-from .models import RatedItem, RecommendResponse
+from .models import RatedItem, Recommendation, RecommendResponse
 from .recommender import (
     MIN_MATCH_SCORE,
     TAG_PHRASES,
@@ -22,48 +22,53 @@ logger = logging.getLogger(__name__)
 
 ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
 CHAT_COMPLETIONS_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
-# Fallback fuera de NVIDIA (mismo host que los 2 modelos de arriba, así que una
-# degradación de NVIDIA los afecta a los tres por igual — ver 2026-08-11 en
-# build-log). Groq corre en hardware propio (LPU) pensado para latencia baja;
-# API compatible con OpenAI, mismo formato de request que NVIDIA NIM. Opcional:
-# si GROQ_API_KEY no está seteada, se lo salta sin error (ver docs/groq-setup.md).
-GROQ_CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL = "llama-3.3-70b-versatile"
-# NVIDIA NIM model catalog (build.nvidia.com). chat_template_kwargs.
-# enable_thinking=false (real parámetro de API, no un truco de system prompt)
-# apaga el chain-of-thought de la familia Nemotron 3.x — eso fue lo que hizo
-# lento a Gemini antes (~20s/call sin poder apagarlo).
+# Cadena de proveedores (2026-09-09). Todos hablan el mismo formato
+# OpenAI chat-completions; _call_nvidia_with_fallback recorre GROQ_MODELS
+# (con GROQ_API_KEY) y después NVIDIA_MODELS (con NVIDIA_API_KEY), un intento
+# por modelo, sin dormir: un 429/timeout pasa al siguiente en el acto.
 #
-# El catálogo free-tier ROTA: modelos se retiran (410 Gone) y la congestión
-# mueve cuál responde rápido. Historial de esta cadena:
-#   - 2026-08-11: primario nemotron-3.5-lightning-30b, fallbacks ultra-550b +
-#     llama-3.1-8b, con Groq de último recurso.
-#   - 2026-08-29: TODA esa cadena estaba muerta en prod (log real: lightning y
-#     ultra-550b timeout 10s cada uno, llama-3.1-8b → 410 Gone/retirado, Groq
-#     → 403 desde Render) → todo caía a heurístico tras ~20s.
-#   - 2026-08-29 (2do pase): LECCIÓN — medir JSON válido NO alcanza, hay que
-#     medir que el modelo ELIJA de la lista de candidatos (matched/total). El
-#     "ganador" nemotron-3-nano-30b respondía en <1s pero devolvía picks=0
-#     SIEMPRE (JSON válido y vacío) → refined=False en prod igual. Re-medido con
-#     una lista de candidatos real (scratchpad/nv_match.py): lightning-30b da
-#     3/3 en ~7s, super-120b 3/3 en ~5s (pero es "famoso" → se congestiona:
-#     estaba 503 a las 14:33), mistral-nemotron timeout 20s, nano 0 picks. Por
-#     eso el primario correcto es lightning-30b (calidad sobre latencia), con
-#     super-120b de fallback. Groq sigue 403 desde Render.
-# OJO free-tier: solo hay 2 modelos que eligen bien Y responden <10s, y los dos
-# se congestionan a veces (a las 14:33 ambos timeoutearon). Si vuelve a caer
-# todo a heurístico, la solución de fondo es pagar (decisión de Matías), no
-# rotar más modelos gratis. No revalidar sin medir de nuevo con nv_match.py.
-MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b"
-# UN solo modelo a propósito (damage control 2026-08-29): el test end-to-end en
-# prod mostró que lightning Y super-120b timeoutean DESDE LA IP DE RENDER (10s
-# cada uno) aunque desde otras IPs responden en 5-7s → NVIDIA free-tier está
-# congestionado/deprioriza el IP de Render. Con 2 modelos eran 20s colgado
-# antes de caer a heurístico; con uno solo el peor caso es 1 timeout. Cuando el
-# free-tier no está saturado, lightning responde ~7s y da why real. La solución
-# de fondo (LLM pago confiable) es decisión de Matías — ver nota en el log.
-NVIDIA_MODELS = [MODEL]
-REQUEST_TIMEOUT = 8
+# Groq va PRIMERO. En el free tier cada modelo es un bucket de cuota
+# INDEPENDIENTE (medido en headers: 8K TPM / 1K RPD / 30 RPM / 200K TPD por
+# modelo), así que la lista es a la vez fallback de disponibilidad y de cuota.
+# Un refine son ~3K tokens → ~2 por minuto y ~65 por día POR modelo, ~190/día
+# entre los tres; el uso real hoy es 30-50/día. Orden por calidad de español
+# medida con el prompt real (scratchpad/llm-strategy.md, 3 corridas c/u):
+#   - qwen3.8-27b: 2-3s, el mejor rioplatense por lejos, 0 títulos inventados.
+#     Límite extra no documentado: 1.000 tokens de SALIDA por minuto → un
+#     refine por minuto; el segundo da 429 (0,1s) y cae al siguiente.
+#   - gpt-oss-120b (reasoning_effort=low): 1,6-1,8s, bueno; a veces cita
+#     candidatos de la misma tanda como si el usuario ya los hubiera visto.
+#   - gpt-oss-20b (low): 1,1s, tutea y repite plantillas. Último antes del
+#     heurístico.
+# gpt-oss son modelos con razonamiento: NO ponerles max_tokens chico (el
+# razonamiento consume el presupuesto y json_object falla con 400).
+GROQ_CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completions"
+GROQ_MODELS = ["qwen/qwen3.8-27b", "openai/gpt-oss-120b", "openai/gpt-oss-20b"]
+GROQ_MODEL = GROQ_MODELS[0]
+# Historial, para no repetir diagnósticos:
+#   - 2026-08-11: cadena NVIDIA lightning-30b → ultra-550b → llama-3.1-8b, con
+#     Groq llama-3.3-70b de último recurso. Groq daba 403 "desde Render".
+#   - 2026-08-29: toda la cadena NVIDIA muerta en prod (timeouts, 410 Gone);
+#     damage control a un solo modelo (lightning) + timeout 8s; Groq seguía 403,
+#     atribuido a un bloqueo de IP de hosting.
+#   - 2026-09-09: el 403 de Groq era el header User-Agent (ver _call_nvidia),
+#     nunca la IP. llama-3.3-70b-versatile ya no existe en Groq. lightning-30b
+#     timeoutea 3/3 también desde IPs de usuario; super-120b responde en
+#     18-20s (Spanglish incluido) — inservible para un request sincrónico.
+#     NVIDIA queda fuera de la cadena sync; la key sigue haciendo falta para
+#     embeddings (vibes_clustering).
+# La familia Nemotron 3.x acepta chat_template_kwargs.enable_thinking=false
+# (parámetro real de la API, no un truco de prompt) — _call_nvidia lo manda
+# por prefijo de nombre, así que si algún día NVIDIA vuelve a la cadena basta
+# con listar el modelo acá. No revalidar sin medir con el prompt real y una
+# lista de candidatos (medir "JSON válido" no alcanza: nano-30b respondía en
+# <1s con picks=0 siempre).
+MODEL = "nvidia/nemotron-3-super-120b-a12b"
+NVIDIA_MODELS: list[str] = []
+# Groq responde en 1-3s (medido); 6s deja 2x de margen. Con tres modelos en
+# la cadena, el peor caso teórico (los tres colgados en vez de 429) son 18s;
+# en la práctica Groq falla rápido, no colgado.
+REQUEST_TIMEOUT = 6
 
 # Same OrderedDict TTL+LRU idiom as tmdb_client's _DISCOVER_CACHE — avoids
 # repeating the call (and burning free-tier quota) when picks are
@@ -106,7 +111,16 @@ _load_env_file()
 
 
 def is_configured() -> bool:
-    return bool(os.environ.get("NVIDIA_API_KEY"))
+    return bool(os.environ.get("GROQ_API_KEY") or os.environ.get("NVIDIA_API_KEY"))
+
+
+def _require_configured() -> str:
+    """Corta si no hay ningún proveedor. Devuelve la key de NVIDIA (o "" si no
+    está): es lo que _call_nvidia_with_fallback usa para NVIDIA_MODELS; la de
+    Groq la lee por su cuenta del entorno."""
+    if not is_configured():
+        raise LlmError("Ningún proveedor LLM configurado (GROQ_API_KEY / NVIDIA_API_KEY).")
+    return os.environ.get("NVIDIA_API_KEY", "")
 
 
 def _phrase_for_tags(tags: list[str]) -> str:
@@ -478,14 +492,26 @@ def _call_nvidia(
         "response_format": {"type": "json_object"},
     }
     # enable_thinking solo aplica a la familia Nemotron de NVIDIA; otros
-    # modelos (el fallback llama de NVIDIA, y Groq) rechazan el parámetro
+    # modelos rechazan el parámetro. gpt-oss (Groq) razona antes de responder:
+    # "low" lo acota (medido: 1-2s en vez de agotar el presupuesto de tokens).
     if model.startswith("nvidia/nemotron"):
         payload_body["chat_template_kwargs"] = {"enable_thinking": False}
+    elif model.startswith("openai/gpt-oss"):
+        payload_body["reasoning_effort"] = "low"
     body = json.dumps(payload_body).encode("utf-8")
     request = urllib.request.Request(
         url,
         data=body,
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            # Sin esto urllib manda "Python-urllib/3.x" y Cloudflare (Groq) lo
+            # bloquea con 403 desde CUALQUIER IP. Tres sesiones (08-11, 08-29)
+            # lo atribuyeron a "Groq filtra la IP de Render": era este header.
+            # Verificado 2026-09-09: curl -A "Python-urllib/3.14" → 403, UA
+            # cualquiera → 200. Mismo request, misma key.
+            "User-Agent": "butaca/1.0 (+https://butaca.xyz)",
+        },
         method="POST",
     )
     try:
@@ -512,24 +538,25 @@ def _call_nvidia(
 
 
 def _call_nvidia_with_fallback(prompt: str, api_key: str) -> dict:
-    """Prueba cada modelo de NVIDIA_MODELS en orden una vez."""
-    last_error: LlmError | None = None
-    for model in NVIDIA_MODELS:
-        try:
-            return _call_nvidia(prompt, api_key, model)
-        except LlmError as exc:
-            last_error = exc
-            logger.warning("NVIDIA %s falló: %s", model, exc)
-
+    """Recorre la cadena una vez por modelo: GROQ_MODELS con GROQ_API_KEY y
+    después NVIDIA_MODELS con `api_key`. Sin reintentos por modelo — un
+    429/timeout pasa al siguiente en el acto (en Groq cada modelo es un bucket
+    de cuota aparte, ver el comentario de GROQ_MODELS)."""
     groq_key = os.environ.get("GROQ_API_KEY")
-    if groq_key:
+    attempts = [(model, groq_key, GROQ_CHAT_COMPLETIONS_URL) for model in GROQ_MODELS if groq_key]
+    attempts += [(model, api_key, CHAT_COMPLETIONS_URL) for model in NVIDIA_MODELS if api_key]
+    if not attempts:
+        raise LlmError("Ningún proveedor LLM configurado (GROQ_API_KEY / NVIDIA_API_KEY).")
+
+    last_error: LlmError | None = None
+    for model, key, url in attempts:
         try:
-            return _call_nvidia(prompt, groq_key, GROQ_MODEL, url=GROQ_CHAT_COMPLETIONS_URL)
+            return _call_nvidia(prompt, key, model, url=url)
         except LlmError as exc:
             last_error = exc
-            logger.warning("Groq %s falló: %s", GROQ_MODEL, exc)
+            logger.warning("LLM %s falló: %s", model, exc)
 
-    assert last_error is not None  # NVIDIA_MODELS nunca está vacío
+    assert last_error is not None  # attempts no está vacío
     raise last_error
 
 
@@ -658,9 +685,7 @@ def refine_recommendations(
     lang: str = "es",
     audience_note: str = "",
 ) -> RecommendResponse:
-    api_key = os.environ.get("NVIDIA_API_KEY")
-    if not api_key:
-        raise LlmError("NVIDIA_API_KEY no configurada.")
+    api_key = _require_configured()
     if not heuristic.recommendations:
         raise LlmError("No hay candidatos para refinar.")
 
@@ -849,9 +874,7 @@ def predict_fit(
     set es fijo: ningún título se pierde aunque el LLM no lo cubra o devuelva
     basura para alguno; en ese caso queda con su why heurístico (mejor una
     card con razón genérica que una card faltante)."""
-    api_key = os.environ.get("NVIDIA_API_KEY")
-    if not api_key:
-        raise LlmError("NVIDIA_API_KEY no configurada.")
+    api_key = _require_configured()
     if not heuristic.recommendations:
         raise LlmError("No hay candidatos para opinar.")
 
@@ -1083,9 +1106,9 @@ _CONTENT_KEYWORD_MARKERS = (
 
 def extract_chat_title(messages: list[tuple[str, str]]) -> dict | None:
     """Cheap, best-effort title extraction for chat grounding."""
-    api_key = os.environ.get("NVIDIA_API_KEY")
-    if not api_key:
+    if not is_configured():
         return None
+    api_key = os.environ.get("NVIDIA_API_KEY", "")
     context = "\n".join(
         f"{'Usuario' if role == 'user' else 'Butaca'}: {content}"
         for role, content in messages[-3:]
@@ -1210,9 +1233,7 @@ def chat_reply(
     """La versión conversacional del agente (/chat). Sin cache: cada turno es
     distinto del anterior por definición, así que una clave de cache nunca
     pegaría dos veces — el tope de gasto lo pone el rate limit del endpoint."""
-    api_key = os.environ.get("NVIDIA_API_KEY")
-    if not api_key:
-        raise LlmError("NVIDIA_API_KEY no configurada.")
+    api_key = _require_configured()
 
     prompt = _build_chat_prompt(ratings, profile, messages, lang, watchlist, feedback, grounding)
     result = _call_nvidia_with_fallback(prompt, api_key)

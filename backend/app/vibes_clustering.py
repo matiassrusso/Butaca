@@ -325,7 +325,7 @@ def _label_cluster(sample_titles_metadata: list[dict]) -> str:
         'Devolvé solo JSON: {"label": "..."}.\n\n' + context
     )
     try:
-        label = llm_client._call_nvidia_with_fallback(prompt, os.environ["NVIDIA_API_KEY"]).get("label", "")
+        label = llm_client._call_nvidia_with_fallback(prompt, os.environ.get("NVIDIA_API_KEY", "")).get("label", "")
     except llm_client.LlmError:
         return fallback
     label = str(label).strip()
