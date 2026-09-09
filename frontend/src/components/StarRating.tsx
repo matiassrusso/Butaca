@@ -94,7 +94,11 @@ export function StarRating({
     if (!el) return 0.5;
     const { left, width } = el.getBoundingClientRect();
     const ratio = Math.min(1, Math.max(0, (clientX - left) / width));
-    return Math.min(5, Math.max(0.5, Math.round(ratio * 10) / 2)); // 0.5..5 en pasos de 0.5
+    // ceil, no round: cubrir la mitad derecha de una estrella la llena ENTERA
+    // (igual que los botones por mitad y el relleno visual). Con round, el
+    // centro de una estrella daba .5 y el entero solo salía pegándole al borde
+    // exacto entre dos estrellas -> casi siempre medios puntos.
+    return Math.min(5, Math.max(0.5, Math.ceil(ratio * 10) / 2)); // 0.5..5 en pasos de 0.5
   }
 
   function onDragStart(e: React.PointerEvent) {
