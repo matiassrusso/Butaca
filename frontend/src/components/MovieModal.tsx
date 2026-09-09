@@ -617,6 +617,10 @@ export function MovieModal({
                   {t("modal.notInterested")}
                 </button>
               </div>
+              {/* #5: el feedback entrena la próxima tanda, dicho en el momento */}
+              <p className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground/60 mt-2">
+                {t("modal.feedbackTrains")}
+              </p>
               {showRateMenu && (
                 <div className="mt-3 border-t border-foreground/10 pt-3">
                   <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-2">

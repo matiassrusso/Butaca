@@ -80,6 +80,10 @@ export const MODAL: Record<string, Entry> = {
     en: "Picked by the recommendation engine, without going through the AI",
   },
   "modal.refining": { es: "escribiendo…", en: "writing…" },
+  "modal.feedbackTrains": {
+    es: "Entrena la próxima tanda de picks.",
+    en: "Trains the next batch of picks.",
+  },
   "modal.refiningHint": {
     es: "El crítico está escribiendo la razón de este pick",
     en: "The critic is writing the reason for this pick",

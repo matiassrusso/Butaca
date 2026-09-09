@@ -159,6 +159,43 @@ export const RECOMMEND: Record<string, Entry> = {
   "recommend.groupGeneros": { es: "Géneros", en: "Genres" },
   "recommend.groupVibras": { es: "Vibras", en: "Vibes" },
   "recommend.groupMovimientos": { es: "Movimientos", en: "Movements" },
+  // #3: qué es cada grupo del picker (Vibras y Movimientos se veían sin explicar)
+  "recommend.groupGenerosHint": {
+    es: "Los de siempre, tal como los clasifica TMDb.",
+    en: "The usual ones, as TMDb classifies them.",
+  },
+  "recommend.groupVibrasHint": {
+    es: "Un tono o una sensación, no un género: cruzan varios. Curadas a mano a partir de las palabras clave que TMDb le pone a cada título.",
+    en: "A tone or a feeling, not a genre: they cut across several. Hand-curated from the keywords TMDb attaches to each title.",
+  },
+  "recommend.groupMovimientosHint": {
+    es: "Corrientes de cine que el modelo encontró solo, agrupando películas parecidas entre sí. Nadie escribió estas categorías a mano; los nombres los puso el agente.",
+    en: "Currents of cinema the model found on its own by grouping similar films together. Nobody wrote these categories by hand; the agent named them.",
+  },
+  // #2: salida para quien no usa Letterboxd
+  "recommend.noLetterboxd": { es: "¿No tenés Letterboxd? Elegí", en: "No Letterboxd? Pick" },
+  "recommend.noLetterboxdTail": {
+    es: ": puntuás {n} pelis en una grilla y ya tenés perfil.",
+    en: ": rate {n} movies in a grid and you have a profile.",
+  },
+  // #4 + #5: cómo leer los resultados
+  "recommend.howToReadLabel": { es: "Cómo leerlo", en: "How to read it" },
+  "recommend.readScore": {
+    es: "El porcentaje es qué tan cerca está cada pick de tu historial según el motor (géneros, vibras, gente, similitud); no es una nota de la película. «{unknown}» quiere decir que no hay datos para estimarlo.",
+    en: "The percentage is how close each pick is to your history according to the engine (genres, vibes, people, similarity); it is not a rating of the film. “{unknown}” means there isn't enough data to estimate it.",
+  },
+  "recommend.readFeedback": {
+    es: "Lo que marcás en cada card (me interesa, no me interesa, ya la vi) entrena la próxima tanda.",
+    en: "What you mark on each card (I'm in, not for me, already seen it) trains the next batch.",
+  },
+  // #6: próximo paso
+  "recommend.nextStepLabel": { es: "Siguiente paso", en: "Next step" },
+  "recommend.nextStepIntro": {
+    es: "Cuanto más puntuás, mejor te conocemos. Cada estrella que pongas afina la próxima tanda.",
+    en: "The more you rate, the better we know you. Every star you give sharpens the next batch.",
+  },
+  "recommend.nextStepRate": { es: "→ Puntuar más pelis", en: "→ Rate more movies" },
+  "recommend.nextStepGames": { es: "→ Jugar al par a par", en: "→ Play head-to-head" },
   "recommend.picksSelected": { es: "{n}/{max} elegidas", en: "{n}/{max} selected" },
   "recommend.pickAtLeastOne": { es: "Elegí al menos una opción.", en: "Pick at least one option." },
 

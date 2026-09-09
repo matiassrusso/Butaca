@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { useLocation } from "wouter";
+import { Link, useLocation } from "wouter";
 
 import { MovieModal, type FeedbackStatus, type Recommendation } from "@/components/MovieModal";
 import { PageTransition } from "@/components/PageTransition";
@@ -58,6 +58,14 @@ const PICK_GROUP_LABEL_KEYS: Record<string, string> = {
   generos: "recommend.groupGeneros",
   vibras: "recommend.groupVibras",
   movimientos: "recommend.groupMovimientos",
+};
+// #3 (aspectos explicativos, 2026-09-02): "Vibras" y "Movimientos" se veían
+// sin explicar; nadie sabía qué es una vibra vs un género ni de dónde salen
+// los movimientos
+const PICK_GROUP_HINT_KEYS: Record<string, string> = {
+  generos: "recommend.groupGenerosHint",
+  vibras: "recommend.groupVibrasHint",
+  movimientos: "recommend.groupMovimientosHint",
 };
 const MAX_SELECTED_OPTIONS = 5; // mismo tope que backend/app/main.py::MAX_SELECTED_OPTIONS
 
@@ -912,6 +920,18 @@ export default function Recommend() {
                   </button>
                 </div>
 
+                {/* #2: Letterboxd se asumía conocido; el que no lo usa
+                    necesita ver que "A mano" es su puerta, no una opción menor */}
+                {sourceGroup !== "manual" && (
+                  <p className="font-mono text-[10px] uppercase leading-relaxed text-muted-foreground -mt-2 mb-6 max-w-xl">
+                    {t("recommend.noLetterboxd")}{" "}
+                    <button onClick={() => pickSource("manual")} className="uppercase underline text-accent hover:text-foreground">
+                      {t("recommend.tabManual")}
+                    </button>
+                    {t("recommend.noLetterboxdTail", { n: MIN_MANUAL_RATINGS })}
+                  </p>
+                )}
+
                 {sourceGroup === "letterboxd" && (
                   <div className="flex gap-0 mb-6 max-w-xs">
                     <button onClick={() => setImportMethod("zip")} className={tabCls(importMethod === "zip")}>
@@ -1186,9 +1206,14 @@ export default function Recommend() {
                       }, {}),
                     ).map(([group, options]) => (
                       <div key={group} className="mb-5">
-                        <h3 className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-2">
+                        <h3 className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-1">
                           {PICK_GROUP_LABEL_KEYS[group] ? t(PICK_GROUP_LABEL_KEYS[group]) : group}
                         </h3>
+                        {PICK_GROUP_HINT_KEYS[group] && (
+                          <p className="font-serif italic text-sm text-muted-foreground mb-3 max-w-2xl">
+                            {t(PICK_GROUP_HINT_KEYS[group])}
+                          </p>
+                        )}
                         <div className="flex flex-wrap gap-2">
                           {options.map((option) => {
                             const selected = selectedGenres.includes(option.key);
@@ -1359,6 +1384,17 @@ export default function Recommend() {
               <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mt-3">
                 {result.taste_summary}
               </p>
+              {/* #4 + #5: el % no se explicaba en ningún lado y el loop de
+                  feedback era invisible (solo estaba en el <details> del paso 3) */}
+              <div className="border-l-2 border-foreground/20 pl-4 mt-6 max-w-2xl">
+                <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-1">
+                  [{t("recommend.howToReadLabel")}]
+                </div>
+                <p className="font-serif text-sm leading-relaxed text-muted-foreground">
+                  {t("recommend.readScore", { unknown: t("match.unknownShort") })}{" "}
+                  {t("recommend.readFeedback")}
+                </p>
+              </div>
             </div>
 
             {/* feedback: a 2 columnas en desktop ancho cada poster salía más
@@ -1376,6 +1412,28 @@ export default function Recommend() {
                 />
               ))}
             </div>
+
+            {/* #6: después de los resultados no había próximo paso — solo
+                "Nuevos picks" y "Cambiar búsqueda", nada que empuje a
+                puntuar más, que es lo que de verdad mejora la próxima tanda */}
+            {!result.ephemeral && (
+              <div className="mt-16 border-t border-foreground/10 pt-8 max-w-2xl">
+                <div className="font-mono text-[10px] uppercase tracking-widest text-accent mb-2">
+                  [{t("recommend.nextStepLabel")}]
+                </div>
+                <p className="font-serif italic text-base text-muted-foreground mb-4">
+                  {t("recommend.nextStepIntro")}
+                </p>
+                <div className="flex flex-wrap gap-x-6 gap-y-2">
+                  <Link href="/rate" className="font-mono text-[10px] uppercase tracking-widest hover:text-accent transition-colors">
+                    {t("recommend.nextStepRate")}
+                  </Link>
+                  <Link href="/games" className="font-mono text-[10px] uppercase tracking-widest hover:text-accent transition-colors">
+                    {t("recommend.nextStepGames")}
+                  </Link>
+                </div>
+              </div>
+            )}
           </>
         )}
 
