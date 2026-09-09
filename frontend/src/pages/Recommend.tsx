@@ -647,7 +647,9 @@ export default function Recommend() {
             mode,
             kind_filter: kindFilter,
             genres: mode === "genres" ? selectedGenres.join(",") : "",
-            refine: true,
+            // false, igual que las otras fuentes: picks al toque y el why del LLM
+            // llega por refineSession
+            refine: false,
           }),
         });
       } else if (importMethod === "manual") {
