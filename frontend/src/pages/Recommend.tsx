@@ -94,14 +94,16 @@ function RecommendationCard({
   index,
   feedback,
   onSelect,
+  refining,
 }: {
   rec: Recommendation;
   index: number;
   feedback?: FeedbackStatus;
   onSelect: () => void;
+  refining?: boolean;
 }) {
   return (
-    <PosterCard rec={rec} index={index + 1} feedback={feedback} featured onSelect={onSelect}>
+    <PosterCard rec={rec} index={index + 1} feedback={feedback} featured onSelect={onSelect} refining={refining}>
       <div className="flex justify-between items-baseline gap-4 mb-4">
         <h3 className="text-2xl font-black uppercase tracking-tighter leading-none group-hover:text-accent transition-colors">
           {rec.title}
@@ -432,7 +434,15 @@ export default function Recommend() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [feedbackState, setFeedbackState] = useState<Record<number, FeedbackStatus>>({});
-  const [selectedRec, setSelectedRec] = useState<Recommendation | null>(null);
+  // id de la sesión cuyo /refine está en vuelo (null = ninguno). Se compara
+  // contra result.session_id: si el usuario pidió "Nuevos picks" mientras
+  // tanto, la respuesta vieja no matchea y se descarta sola — sin AbortController
+  const [refiningSid, setRefiningSid] = useState<number | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  // derivado, no snapshot: cuando /refine pisa el why, el modal abierto lo tiene
+  // que ver (con un objeto copiado se quedaba con el texto heurístico)
+  const selectedRec = result?.recommendations.find((r) => r.id === selectedId) ?? null;
+  const refining = result?.session_id != null && result.session_id === refiningSid;
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
@@ -599,7 +609,10 @@ export default function Recommend() {
             mode,
             kind_filter: kindFilter,
             genres: mode === "genres" ? selectedGenres.join(",") : "",
-            refine: true,
+            // false: los picks salen al toque con el why heurístico y el del
+            // LLM se pide aparte en refineSession (antes el request esperaba
+            // 9-28s al LLM adentro)
+            refine: false,
             // el LLM del backend escribe los "why" en este idioma
             lang,
           }),
@@ -609,7 +622,7 @@ export default function Recommend() {
         formData.append("mode", mode);
         formData.append("kind_filter", kindFilter);
         formData.append("genres", mode === "genres" ? selectedGenres.join(",") : "");
-        formData.append("refine", "1");
+        formData.append("refine", "0");
 
         let endpoint = `${API_BASE_URL}/recommend/zip`;
         if (importMethod === "zip") {
@@ -640,6 +653,9 @@ export default function Recommend() {
 
       setResult(data);
       setFeedbackState({});
+      // desde el handler y no desde un effect sobre session_id: StrictMode
+      // duplicaría el effect en dev y pediría el refine dos veces
+      if (data.session_id != null && !data.refined) void refineSession(data.session_id);
       toast.success(t("recommend.picksReady"));
     } catch (err) {
       const message = err instanceof Error ? err.message : t("recommend.generateFailed");
@@ -647,6 +663,39 @@ export default function Recommend() {
       toast.error(message);
     } finally {
       setLoading(false);
+    }
+  }
+
+  // segunda mitad del render progresivo: los picks ya están en pantalla con el
+  // why heurístico; acá se piden los del LLM y se pisan por id. Solo why y
+  // refined: match_score es el del motor y no se toca, el orden tampoco.
+  async function refineSession(sid: number) {
+    if (!token) return;
+    setRefiningSid(sid);
+    try {
+      const response = await fetch(`${API_BASE_URL}/recommend/sessions/${sid}/refine`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) return; // queda el heurístico, mismo trato que refined=false
+      const refined = (await response.json()) as RecommendResponse;
+      const byId = new Map(refined.recommendations.map((rec) => [rec.id, rec]));
+      setResult((prev) => {
+        if (!prev || prev.session_id !== sid) return prev; // llegó tarde: ya hay otra tanda
+        return {
+          ...prev,
+          refined: refined.refined,
+          taste_summary: refined.taste_summary || prev.taste_summary,
+          recommendations: prev.recommendations.map((rec) => {
+            const next = byId.get(rec.id);
+            return next ? { ...rec, why: next.why, refined: next.refined } : rec;
+          }),
+        };
+      });
+    } catch {
+      // red caída: el heurístico ya está en pantalla, no hay nada que avisar
+    } finally {
+      setRefiningSid((prev) => (prev === sid ? null : prev));
     }
   }
 
@@ -1214,7 +1263,8 @@ export default function Recommend() {
                   rec={rec}
                   index={i}
                   feedback={feedbackState[rec.id]}
-                  onSelect={() => setSelectedRec(rec)}
+                  onSelect={() => setSelectedId(rec.id)}
+                  refining={refining}
                 />
               ))}
             </div>
@@ -1228,7 +1278,7 @@ export default function Recommend() {
             token={token}
             feedback={feedbackState[selectedRec.id]}
             seenWhys={seenWhysRef}
-            onClose={() => setSelectedRec(null)}
+            onClose={() => setSelectedId(null)}
             onFeedback={(status) => submitFeedback(selectedRec.id, status)}
             onRate={(rating, title, tmdbId, review) => rateTitle(selectedRec, rating, title, tmdbId, review)}
             readOnly={result?.ephemeral}

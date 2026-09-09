@@ -79,6 +79,11 @@ export const MODAL: Record<string, Entry> = {
     es: "Elegido por el motor de recomendación, sin pasar por la IA",
     en: "Picked by the recommendation engine, without going through the AI",
   },
+  "modal.refining": { es: "escribiendo…", en: "writing…" },
+  "modal.refiningHint": {
+    es: "El crítico está escribiendo la razón de este pick",
+    en: "The critic is writing the reason for this pick",
+  },
 
   // ─── Estrellas ────────────────────────────────────────────────────────
   "modal.yourRating": { es: "Tu rating", en: "Your rating" },
