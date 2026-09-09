@@ -228,7 +228,12 @@ CREDITS_ENRICH_CAP = 30
 # ponytail: ~65 req/s pico a ~90ms/req contra ~50 sostenidos de TMDb; un 429 es
 # TmdbError => ese item queda sin enriquecer, no rompe nada. Bajar a 4 si
 # aparecen "Keywords de X fallaron" en logs; subir a 8-10 si nunca aparecen.
-ENRICH_WORKERS = 6
+ENRICH_WORKERS = 8
+# Medido en prod (2026-09-09, deploy bcdb5f9) con 6 workers: ~200 llamadas de
+# enriquecimiento en ~7s, o sea ~210ms por llamada desde Render (no los
+# ~90ms que se ven desde una IP de usuario), y cero "fallaron" en logs. 8
+# workers ≈ 40 req/s, debajo de los ~50 sostenidos de TMDb. Si aparecen
+# "Keywords de X fallaron" en logs, volver a 6.
 
 # El pool personalizado pedía UNA página (20 títulos) y siempre la misma, así
 # que "Nuevos picks" volvía a mirar los mismos 20 de siempre y, con la
