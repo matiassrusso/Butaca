@@ -15,7 +15,7 @@ If a session is drifting without moving hacia calidad de recomendación o clarid
 1. Definición corta del alcance (ver `docs/product-mvp.md`)
 2. Implementación en `backend` (FastAPI + SQLite) y/o `frontend` (React + Vite + Tailwind)
 3. Si hay varios agentes en paralelo: coordinación por `TASKS.md` (worktrees separados, marcar In Progress → Done, nunca mergear a `main` solo)
-4. Tests de backend en verde antes de cerrar (294 tests a la fecha)
+4. Tests de backend en verde antes de cerrar (537 tests a la fecha; correrlos desde un worktree fuera de OneDrive, ver Estado actual)
 5. Deployeado: frontend [butaca.xyz](https://butaca.xyz/) (Vercel), backend [api.butaca.xyz](https://api.butaca.xyz) (Render, free tier — cold start en la primera request)
 
 ## Key People
@@ -44,6 +44,36 @@ Solo yo (Matías), con posible coordinación multi-agente (Claude, Codex) docume
 ## Current Status
 
 <!-- SESSION_STATE:START -->
+## Estado actual
+_Última actualización: 2026-09-09_
+
+**Qué se hizo:**
+- **Auditoría completa del proyecto** a pedido de Matías, anotada en `03 Iteration Logs/(C) 2026-09-09 auditoria-completa.md` (severidad + confianza por hallazgo, y al final la ruta de soluciones ejecutada con números).
+- **`/recommend` lento y siempre heurístico, resuelto de raíz.** El 403 de Groq que tres sesiones atribuyeron a "Cloudflare filtra la IP de Render" era el header `User-Agent`: `urllib` manda `Python-urllib/3.x` y Groq lo bloquea desde cualquier IP (verificado con curl: UA default → 200, `-A Python-urllib/3.14` → 403). Además `llama-3.3-70b-versatile` ya no existe en Groq, `lightning-30b` (el único de NVIDIA en prod) timeoutea siempre y `super-120b` tarda 18-20s. Cadena nueva: Groq `qwen3.8-27b → gpt-oss-120b → gpt-oss-20b` (medidos con el prompt real, 3 corridas c/u; cada modelo es un bucket de cuota independiente, ~190 refines/día gratis contra 30-50 de uso), NVIDIA fuera de la cadena sync (la key queda para embeddings), timeout 6s, UA propio. Log de prod tras el deploy: `LLM qwen/qwen3.8-27b respondió en 1.7s` desde Render.
+- **Render progresivo cableado en el frontend** (nunca lo había estado: `Recommend.tsx` mandaba siempre `refine: true` y no había ninguna referencia a `/refine` en todo el git). Ahora `refine: false` + `POST /recommend/sessions/{id}/refine`, chip "escribiendo…" mientras tanto. Cambio semántico explícito: el LLM opina sobre los 6 del motor en vez de elegir 6 de 12.
+- **Columna `refined` en `recommendations_served`** (migración idempotente): la bitácora y "Current picks" marcaban HEURÍSTICO en todo porque el flag no existía.
+- **CI estaba roja desde el 2026-08-29** (6 pushes): `Recommendation` usado en anotaciones sin importar; local pasaba por anotaciones diferidas de 3.14, CI en 3.12 explotaba. Import + matriz 3.12/3.14. Render corre 3.14.3 default (visto en build log), no se pinea.
+- **Perf backend**: enriquecimiento de candidatos en paralelo (8 workers; ~210ms/llamada desde Render), bloque duplicado de `_finish_recommend` borrado, headers HSTS/nosniff/referrer-policy, `--no-server-header` (vía API de Render: `render.yaml` NO se sincroniza con el servicio), fixtures de conftest para la suite. 537 tests.
+- **Medido en prod, antes → después:** perfil cacheado 9,0s heurístico → **1,1s** picks + 1,7-2,1s el why del LLM (6/6); perfil frío 28,2s → **13,1s con 8 workers (timeline por logs: ~5s de perfil+discover secuencial, ~6s de enriquecimiento, ~2s scoring/DB; se paga una vez por usuario, cache 24h)**; `/history` con flags reales; CI verde.
+- Limpieza: 10 worktrees viejos y 16 branches mergeadas borrados; el WIP sin commitear que había en main (tab "Mi perfil" + estrellas arrastrables en touch) quedó intacto en la branch `wip/mi-perfil-tab-y-estrellas-touch`.
+
+**Dónde retomar:** que Matías pruebe `/recommend` en butaca.xyz y confirme (picks al toque, why en ~2s). Lo que quedó para él está en la nota, sección "Para Matías": rotar `BUTACA_ADMIN_TOKEN` (lo pasé por query string en un `/admin/stats` y quedó en un access log de Render — error mío), decidir el WIP de "Mi perfil" (al rebasar, cambiar su `refine: true` → `false`), y si encaro los tests que salen a la red real (hallazgo nuevo: `taste_profile.match_titles` pega a TMDb con la key falsa y el 401 se traga; un test hace 82 llamadas HTTPS, por eso la suite oscila 37-100s). Siguiente palanca de perf si el frío molesta: la fase de discover sigue secuencial (~6 `search/person` + ~10 `discover`, ~2-3s).
+
+**Bloqueos / decisiones pendientes:**
+- Cuota de Groq free tier: hoy sobra (30-50 refines/día contra ~190), pero el tope teórico del producto (20/día × usuarios) no entra. Si aprieta: Groq Dev Tier (~USD 4/mes estimado), no OpenAI.
+- El worktree `.claude/worktrees/nifty-margulis-b14e64` (julio, mergeado) tiene 2 archivos sin commitear; no se borró. `backup-before-history-rewrite` y la remota `claude/recommendations-slow-heuristic-9m0huf` quedaron.
+
+**Contexto que no es obvio del código:**
+- **Cualquier cliente HTTP nuevo con `urllib` en este proyecto tiene que setear `User-Agent`**, y antes de decir que un proveedor "bloquea a Render" hay que reproducir desde local con el MISMO cliente, no con curl.
+- Los gpt-oss de Groq razonan: `reasoning_effort: low` y sin `max_tokens` chico, si no `json_object` falla con 400. `qwen3.8-27b` tiene 1.000 tokens de salida por minuto (no documentado): un refine por minuto, el segundo da 429 y cae al siguiente bucket en 0,1s. `_call_nvidia_with_fallback` loguea a INFO qué modelo respondió y en cuánto.
+- **La suite tarda 4x más desde el repo principal (OneDrive) que desde un worktree en `C:\Users\matia\butaca-wt`** (403s vs 93s). Correrla desde ahí.
+- **`git worktree remove --force` sigue los junctions de `node_modules`** y vació el del repo principal en esta sesión (se regeneró con `npm ci`, nada trackeado se perdió): soltar el junction con `rmdir` y verificar que no existe ANTES de borrar el worktree.
+- `render.yaml` no gobierna el servicio de Render (startCommand y env vars viven en el dashboard); los cambios van por API (`PATCH /v1/services/{id}`).
+- Codex en background (`codex exec`) volvió a no producir nada en 30 min, igual que el 2026-08-29; el despacho paralelo fue por subagentes Claude en worktrees.
+
+<details>
+<summary>Estado detallado anterior (2026-08-11)</summary>
+
 ## Estado actual
 _Última actualización: 2026-08-11_
 
@@ -438,7 +468,15 @@ _Última actualización: 2026-08-07_
 
 </details>
 
+</details>
+
 ## Historial de sesiones
+
+### 2026-09-09 — auditoría completa, y el 403 de Groq que era un header
+Matías pidió auditar todo el proyecto y anotar lo que anduviera y lo que no, con foco en `/recommend` lento y heurístico. Medí en prod con un guest descartable (28s frío / 9s cacheado, siempre heurístico) y en vez de aceptar el diagnóstico heredado ("Groq bloquea la IP de Render") lo reproduje desde local con el mismo cliente: el 403 era el `User-Agent` de `urllib`. Un mes de "sin solución de nuestro lado" era un header. De paso: el modelo configurado en Groq ya no existía, el de NVIDIA no respondía nunca, CI llevaba seis pushes en rojo sin que nadie lo viera, y el render progresivo del backend nunca se había cableado en el frontend. Todo anotado con severidad y confianza en la nota de auditoría.
+
+Para las soluciones, Matías pidió pensar con varios agentes antes de tocar: tres planes en paralelo (uno midió cuotas y calidad de cada modelo de Groq con el prompt real; otro diseñó el render progresivo con sus carreras; otro el plan de perf/CI/headers), después ejecución en worktrees separados con subagentes Claude (el despacho a Codex no produjo nada en 30 minutos, otra vez). Cerró con todo deployado y verificado por logs de Render: `qwen3.8-27b respondió en 1.7s` desde la IP que supuestamente estaba bloqueada; picks en 1,1s y el why del LLM 2s después. Dos errores míos reportados en la nota: pasé el token de admin por query string (quedó en un access log, hay que rotarlo) y la limpieza de worktrees vació el `node_modules` del repo principal a través de un junction (regenerado, nada trackeado perdido).
+
 
 ### 2026-08-11 — /recommend lento y siempre heurístico, y por qué los modelos "famosos" del catálogo NVIDIA son los peores hoy
 Retomé una sesión cloud anterior que había quedado a mitad de diagnóstico (nota en `D:\Descargas\butacarecommendslowheuristic20260811.md`): Matías reportaba `/recommend` lento y siempre con el "why" heurístico, nunca el del LLM. Con `RENDER_API_KEY` local pude leer logs reales de producción en vez de hipotetizar — no era rate-limit (429), eran timeouts genuinos: los 4 intentos de la cadena vieja (2 modelos × 2 reintentos) tardaban el timeout completo, ~82s, calzando exacto con los "1:25" que había reportado. Reduje `ATTEMPTS_PER_MODEL` a 1 y `REQUEST_TIMEOUT` a 10s, cortando el peor caso a ~20-28s — verificado con logs después del deploy.
