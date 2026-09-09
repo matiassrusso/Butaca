@@ -151,6 +151,7 @@ CREATE TABLE IF NOT EXISTS recommendations_served (
     backdrop_path TEXT,
     overview TEXT NOT NULL DEFAULT '',
     vote_average REAL,
+    refined INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -325,6 +326,7 @@ CREATE TABLE IF NOT EXISTS recommendations_served (
     backdrop_path TEXT,
     overview TEXT NOT NULL DEFAULT '',
     vote_average REAL,
+    refined INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT ({_PG_NOW})
 );
 
@@ -455,6 +457,12 @@ def _run_migrations(conn) -> None:
         )
     if not _has_column(conn, "recommendations_served", "tmdb_id"):
         conn.execute("ALTER TABLE recommendations_served ADD COLUMN tmdb_id INTEGER")
+    if not _has_column(conn, "recommendations_served", "refined"):
+        # Si el why lo escribió el LLM (1) o es el heurístico del motor (0).
+        # Sin esto la bitácora y "Current picks" de la home marcaban TODO como
+        # heurístico, aunque el refine hubiera pisado el why. Filas viejas
+        # quedan en 0: no se puede saber hacia atrás.
+        conn.execute("ALTER TABLE recommendations_served ADD COLUMN refined INTEGER NOT NULL DEFAULT 0")
     if not _has_column(conn, "rated_items", "watched_date"):
         conn.execute("ALTER TABLE rated_items ADD COLUMN watched_date TEXT NOT NULL DEFAULT ''")
     if not _has_column(conn, "rated_items", "source"):
@@ -1066,8 +1074,8 @@ def save_recommendations(session_id: int, user_id: int, mood: str, items: list[d
                 """
                 INSERT INTO recommendations_served
                     (session_id, user_id, tmdb_id, title, year, kind, why, match_score, tags, mood,
-                     poster_path, backdrop_path, overview, vote_average)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     poster_path, backdrop_path, overview, vote_average, refined)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """
                 + (" RETURNING id" if _is_postgres() else ""),
                 (
@@ -1085,6 +1093,7 @@ def save_recommendations(session_id: int, user_id: int, mood: str, items: list[d
                     item.get("backdrop_path"),
                     item.get("overview", ""),
                     item.get("vote_average"),
+                    1 if item.get("refined") else 0,
                 ),
             )
             ids.append(_last_insert_id(conn, cursor))
@@ -1136,7 +1145,7 @@ def get_recommendation_history(user_id: int) -> list[dict]:
             """
             SELECT
                 id, session_id, tmdb_id, title, year, kind, why, match_score, tags, poster_path,
-                backdrop_path, overview, vote_average
+                backdrop_path, overview, vote_average, refined
             FROM recommendations_served
             WHERE user_id = ? AND session_id IS NOT NULL
             ORDER BY session_id DESC, id ASC
@@ -1160,6 +1169,7 @@ def get_recommendation_history(user_id: int) -> list[dict]:
                 "backdrop_path": row["backdrop_path"],
                 "overview": row["overview"],
                 "vote_average": row["vote_average"],
+                "refined": bool(row["refined"]),
             }
         )
 
@@ -1189,7 +1199,7 @@ def get_session_recommendations(session_id: int, user_id: int) -> list[dict]:
         rows = conn.execute(
             """
             SELECT id, tmdb_id, title, year, kind, why, match_score, tags,
-                   poster_path, backdrop_path, overview, vote_average
+                   poster_path, backdrop_path, overview, vote_average, refined
             FROM recommendations_served
             WHERE session_id = ? AND user_id = ?
             ORDER BY id ASC
@@ -1216,16 +1226,17 @@ def get_session_recommendations(session_id: int, user_id: int) -> list[dict]:
 
 
 def update_session_refinement(
-    session_id: int, taste_summary: str, why_by_id: list[tuple[int, str]]
+    session_id: int, taste_summary: str, why_by_id: list[tuple[int, str, bool]]
 ) -> None:
     with get_connection() as conn:
         conn.execute(
             "UPDATE recommendation_sessions SET taste_summary = ? WHERE id = ?",
             (taste_summary, session_id),
         )
-        for rec_id, why in why_by_id:
+        for rec_id, why, refined in why_by_id:
             conn.execute(
-                "UPDATE recommendations_served SET why = ? WHERE id = ?", (why, rec_id)
+                "UPDATE recommendations_served SET why = ?, refined = ? WHERE id = ?",
+                (why, 1 if refined else 0, rec_id),
             )
 
 

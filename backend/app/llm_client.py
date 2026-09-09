@@ -550,11 +550,18 @@ def _call_nvidia_with_fallback(prompt: str, api_key: str) -> dict:
 
     last_error: LlmError | None = None
     for model, key, url in attempts:
+        started = time.monotonic()
         try:
-            return _call_nvidia(prompt, key, model, url=url)
+            result = _call_nvidia(prompt, key, model, url=url)
         except LlmError as exc:
             last_error = exc
             logger.warning("LLM %s falló: %s", model, exc)
+        else:
+            # qué bucket sirvió y cuánto tardó: sin esto los logs solo cuentan
+            # los fallos, y no se ve si qwen está 429 todo el día y todo cae
+            # al segundo modelo
+            logger.info("LLM %s respondió en %.1fs", model, time.monotonic() - started)
+            return result
 
     assert last_error is not None  # attempts no está vacío
     raise last_error

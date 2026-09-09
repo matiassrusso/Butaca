@@ -1675,7 +1675,9 @@ def test_refine_session_applies_llm_and_persists(monkeypatch) -> None:
     # "Current picks" de la home, 2026-07-31).
     def fake_predict(user_id, ratings, heuristic, lang="es"):
         picks = [
-            rec.model_copy(update={"why": f"razón del agente {i}", "match_score": 99})
+            # refined=True por pick es parte del contrato de predict_fit
+            # (_apply_verdict_result lo pone en cada pick que el LLM cubrió)
+            rec.model_copy(update={"why": f"razón del agente {i}", "match_score": 99, "refined": True})
             for i, rec in enumerate(heuristic.recommendations)
         ]
         return heuristic.model_copy(update={"recommendations": picks})
@@ -1700,6 +1702,31 @@ def test_refine_session_applies_llm_and_persists(monkeypatch) -> None:
     assert all(
         item["why"].startswith("razón del agente") for item in session["recommendations"]
     )
+    # y el flag persiste con el why: antes /history no lo devolvía y la
+    # bitácora marcaba HEURÍSTICO hasta los picks que el LLM sí explicó
+    assert all(item["refined"] is True for item in session["recommendations"])
+
+
+def test_history_marks_heuristic_picks_as_not_refined(monkeypatch) -> None:
+    monkeypatch.setenv("NVIDIA_API_KEY", "fake-key")
+    headers = _auth_headers("heuristichistory")
+    fast = _post_zip(headers, refine="0").json()
+    session_id = fast["session_id"]
+
+    # el LLM cubre solo el primero; el resto queda con el why del motor
+    def fake_predict(user_id, ratings, heuristic, lang="es"):
+        first, *rest = heuristic.recommendations
+        picks = [first.model_copy(update={"why": "razón del agente", "refined": True})] + rest
+        return heuristic.model_copy(update={"recommendations": picks})
+
+    monkeypatch.setattr("backend.app.main.llm_client.predict_fit", fake_predict)
+    client.post(f"/recommend/sessions/{session_id}/refine", headers=headers)
+
+    sessions = client.get("/history", headers=headers).json()["sessions"]
+    session = next(item for item in sessions if item["id"] == session_id)
+    flags = [item["refined"] for item in session["recommendations"]]
+    assert flags[0] is True
+    assert all(flag is False for flag in flags[1:])
 
 
 def test_refine_session_404_for_other_user() -> None:

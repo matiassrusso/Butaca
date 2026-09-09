@@ -2544,7 +2544,7 @@ def refine_session(
     db.update_session_refinement(
         session_id,
         refined.taste_summary,
-        [(rec.id, rec.why) for rec in refined.recommendations if rec.id is not None],
+        [(rec.id, rec.why, rec.refined) for rec in refined.recommendations if rec.id is not None],
     )
     refined.session_id = session_id
     refined.refined = True
