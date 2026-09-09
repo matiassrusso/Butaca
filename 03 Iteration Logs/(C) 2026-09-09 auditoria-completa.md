@@ -220,3 +220,6 @@ Al borrar los worktrees viejos, un junction de `node_modules` no se soltó y `gi
 |---|---|
 | Refine | 1,6s, 6/6 whys del LLM |
 | Perfil cacheado | 1,0s |
+
+### Reportado por Matías después del cierre: "sacaste varias animaciones"
+No fue de esta sesión: el commit de accesibilidad del 2026-08-25 (`2d967d5`, auditoría nocturna vía Codex) pasó el panel del menú lateral (`StaggeredMenu`) a montarse solo con `open`, y `toggleMenu` llama a `playOpen()` en el mismo tick que `setOpen(true)`, antes de que el portal exista: `buildOpenTimeline()` no encontraba el panel y devolvía null; al cerrar, el unmount se llevaba el elemento antes del tween de salida. Fix: el panel vuelve a estar siempre montado (offscreen vía GSAP) y la accesibilidad que buscaba ese cambio la da `inert={!open}`; de paso, el effect que devolvía el foco al botón corría también al montar y robaba el foco en cada carga de página (guard con `wasOpenRef`). Verificado en Chrome real contra el dev server: tween de apertura 460px → 0 en 0,65s y de cierre 0 → 460px en 0,32s, `inert` solo cerrado, foco en `body` al cargar. Con la pestaña oculta el browser congela rAF y GSAP no avanza, así que la medición fue forzando `progress()` de los tweens, no a ojo.

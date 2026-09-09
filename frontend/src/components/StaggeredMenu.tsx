@@ -239,8 +239,10 @@ export function StaggeredMenu({
     return () => document.removeEventListener("keydown", onKey);
   }, [open, closeMenu]);
 
+  const wasOpenRef = useRef(false);
   useEffect(() => {
-    if (!open) toggleBtnRef.current?.focus();
+    if (!open && wasOpenRef.current) toggleBtnRef.current?.focus();
+    wasOpenRef.current = open;
   }, [open]);
 
   useEffect(() => {
@@ -286,7 +288,7 @@ export function StaggeredMenu({
         </span>
       </button>
 
-      {open && createPortal(
+      {createPortal(
         <>
           <div ref={preLayersRef} className="sm-prelayers" data-position={position} aria-hidden="true">
             <div className="sm-prelayer sm-prelayer-1" />
@@ -299,6 +301,7 @@ export function StaggeredMenu({
             className="sm-panel"
             data-position={position}
             aria-hidden={!open}
+            inert={!open}
           >
             <div className="sm-panel-inner">
               {eyebrow && <div className="sm-panel-eyebrow">{eyebrow}</div>}
