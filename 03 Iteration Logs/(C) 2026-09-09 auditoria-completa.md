@@ -207,7 +207,7 @@ Commits en `main`: `9cfe631` (cadena LLM + CI), `f380283` (render progresivo), `
 
 ### Para Matías
 - **Rotar `BUTACA_ADMIN_TOKEN`** (quedó en un access log de Render por error mío al auditar).
-- **Decidir el WIP** de la branch `wip/mi-perfil-tab-y-estrellas-touch` (tab "Mi perfil" + estrellas arrastrables). Al rebasarla sobre main hay que cambiar su `refine: true` → `false` en el bloque de `/recommend/profile`.
+- ~~Decidir el WIP de la branch `wip/mi-perfil-tab-y-estrellas-touch`~~ **Resuelto**: era el trabajo de la sesión del 2026-09-02 ("Reordenar opciones de recomendación": picker Mi perfil / Letterboxd / A mano, marco "cómo funciona", estrellas arrastrables en touch). Matías pidió rebasarlo y mergearlo; hecho con el único ajuste de `refine: false` en `/recommend/profile`, verificado en dev server (`POST /recommend/profile` → `/refine`, picks <0,5s) y publicado (`2b45626`). Quedan pendientes de esa sesión los puntos 2-6 de "aspectos explicativos": cartel "¿no tenés Letterboxd? → A mano", qué es una vibra/movimiento, qué significa el match score, decir en el momento que "Ya la vi" entrena las próximas tandas, próximo paso tras los resultados.
 - El worktree `.claude/worktrees/nifty-margulis-b14e64` (branch de julio, mergeada) tiene 2 archivos modificados sin commitear (`AGENTS.md`, `docs/architecture.md`); no lo borré por eso.
 - Branch `backup-before-history-rewrite` y la remota `claude/recommendations-slow-heuristic-9m0huf` quedaron; borrarlas es decisión tuya.
 - Tests que salen a la red (arriba): ¿lo encaro la próxima?
