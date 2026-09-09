@@ -21,9 +21,41 @@ export const RECOMMEND: Record<string, Entry> = {
     es: "Para recomendarte en serio primero tenemos que conocerte. Elegí cómo nos contás qué viste y qué te gustó.",
     en: "To recommend anything worth watching we need to know you first. Pick how you tell us what you've seen and what you loved.",
   },
+  // #1: marco del ciclo, siempre visible arriba del picker — el usuario nuevo
+  // no entiende que el perfil es un acumulador único
+  "recommend.howItWorksLabel": { es: "Cómo funciona", en: "How it works" },
+  "recommend.howItWorks": {
+    es: "Nos das tu gusto una vez —de Letterboxd o a mano— y Butaca arma tu perfil. Mejora con cada peli que puntúes, así que después entrás siempre por «Mi perfil» y ya engloba todo.",
+    en: "You give us your taste once —from Letterboxd or by hand— and Butaca builds your profile. It gets better with every movie you rate, so from then on you just pick “My profile” and it covers everything.",
+  },
+  // picker primario: de dónde sale tu gusto
+  "recommend.tabProfile": { es: "Mi perfil", en: "My profile" },
+  "recommend.tabLetterboxd": { es: "Letterboxd", en: "Letterboxd" },
+  "recommend.tabManual": { es: "A mano", en: "By hand" },
+  // sub-toggle dentro de Letterboxd
   "recommend.tabZip": { es: "Subir .zip", en: "Upload .zip" },
   "recommend.tabUsername": { es: "Username", en: "Username" },
-  "recommend.tabManual": { es: "Sin cuenta", en: "No account" },
+
+  "recommend.profileHint": {
+    es: "Usamos todo lo que ya puntuaste en Butaca ({n} títulos) — venga de Letterboxd, de la grilla o de estrellas en el sitio. No hace falta subir nada.",
+    en: "We use everything you've already rated on Butaca ({n} titles) — from Letterboxd, the grid or stars on the site. Nothing to upload.",
+  },
+  "recommend.profileEmpty": {
+    es: "Todavía no tenés suficiente historial en Butaca. Importá de Letterboxd o puntuá a mano para armar tu perfil.",
+    en: "You don't have enough history on Butaca yet. Import from Letterboxd or rate by hand to build your profile.",
+  },
+  "recommend.hintProfile": {
+    es: "Necesitás un perfil con al menos {n} pelis puntuadas.",
+    en: "You need a profile with at least {n} rated movies.",
+  },
+  "recommend.recapProfile": { es: "tu perfil de Butaca ({n} títulos)", en: "your Butaca profile ({n} titles)" },
+  // se muestra donde la fuente SÍ se guarda al perfil (zip, tu propio username,
+  // a mano) — la idea de fondo: la próxima vez entrás por «Mi perfil» y ya está
+  // todo junto. En cuenta ajena NO se muestra (es efímera, no persiste).
+  "recommend.mergeNote": {
+    es: "Se guarda en tu perfil de Butaca. La próxima vez entrá por «Mi perfil» y tenés todo junto: esto más lo que vayas puntuando acá.",
+    en: "It's saved to your Butaca profile. Next time just pick “My profile” and it's all in one place: this plus whatever you rate here.",
+  },
 
   "recommend.zipHint": {
     es: "La mejor opción: trae tu historial completo (ratings, reviews, likes, watchlist). Descargalo desde Letterboxd: Settings → Data → Export your data.",
@@ -120,8 +152,8 @@ export const RECOMMEND: Record<string, Entry> = {
     en: "Only with the .zip: the watchlist doesn't come through the other options.",
   },
   "recommend.modeRecentDisabled": {
-    es: "Necesita fechas de visto, que el modo sin cuenta no tiene.",
-    en: "Needs watch dates, which the no-account mode doesn't have.",
+    es: "Necesita fechas de visto, que el modo a mano no tiene.",
+    en: "Needs watch dates, which the by-hand mode doesn't have.",
   },
 
   "recommend.groupGeneros": { es: "Géneros", en: "Genres" },

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { useLang } from "@/lib/i18n";
 
@@ -81,6 +81,41 @@ export function StarRating({
     onChange(rating);
   }
 
+  // En touch, acertar la mitad de una estrella (franja de ~14-22px en el
+  // centro) con el dedo es imposible. En vez de tap ciego, la fila entera es
+  // una pista deslizable: tocás y arrastrás, el relleno sigue el dedo en vivo
+  // (snap a 0.5) y al soltar confirma. La precisión sale del arrastre con
+  // feedback, no de pegarle a un target sub-dedo.
+  const rowRef = useRef<HTMLDivElement>(null);
+  const [dragging, setDragging] = useState(false);
+
+  function ratingFromClientX(clientX: number): number {
+    const el = rowRef.current;
+    if (!el) return 0.5;
+    const { left, width } = el.getBoundingClientRect();
+    const ratio = Math.min(1, Math.max(0, (clientX - left) / width));
+    return Math.min(5, Math.max(0.5, Math.round(ratio * 10) / 2)); // 0.5..5 en pasos de 0.5
+  }
+
+  function onDragStart(e: React.PointerEvent) {
+    if (disabled) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setDragging(true);
+    setPendingTap(null);
+    setPreview(ratingFromClientX(e.clientX));
+  }
+  function onDragMove(e: React.PointerEvent) {
+    if (!dragging) return;
+    setPreview(ratingFromClientX(e.clientX));
+  }
+  function onDragEnd(e: React.PointerEvent) {
+    if (!dragging) return;
+    const rating = ratingFromClientX(e.clientX);
+    setDragging(false);
+    setPreview(null);
+    onChange(rating);
+  }
+
   const starPx = SIZE_PX[size];
   // cuánto crece el botón invisible más allá del ícono dibujado: vertical
   // repartido arriba/abajo, horizontal solo hacia el borde EXTERNO de cada
@@ -93,7 +128,9 @@ export function StarRating({
 
   return (
     <div className="text-center" onMouseLeave={() => setPreview(null)}>
+      <div className="relative inline-block">
       <div
+        ref={rowRef}
         role="radiogroup"
         aria-label={label ?? t("modal.yourRating")}
         className={`inline-flex items-center justify-center ${disabled ? "opacity-50" : ""}`}
@@ -148,6 +185,19 @@ export function StarRating({
             </span>
           );
         })}
+      </div>
+        {/* touch: capa deslizable sobre las estrellas (arriba de los botones
+            por mitad, que quedan solo para mouse/teclado/lector) */}
+        {isCoarsePointer && !disabled && (
+          <div
+            className="absolute inset-0 z-20 cursor-grab active:cursor-grabbing"
+            style={{ touchAction: "none" }}
+            onPointerDown={onDragStart}
+            onPointerMove={onDragMove}
+            onPointerUp={onDragEnd}
+            onPointerCancel={onDragEnd}
+          />
+        )}
       </div>
       {showLabel && (
         <div className="mt-1 min-h-4 font-mono text-[9px] uppercase tracking-wider text-muted-foreground">

@@ -61,7 +61,11 @@ const PICK_GROUP_LABEL_KEYS: Record<string, string> = {
 };
 const MAX_SELECTED_OPTIONS = 5; // mismo tope que backend/app/main.py::MAX_SELECTED_OPTIONS
 
-type ImportMethod = "zip" | "username" | "manual";
+// "profile" = perfil ya acumulado en Butaca (todo lo puntuado, venga de donde
+// venga); "zip"/"username" son las dos puertas de Letterboxd; "manual" es la
+// grilla para quien no tiene Letterboxd.
+type ImportMethod = "zip" | "username" | "manual" | "profile";
+type SourceGroup = "profile" | "letterboxd" | "manual";
 
 // onboarding without Letterboxd: rate seed titles by hand
 export type OnboardingTitle = {
@@ -352,6 +356,12 @@ export default function Recommend() {
   }, [optionsRetry]);
 
   const [importMethod, setImportMethod] = useState<ImportMethod>("zip");
+  // cuántos títulos tiene el perfil de Butaca — decide el default (usuario que
+  // vuelve arranca en "Mi perfil") y si esa opción está habilitada. null =
+  // todavía no sé (cargando o falló el fetch)
+  const [ratedCount, setRatedCount] = useState<number | null>(null);
+  // si el usuario ya eligió fuente a mano, no le piso la elección con el default
+  const sourceTouched = useRef(false);
   const [zipFile, setZipFile] = useState<File | null>(null);
   const [letterboxdUsername, setLetterboxdUsername] = useState("");
   const [isDragging, setIsDragging] = useState(false);
@@ -373,6 +383,21 @@ export default function Recommend() {
   useEffect(() => {
     if (user?.letterboxdUsername) setLetterboxdUsername(user.letterboxdUsername);
   }, [user?.letterboxdUsername]);
+
+  // ¿tenés perfil de Butaca? el que vuelve arranca en "Mi perfil" (un click,
+  // sin re-subir nada); el nuevo lo ve deshabilitado hasta armar historial.
+  useEffect(() => {
+    if (!token) return;
+    fetch(`${API_BASE_URL}/profile/summary`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((body: { rated_count?: number } | null) => {
+        if (!body) return;
+        const count = body.rated_count ?? 0;
+        setRatedCount(count);
+        if (!sourceTouched.current && count >= MIN_MANUAL_RATINGS) setImportMethod("profile");
+      })
+      .catch(() => {});
+  }, [token]);
 
   const isForeignAccount =
     Boolean(user?.letterboxdUsername) &&
@@ -569,22 +594,40 @@ export default function Recommend() {
     });
   }
 
+  // grupo primario del picker: Letterboxd agrupa .zip + username
+  const sourceGroup: SourceGroup =
+    importMethod === "profile" ? "profile" : importMethod === "manual" ? "manual" : "letterboxd";
+  // "Mi perfil" solo sirve si ya tenés historial; con count desconocido (null)
+  // no lo bloqueo — el backend igual corta con 400 si no alcanza
+  const profileDisabled = ratedCount !== null && ratedCount < MIN_MANUAL_RATINGS;
+
+  function pickSource(group: SourceGroup) {
+    sourceTouched.current = true;
+    if (group === "profile") setImportMethod("profile");
+    else if (group === "manual") setImportMethod("manual");
+    else if (sourceGroup !== "letterboxd") setImportMethod("zip"); // default de la puerta LB
+  }
+
   const hasSource =
-    importMethod === "zip"
-      ? Boolean(zipFile)
-      : importMethod === "username"
-        ? letterboxdUsername.trim().length > 0
-        : manualCount >= MIN_MANUAL_RATINGS;
+    importMethod === "profile"
+      ? ratedCount === null || ratedCount >= MIN_MANUAL_RATINGS
+      : importMethod === "zip"
+        ? Boolean(zipFile)
+        : importMethod === "username"
+          ? letterboxdUsername.trim().length > 0
+          : manualCount >= MIN_MANUAL_RATINGS;
   const step2Valid = mode !== "genres" || (pickOptions.length > 0 && selectedGenres.length > 0);
   const canGenerate = hasSource && step2Valid;
 
   // hint junto al botón deshabilitado: qué falta para poder continuar
   const step1Hint =
-    importMethod === "zip"
-      ? t("recommend.hintZip")
-      : importMethod === "username"
-        ? t("recommend.hintUsername")
-        : t("recommend.hintManual", { n: MIN_MANUAL_RATINGS });
+    importMethod === "profile"
+      ? t("recommend.hintProfile", { n: MIN_MANUAL_RATINGS })
+      : importMethod === "zip"
+        ? t("recommend.hintZip")
+        : importMethod === "username"
+          ? t("recommend.hintUsername")
+          : t("recommend.hintManual", { n: MIN_MANUAL_RATINGS });
 
   async function handleGenerate() {
     if (!token || !canGenerate) return;
@@ -593,7 +636,21 @@ export default function Recommend() {
 
     try {
       let response: Response;
-      if (importMethod === "manual") {
+      if (importMethod === "profile") {
+        // usa el perfil ya guardado, sin re-subir fuente (persist=False en el
+        // backend); el idioma va por el header Accept-Language global
+        response = await fetch(`${API_BASE_URL}/recommend/profile`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            mood: "",
+            mode,
+            kind_filter: kindFilter,
+            genres: mode === "genres" ? selectedGenres.join(",") : "",
+            refine: true,
+          }),
+        });
+      } else if (importMethod === "manual") {
         response = await fetch(`${API_BASE_URL}/recommend/manual`, {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
@@ -819,23 +876,60 @@ export default function Recommend() {
                 <h2 className="text-3xl font-black uppercase tracking-tighter mb-3">
                   {t("recommend.step1Title")}
                 </h2>
-                <p className="font-serif italic text-lg text-muted-foreground mb-8 max-w-2xl">
+                <p className="font-serif italic text-lg text-muted-foreground mb-6 max-w-2xl">
                   {t("recommend.step1Intro")}
                 </p>
 
+                {/* #1: el ciclo, siempre visible — el nuevo no sabe que el
+                    perfil acumula todo y que "Mi perfil" engloba Letterboxd +
+                    lo puntuado acá */}
+                <div className="border-l-2 border-accent pl-4 mb-8 max-w-2xl">
+                  <div className="font-mono text-[10px] uppercase tracking-widest text-accent mb-1">
+                    [{t("recommend.howItWorksLabel")}]
+                  </div>
+                  <p className="font-serif text-base leading-relaxed text-muted-foreground">
+                    {t("recommend.howItWorks")}
+                  </p>
+                </div>
+
+                {/* picker primario: de dónde sale tu gusto. Letterboxd agrupa
+                    .zip + username en un sub-toggle abajo */}
                 <div className="flex gap-0 mb-6 max-w-xl">
-                  <button onClick={() => setImportMethod("zip")} className={tabCls(importMethod === "zip")}>
-                    {t("recommend.tabZip")}
+                  <button
+                    onClick={() => !profileDisabled && pickSource("profile")}
+                    disabled={profileDisabled}
+                    className={`${tabCls(sourceGroup === "profile")} disabled:opacity-40 disabled:cursor-not-allowed`}
+                  >
+                    {t("recommend.tabProfile")}
                   </button>
-                  <button onClick={() => setImportMethod("username")} className={tabCls(importMethod === "username")}>
-                    {t("recommend.tabUsername")}
+                  <button onClick={() => pickSource("letterboxd")} className={tabCls(sourceGroup === "letterboxd")}>
+                    {t("recommend.tabLetterboxd")}
                   </button>
-                  <button onClick={() => setImportMethod("manual")} className={tabCls(importMethod === "manual")}>
+                  <button onClick={() => pickSource("manual")} className={tabCls(sourceGroup === "manual")}>
                     {t("recommend.tabManual")}
                   </button>
                 </div>
 
-                {importMethod === "zip" ? (
+                {sourceGroup === "letterboxd" && (
+                  <div className="flex gap-0 mb-6 max-w-xs">
+                    <button onClick={() => setImportMethod("zip")} className={tabCls(importMethod === "zip")}>
+                      {t("recommend.tabZip")}
+                    </button>
+                    <button onClick={() => setImportMethod("username")} className={tabCls(importMethod === "username")}>
+                      {t("recommend.tabUsername")}
+                    </button>
+                  </div>
+                )}
+
+                {importMethod === "profile" ? (
+                  <div className="max-w-xl">
+                    <p className="font-serif italic text-base text-muted-foreground">
+                      {profileDisabled
+                        ? t("recommend.profileEmpty")
+                        : t("recommend.profileHint", { n: ratedCount ?? 0 })}
+                    </p>
+                  </div>
+                ) : importMethod === "zip" ? (
                   <div className="max-w-xl">
                     <p className="font-mono text-[10px] uppercase leading-relaxed text-muted-foreground mb-3">
                       {t("recommend.zipHint")}
@@ -872,6 +966,9 @@ export default function Recommend() {
                         </div>
                       )}
                     </label>
+                    <p className="font-mono text-[10px] uppercase leading-relaxed text-accent mt-3">
+                      {t("recommend.mergeNote")}
+                    </p>
                   </div>
                 ) : importMethod === "username" ? (
                   <div className="max-w-xl">
@@ -896,12 +993,16 @@ export default function Recommend() {
                         <option key={name} value={name} />
                       ))}
                     </datalist>
-                    {isForeignAccount && (
+                    {isForeignAccount ? (
                       <p className="font-mono text-[10px] uppercase leading-relaxed text-accent mt-3">
                         {t("recommend.foreignAccount", {
                           name: letterboxdUsername.trim(),
                           own: user?.letterboxdUsername ?? "",
                         })}
+                      </p>
+                    ) : (
+                      <p className="font-mono text-[10px] uppercase leading-relaxed text-accent mt-3">
+                        {t("recommend.mergeNote")}
                       </p>
                     )}
                   </div>
@@ -913,8 +1014,11 @@ export default function Recommend() {
                     <p className="font-mono text-[10px] uppercase leading-relaxed text-muted-foreground mb-2 max-w-2xl">
                       {t("recommend.manualHint")}
                     </p>
-                    <p className="font-mono text-[10px] uppercase leading-relaxed text-muted-foreground/60 mb-6 max-w-2xl">
+                    <p className="font-mono text-[10px] uppercase leading-relaxed text-muted-foreground/60 mb-2 max-w-2xl">
                       {t("recommend.manualWarning")}
+                    </p>
+                    <p className="font-mono text-[10px] uppercase leading-relaxed text-accent mb-6 max-w-2xl">
+                      {t("recommend.mergeNote")}
                     </p>
 
                     <div className="flex items-baseline justify-between gap-4 mb-4 flex-wrap">
@@ -1134,11 +1238,13 @@ export default function Recommend() {
 
                 <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-8">
                   {t("recommend.recapSource")}{" "}
-                  {importMethod === "zip"
-                    ? `.zip (${zipFile?.name ?? ""})`
-                    : importMethod === "username"
-                      ? `@${letterboxdUsername.trim()}`
-                      : t("recommend.recapManualCount", { n: manualCount })}{" "}
+                  {importMethod === "profile"
+                    ? t("recommend.recapProfile", { n: ratedCount ?? 0 })
+                    : importMethod === "zip"
+                      ? `.zip (${zipFile?.name ?? ""})`
+                      : importMethod === "username"
+                        ? `@${letterboxdUsername.trim()}`
+                        : t("recommend.recapManualCount", { n: manualCount })}{" "}
                   · {t("recommend.recapMode")}{" "}
                   {t(modeOptions.find((o) => o.mode === mode)?.labelKey ?? "")}
                   {mode === "genres" &&
