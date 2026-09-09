@@ -225,6 +225,10 @@ _catalog_stats_cache: tuple[float, dict] | None = None
 # ponytail: matches a single discover page's worth of movie candidates; raise
 # if latency allows enriching more per personalized recommend request.
 CREDITS_ENRICH_CAP = 30
+# ponytail: ~65 req/s pico a ~90ms/req contra ~50 sostenidos de TMDb; un 429 es
+# TmdbError => ese item queda sin enriquecer, no rompe nada. Bajar a 4 si
+# aparecen "Keywords de X fallaron" en logs; subir a 8-10 si nunca aparecen.
+ENRICH_WORKERS = 6
 
 # El pool personalizado pedía UNA página (20 títulos) y siempre la misma, así
 # que "Nuevos picks" volvía a mirar los mismos 20 de siempre y, con la
@@ -1230,7 +1234,10 @@ def fetch_taste_credits(tmdb_id: int, kind: str = "movie") -> dict:
     if cached is not None:
         expires_at, result = cached
         if expires_at > _now_monotonic():
-            _TASTE_CREDITS_CACHE.move_to_end(cache_key)
+            try:
+                _TASTE_CREDITS_CACHE.move_to_end(cache_key)
+            except KeyError:  # otro thread la evictó entre .get y acá; el valor ya lo tenemos
+                pass
             return result
         # .pop(..., None) not del: build_taste_profile fetches credits
         # concurrently now, another thread may have evicted this key already.
@@ -1275,7 +1282,10 @@ def fetch_keywords(tmdb_id: int, kind: str = "movie") -> list[str]:
     if cached is not None:
         expires_at, names = cached
         if expires_at > _now_monotonic():
-            _KEYWORDS_CACHE.move_to_end(cache_key)
+            try:
+                _KEYWORDS_CACHE.move_to_end(cache_key)
+            except KeyError:  # otro thread la evictó entre .get y acá; el valor ya lo tenemos
+                pass
             # copia, no el objeto cacheado: el bug que esta feature tiene que
             # evitar es justamente aliasing de listas entre requests
             return list(names)
@@ -1404,6 +1414,31 @@ def _enrich_with_keyword_tags(item: dict, kind: str) -> None:
         len(keywords),
         sorted(extra) or "sin match",
     )
+
+
+def _enrich_candidate(item: dict, kind: str, with_credits: bool) -> None:
+    if with_credits:
+        # credits y keywords son enriquecimientos independientes: que falle
+        # uno no tiene que saltear el otro para el mismo item (esto era un
+        # `continue` antes de que existieran los keywords).
+        try:
+            credits = fetch_taste_credits(item["tmdb_id"], kind=kind)
+        except TmdbError:
+            pass
+        else:
+            item["director"] = credits["director"]
+            item["actors"] = credits["actors"]
+    _enrich_with_keyword_tags(item, kind)
+
+
+def _enrich_candidates(items: list[dict], kind: str, with_credits: bool = False) -> None:
+    """In place sobre los primeros CREDITS_ENRICH_CAP; el orden de `items` no
+    se toca. En paralelo porque en prod son ~200 llamadas a TMDb por perfil
+    frío (~16s en serie): cada item es un dict distinto y los caches toleran
+    la carrera (ver fetch_keywords), así que no hace falta lock."""
+    with ThreadPoolExecutor(max_workers=ENRICH_WORKERS) as pool:
+        # list(): re-lanza acá cualquier excepción no-TmdbError, igual que el loop de antes
+        list(pool.map(lambda item: _enrich_candidate(item, kind, with_credits), items[:CREDITS_ENRICH_CAP]))
 
 
 def enrich_with_keyword_tags(item: dict, kind: str = "movie") -> None:
@@ -1615,18 +1650,7 @@ def fetch_personalized_candidates(
                 )
             )
         for movies in movie_pools:
-            for item in movies[:CREDITS_ENRICH_CAP]:
-                # credits y keywords son enriquecimientos independientes: que falle
-                # uno no tiene que saltear el otro para el mismo item (esto era un
-                # `continue` antes de que existieran los keywords).
-                try:
-                    credits = fetch_taste_credits(item["tmdb_id"], kind="movie")
-                except TmdbError:
-                    pass
-                else:
-                    item["director"] = credits["director"]
-                    item["actors"] = credits["actors"]
-                _enrich_with_keyword_tags(item, "movie")
+            _enrich_candidates(movies, "movie", with_credits=True)
             candidates.extend(movies)
 
     if has_profile_signal and kind_filter in ("series", "both"):
@@ -1639,8 +1663,7 @@ def fetch_personalized_candidates(
         )
         # los keywords, a diferencia de with_people, SÍ funcionan en /tv — así
         # que este es el primer enriquecimiento por item que reciben las series
-        for item in series[:CREDITS_ENRICH_CAP]:
-            _enrich_with_keyword_tags(item, "series")
+        _enrich_candidates(series, "series")
         candidates.extend(series)
 
     exploration = fetch_candidates(mood, pages=1)
@@ -1654,10 +1677,8 @@ def fetch_personalized_candidates(
     # (el caso normal) — se aplica el cap por separado, igual que profile/series.
     exploration_movies = [item for item in exploration if item["kind"] == "movie"]
     exploration_series = [item for item in exploration if item["kind"] == "series"]
-    for item in exploration_movies[:CREDITS_ENRICH_CAP]:
-        _enrich_with_keyword_tags(item, "movie")
-    for item in exploration_series[:CREDITS_ENRICH_CAP]:
-        _enrich_with_keyword_tags(item, "series")
+    _enrich_candidates(exploration_movies, "movie")
+    _enrich_candidates(exploration_series, "series")
     candidates.extend(exploration)
 
     seen: set[tuple[str, str]] = set()

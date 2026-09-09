@@ -1,4 +1,6 @@
 import io
+import threading
+import time
 from urllib.error import HTTPError
 
 import pytest
@@ -1056,6 +1058,39 @@ def test_fetch_personalized_candidates_enriches_exploration_series_past_the_movi
     series = next(c for c in candidates if c["title"] == "Explore Series")
     assert series["_source"] == "exploration"
     assert "dystopian" in series["tags"]
+
+
+def test_fetch_personalized_candidates_enriches_items_concurrently_and_keeps_order(monkeypatch) -> None:
+    # el enriquecimiento corre en un ThreadPoolExecutor por pool: tiene que
+    # solaparse (secuencial => peak siempre 1) sin cambiar el orden del pool.
+    monkeypatch.setenv("TMDB_API_KEY", "fake-key")
+    movies = [
+        {"id": i, "title": f"M{i}", "release_date": "2010-01-01", "genre_ids": [18], "overview": ""}
+        for i in range(6)
+    ]
+    monkeypatch.setattr(
+        tmdb_client, "_get_json", lambda url: {"results": movies if "discover/movie" in url else []}
+    )
+    monkeypatch.setattr(
+        tmdb_client, "fetch_taste_credits", lambda tmdb_id, kind="movie": {"director": None, "actors": []}
+    )
+    lock, active, peak = threading.Lock(), [0], [0]
+
+    def fake_keywords(tmdb_id, kind="movie"):
+        with lock:
+            active[0] += 1
+            peak[0] = max(peak[0], active[0])
+        time.sleep(0.02)
+        with lock:
+            active[0] -= 1
+        return []
+
+    monkeypatch.setattr(tmdb_client, "fetch_keywords", fake_keywords)
+
+    candidates = tmdb_client.fetch_personalized_candidates(_KEYWORD_PROFILE, mood="", kind_filter="movie")
+
+    assert peak[0] >= 2
+    assert [c["title"] for c in candidates[:6]] == [f"M{i}" for i in range(6)]
 
 
 def test_fetch_personalized_candidates_falls_back_to_exploration_only_when_profile_has_no_signal(

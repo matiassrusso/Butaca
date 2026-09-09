@@ -247,6 +247,18 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    # add_middleware inserta en el índice 0, así que este (agregado después)
+    # queda por FUERA de CORS: los preflight también salen con estos headers
+    # y los Access-Control-* los sigue poniendo CORSMiddleware adentro.
+    response = await call_next(request)
+    response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")  # API JSON, no navega
+    return response
+
+
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     # ponytail: an exception FastAPI itself doesn't catch (i.e. not an
@@ -1357,9 +1369,16 @@ def _finish_recommend(
     persist=False when ratings were just read back from the DB (the "usar mi
     perfil" shortcut) — re-saving them would insert duplicate rated_items."""
     _validate_recommend_genres(mode, genres, lang)
+    # parseo de "a tu elección" ANTES del fetch de candidatos — el picker
+    # maneja su propio pedido a TMDb (fetch_candidates_for_options), no
+    # post-filtra el pool de perfil/mood como antes (bug reportado
+    # 2026-08-02: opciones angostas nunca traían señal suficiente).
     selected_genres = [key.strip() for key in genres.split(",") if key.strip()]
     if len(selected_genres) > MAX_SELECTED_OPTIONS:
         raise HTTPException(status_code=400, detail=errors.msg("too_many_options", lang, n=MAX_SELECTED_OPTIONS))
+    # tupla ordenada (orden de selección), una entrada por opción elegida —
+    # no un frozenset aplanado (bug reportado 2026-08-02: cobertura por tag
+    # suelto, no por opción, con orden de iteración no determinístico).
     vibe_labels = {f"vibe-l2:{row['cluster_id']}": row["label"] for row in db.get_vibe_clusters(level=2)}
     selected_static_options = [key for key in selected_genres if key in GENRE_OPTIONS]
     selected_vibe_tags = [key for key in selected_genres if key in vibe_labels]
@@ -1415,34 +1434,6 @@ def _finish_recommend(
         except Exception:
             logger.warning("Taste profile computation failed, falling back to unpersonalized candidates", exc_info=True)
             profile = None
-
-    # parseo de "a tu elección" ANTES del fetch de candidatos — el picker
-    # maneja su propio pedido a TMDb (fetch_candidates_for_options), no
-    # post-filtra el pool de perfil/mood como antes (bug reportado
-    # 2026-08-02: opciones angostas nunca traían señal suficiente).
-    selected_genres = [key.strip() for key in genres.split(",") if key.strip()]
-    if len(selected_genres) > MAX_SELECTED_OPTIONS:
-        raise HTTPException(
-            status_code=400,
-            detail=errors.msg("too_many_options", lang, n=MAX_SELECTED_OPTIONS),
-        )
-    # tupla ordenada (orden de selección), una entrada por opción elegida —
-    # no un frozenset aplanado (bug reportado 2026-08-02: cobertura por tag
-    # suelto, no por opción, con orden de iteración no determinístico).
-    vibe_labels = {
-        f"vibe-l2:{row['cluster_id']}": row["label"]
-        for row in db.get_vibe_clusters(level=2)
-    }
-    selected_static_options = [key for key in selected_genres if key in GENRE_OPTIONS]
-    selected_vibe_tags = [key for key in selected_genres if key in vibe_labels]
-    required_any_groups = tuple(
-        [frozenset(GENRE_OPTIONS[key]) for key in selected_static_options]
-        + [frozenset({tag}) for tag in selected_vibe_tags]
-    )
-    if mode == "genres" and not required_any_groups:
-        raise HTTPException(
-            status_code=400, detail=errors.msg("no_genre_selected", lang)
-        )
 
     # títulos ya recomendados antes a este usuario. Se lee acá arriba (y no
     # junto al resto de las exclusiones, más abajo) porque su TAMAÑO decide

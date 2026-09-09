@@ -77,6 +77,27 @@ def test_health_accepts_get_and_head() -> None:
     assert client.head("/health").status_code == 200
 
 
+def test_security_headers_on_health() -> None:
+    response = client.get("/health")
+
+    assert response.headers["strict-transport-security"] == "max-age=31536000; includeSubDomains"
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["referrer-policy"] == "no-referrer"
+
+
+def test_cors_preflight_still_allows_known_origin() -> None:
+    # el middleware de hardening envuelve a CORS: el preflight tiene que seguir
+    # saliendo con Access-Control-* (y, de paso, con los headers nuevos).
+    response = client.options(
+        "/health",
+        headers={"Origin": "http://localhost:4173", "Access-Control-Request-Method": "GET"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://localhost:4173"
+    assert response.headers["x-content-type-options"] == "nosniff"
+
+
 def test_recommend_zip_rejects_non_zip_filename() -> None:
     headers = _auth_headers("notazip")
     response = client.post(
@@ -938,6 +959,19 @@ def test_invalid_genres_import_does_not_persist_ratings() -> None:
     user_id = db.get_user_by_username("genreimportpure")["id"]
 
     response = _post_zip(headers, mode="genres", genres="")
+
+    assert response.status_code == 400
+    assert db.get_watched_items(user_id) == []
+
+
+def test_unknown_genre_key_import_does_not_persist_ratings() -> None:
+    # _validate_recommend_genres atrapa genres="" pero no una key desconocida:
+    # a esa la corta el check de required_any_groups, que tiene que correr
+    # ANTES de save_rated_items (antes había un segundo bloque igual más abajo).
+    headers = _auth_headers("bogusgenrekey")
+    user_id = db.get_user_by_username("bogusgenrekey")["id"]
+
+    response = _post_zip(headers, mode="genres", genres="bogus")
 
     assert response.status_code == 400
     assert db.get_watched_items(user_id) == []

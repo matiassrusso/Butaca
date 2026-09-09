@@ -70,3 +70,32 @@ def clear_llm_verdict_cache():
     yield
     llm_client._VERDICT_CACHE.clear()
     llm_client._INFLIGHT_VERDICTS.clear()
+
+
+@pytest.fixture(autouse=True)
+def fast_sqlite(monkeypatch):
+    # ponytail: get_connection abre una conexión nueva por llamada y cada test
+    # estrena una DB: medido en Windows, el schema costaba ~100ms y cada commit
+    # ~8ms por el fsync (5ms y ~1ms sin él). En tests la durabilidad no
+    # importa. db.sqlite3 es el módulo global, monkeypatch lo restaura solo.
+    from backend.app import db
+
+    real_connect = db.sqlite3.connect
+
+    def connect(*args, **kwargs):
+        conn = real_connect(*args, **kwargs)
+        conn.execute("PRAGMA synchronous=OFF")
+        conn.execute("PRAGMA journal_mode=MEMORY")
+        return conn
+
+    monkeypatch.setattr(db.sqlite3, "connect", connect)
+
+
+@pytest.fixture(autouse=True)
+def fast_pbkdf2(monkeypatch):
+    # 260k iteraciones son ~46ms por hash y la suite hashea cientos de veces;
+    # ningún test asume un hash fijo (verify_password rehashea con la misma
+    # constante), así que bajarla no cambia ningún resultado.
+    from backend.app import auth
+
+    monkeypatch.setattr(auth, "PBKDF2_ITERATIONS", 1_000)
