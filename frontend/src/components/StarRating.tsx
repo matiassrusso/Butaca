@@ -81,40 +81,45 @@ export function StarRating({
     onChange(rating);
   }
 
-  // En touch, acertar la mitad de una estrella (franja de ~14-22px en el
-  // centro) con el dedo es imposible. En vez de tap ciego, la fila entera es
-  // una pista deslizable: tocás y arrastrás, el relleno sigue el dedo en vivo
-  // (snap a 0.5) y al soltar confirma. La precisión sale del arrastre con
-  // feedback, no de pegarle a un target sub-dedo.
+  // En touch no hay hover y las mitades de estrella son sub-dedo. La fila es
+  // una pista táctil: un TAP en una estrella pone esa estrella ENTERA (el gesto
+  // natural, y el caso común); ARRASTRAR afina a pasos de 0.5 con el relleno
+  // siguiendo el dedo en vivo. Antes todo era un slider continuo y el cuerpo de
+  // cada estrella quedaba partido 50/50 entre media y entera -> tapear una
+  // estrella era una moneda al aire y "solo salían medios puntos".
   const rowRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
+  const dragMoved = useRef(false);
+  const dragStartX = useRef(0);
 
-  function ratingFromClientX(clientX: number): number {
+  function posFromClientX(clientX: number): number {
     const el = rowRef.current;
-    if (!el) return 0.5;
+    if (!el) return 0;
     const { left, width } = el.getBoundingClientRect();
-    const ratio = Math.min(1, Math.max(0, (clientX - left) / width));
-    // ceil, no round: cubrir la mitad derecha de una estrella la llena ENTERA
-    // (igual que los botones por mitad y el relleno visual). Con round, el
-    // centro de una estrella daba .5 y el entero solo salía pegándole al borde
-    // exacto entre dos estrellas -> casi siempre medios puntos.
-    return Math.min(5, Math.max(0.5, Math.ceil(ratio * 10) / 2)); // 0.5..5 en pasos de 0.5
+    return Math.min(1, Math.max(0, (clientX - left) / width)) * 5; // 0..5 en unidades de estrella
   }
+  const snapWhole = (pos: number) => Math.min(5, Math.max(1, Math.ceil(pos))); // tap -> estrella entera
+  const snapHalf = (pos: number) => Math.min(5, Math.max(0.5, Math.ceil(pos * 2) / 2)); // drag -> 0.5
 
   function onDragStart(e: React.PointerEvent) {
     if (disabled) return;
     e.currentTarget.setPointerCapture(e.pointerId);
     setDragging(true);
     setPendingTap(null);
-    setPreview(ratingFromClientX(e.clientX));
+    dragMoved.current = false;
+    dragStartX.current = e.clientX;
+    setPreview(snapWhole(posFromClientX(e.clientX)));
   }
   function onDragMove(e: React.PointerEvent) {
     if (!dragging) return;
-    setPreview(ratingFromClientX(e.clientX));
+    if (Math.abs(e.clientX - dragStartX.current) > 6) dragMoved.current = true;
+    const pos = posFromClientX(e.clientX);
+    setPreview(dragMoved.current ? snapHalf(pos) : snapWhole(pos));
   }
   function onDragEnd(e: React.PointerEvent) {
     if (!dragging) return;
-    const rating = ratingFromClientX(e.clientX);
+    const pos = posFromClientX(e.clientX);
+    const rating = dragMoved.current ? snapHalf(pos) : snapWhole(pos);
     setDragging(false);
     setPreview(null);
     onChange(rating);
